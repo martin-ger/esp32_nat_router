@@ -5,7 +5,8 @@ This is a firmware to use the ESP32 as WiFi NAT router, based on the [Console Co
 ## Usage
 
 For configuration you have to use a serial console (Putty or GtkTerm with 115200 bps).
-Use the "set_sta" and the "set_ap" command to configure the WiFi settings.
+Use the "set_sta" and the "set_ap" command to configure the WiFi settings. Changes are stored persistently in NVS and are applied after next restart.
+
 Enter the `help` command get a full list of all available commands.
 
 If you want to enter non-ASCII or special characters you can use HTTP-style hex encoding (e.g. "My%20AccessPoint" results in a string "My AccessPoint").
