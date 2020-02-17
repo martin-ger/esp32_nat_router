@@ -274,6 +274,10 @@ void app_main(void)
     ESP_LOGI(TAG, "NAT is enabled");
 #endif
 
+    if (!unconf) {
+        //start_webserver();
+    }
+
     initialize_console();
 
     /* Register commands */
@@ -295,7 +299,7 @@ void app_main(void)
 
     if (unconf) {
          printf("\n"
-               "Unconfigure WiFi.\n"
+               "Unconfigured WiFi\n"
                "Configure using 'set_sta' and 'set_ap' and restart.\n");       
     }
 

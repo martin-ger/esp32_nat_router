@@ -1,6 +1,6 @@
 # ESP32 NAT Router
 
-This is a firmware to use the ESP32 as WiFi NAT router, based on the [Console Component](https://docs.espressif.com/projects/esp-idf/en/latest/api-guides/console.html#console) and the [esp-idf-nat-example](https://github.com/jonask1337/esp-idf-nat-example).
+This is a firmware to use the ESP32 as WiFi NAT router, based on the [Console Component](https://docs.espressif.com/projects/esp-idf/en/latest/api-guides/console.html#console) and the [esp-idf-nat-example](https://github.com/jonask1337/esp-idf-nat-example). It can achieve a bandwidth of more than 15mbps.
 
 ## Usage
 
@@ -23,7 +23,7 @@ esptool.py --chip esp32 --port /dev/ttyUSB0 \
 ```
 
 ## Building the Binaries
-The following are the steps required to compile this project on the ESP32.
+The following are the steps required to compile this project:
 
 ### Step 1 - Setup ESP-IDF
 Download and setup the ESP-IDF.
@@ -57,7 +57,7 @@ Replace the value of the *MY_DNS_IP_ADDR* with your desired DNS-Server IP addres
 
 ### Line Endings
 
-The line endings in the Console Example are configured to match particular serial monitors. Therefore, if the following log output appears, consider using a different serial monitor (e.g. Putty for Windows or GtkTerm on Linux) or modify the example's [UART configuration](#Configuring-UART-and-VFS).
+The line endings in the Console Example are configured to match particular serial monitors. Therefore, if the following log output appears, consider using a different serial monitor (e.g. Putty for Windows or GtkTerm on Linux) or modify the example's UART configuration.
 
 ```
 This is an example of ESP-IDF console component.

@@ -3,7 +3,7 @@
 # project subdirectory.
 #
 
-PROJECT_NAME := console
+PROJECT_NAME := esp32_nat_router
 
 include $(IDF_PATH)/make/project.mk
 
