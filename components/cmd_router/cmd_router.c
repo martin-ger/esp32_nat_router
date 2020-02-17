@@ -32,6 +32,7 @@ static const char *TAG = "cmd_router";
 
 static void register_set_sta(void);
 static void register_set_ap(void);
+static void register_show(void);
 
 void preprocess_string(char* str)
 {
@@ -64,10 +65,50 @@ void preprocess_string(char* str)
     *q = '\0';
 }
 
+esp_err_t get_config_param_str(char* name, char** param)
+{
+    nvs_handle_t nvs;
+
+    esp_err_t err = nvs_open(PARAM_NAMESPACE, NVS_READONLY, &nvs);
+    if (err == ESP_OK) {
+        size_t len;
+        if ( (err = nvs_get_str(nvs, name, NULL, &len)) == ESP_OK) {
+            *param = (char *)malloc(len);
+            err = nvs_get_str(nvs, name, *param, &len);
+            ESP_LOGI(TAG, "%s %s", name, *param);
+        } else {
+            return err;
+        }
+        nvs_close(nvs);
+    } else {
+        return err;
+    }
+    return ESP_OK;
+}
+
+esp_err_t get_config_param_int(char* name, int* param)
+{
+    nvs_handle_t nvs;
+
+    esp_err_t err = nvs_open(PARAM_NAMESPACE, NVS_READONLY, &nvs);
+    if (err == ESP_OK) {
+        if ( (err = nvs_get_i32(nvs, name, param)) == ESP_OK) {
+            ESP_LOGI(TAG, "%s %d", name, *param);
+        } else {
+            return err;
+        }
+        nvs_close(nvs);
+    } else {
+        return err;
+    }
+    return ESP_OK;
+}
+
 void register_router(void)
 {
     register_set_sta();
     register_set_ap();
+    register_show();
 }
 
 /** Arguments used by 'set_ap' function */
@@ -92,7 +133,7 @@ static int set_sta(int argc, char **argv)
     preprocess_string((char*)set_sta_arg.ssid->sval[0]);
     preprocess_string((char*)set_sta_arg.password->sval[0]);
 
-    err = nvs_open("esp32_nat", NVS_READWRITE, &nvs);
+    err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
     if (err != ESP_OK) {
         return err;
     }
@@ -154,7 +195,7 @@ static int set_ap(int argc, char **argv)
         return 1;
     }
 
-    err = nvs_open("esp32_nat", NVS_READWRITE, &nvs);
+    err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
     if (err != ESP_OK) {
         return err;
     }
@@ -185,6 +226,43 @@ static void register_set_ap(void)
         .hint = NULL,
         .func = &set_ap,
         .argtable = &set_ap_args
+    };
+    ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
+}
+
+/* 'show' command */
+static int show(int argc, char **argv)
+{
+    char* ssid = NULL;
+    char* passwd = NULL;
+    char* ap_ssid = NULL;
+    char* ap_passwd = NULL;
+
+    get_config_param_str("ssid", &ssid);
+    get_config_param_str("passwd", &passwd);
+    get_config_param_str("ap_ssid", &ap_ssid);
+    get_config_param_str("ap_passwd", &ap_passwd);
+
+    printf("STA SSID: %s PASSWORD: %s\n", ssid != NULL?ssid:"<undef>",
+        passwd != NULL?passwd:"<undef>");
+    printf("AP SSID: %s PASSWORD: %s\n", ap_ssid != NULL?ap_ssid:"<undef>",
+        ap_passwd != NULL?ap_passwd:"<undef>");
+
+    if (ssid != NULL) free (ssid);
+    if (passwd != NULL) free (passwd);
+    if (ap_ssid != NULL) free (ap_ssid);
+    if (ap_passwd != NULL) free (ap_passwd);
+
+    return 0;
+}
+
+static void register_show(void)
+{
+    const esp_console_cmd_t cmd = {
+        .command = "show",
+        .help = "Get status and config of the router",
+        .hint = NULL,
+        .func = &show,
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }

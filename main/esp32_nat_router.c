@@ -225,7 +225,6 @@ void wifi_init(const char* ssid, const char* passwd, const char* ap_ssid, const 
 
 void app_main(void)
 {
-    esp_err_t err;
     bool unconf = true;
 
     initialize_nvs();
@@ -237,51 +236,28 @@ void app_main(void)
     ESP_LOGI(TAG, "Command history disabled");
 #endif
 
-    nvs_handle_t nvs;
     char* ssid = NULL;
     char* passwd = NULL;
     char* ap_ssid = NULL;
     char* ap_passwd = NULL;
 
-    err = nvs_open("esp32_nat", NVS_READONLY, &nvs);
-    if (err == ESP_OK) {
-        size_t len;
-        if ( (err = nvs_get_str(nvs, "ssid", NULL, &len)) == ESP_OK) {
-            ssid = (char *)malloc(len);
-            err = nvs_get_str(nvs, "ssid", ssid, &len);
-            ESP_LOGI(TAG, "ssid %s", ssid);
-        }
-        if ( (err = nvs_get_str(nvs, "passwd", NULL, &len)) == ESP_OK) {
-            passwd = (char *)malloc(len);
-            err = nvs_get_str(nvs, "passwd", passwd, &len);
-            ESP_LOGI(TAG, "passwd %s", passwd);
-        }
-        if ( (err = nvs_get_str(nvs, "ap_ssid", NULL, &len)) == ESP_OK) {
-            ap_ssid = (char *)malloc(len);
-            err = nvs_get_str(nvs, "ap_ssid", ap_ssid, &len);
-            ESP_LOGI(TAG, "ap_ssid %s", ap_ssid);
-        }
-        if ( (err = nvs_get_str(nvs, "ap_passwd", NULL, &len)) == ESP_OK) {
-            ap_passwd = (char *)malloc(len);
-            err = nvs_get_str(nvs, "ap_passwd", ap_passwd, &len);
-            ESP_LOGI(TAG, "ap_passwd %s", ap_passwd);
-        }
-
-        nvs_close(nvs);
-    }
+    get_config_param_str("ssid", &ssid);
+    get_config_param_str("passwd", &passwd);
+    get_config_param_str("ap_ssid", &ap_ssid);
+    get_config_param_str("ap_passwd", &ap_passwd);
 
     // Setup WIFI
     if (ssid != NULL && passwd != NULL && ap_ssid != NULL && ap_passwd != NULL ) {
         wifi_init(ssid, passwd, ap_ssid, ap_passwd);
-
-        free(ssid);
-        free(passwd);
-        free(ap_ssid);
-        free(ap_passwd);
         unconf = false;
     } else {
         ESP_LOGI(TAG, "Could not start WiFi - incomplete config\n");
     }
+
+    if (ssid != NULL) free (ssid);
+    if (passwd != NULL) free (passwd);
+    if (ap_ssid != NULL) free (ap_ssid);
+    if (ap_passwd != NULL) free (ap_passwd);
 
 #if IP_NAPT
     u32_t napt_netif_ip = 0xC0A80401; // Set to ip address of softAP netif (Default is 192.168.4.1)
@@ -294,7 +270,6 @@ void app_main(void)
     /* Register commands */
     esp_console_register_help_command();
     register_system();
-    //register_wifi();
     register_nvs();
     register_router();
 

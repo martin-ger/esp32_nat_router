@@ -5,7 +5,7 @@ This is a firmware to use the ESP32 as WiFi NAT router, based on the [Console Co
 ## Usage
 
 For configuration you have to use a serial console (Putty or GtkTerm with 115200 bps).
-Use the "set_sta" and the "set_ap" command to configure the WiFi settings. Changes are stored persistently in NVS and are applied after next restart.
+Use the "set_sta" and the "set_ap" command to configure the WiFi settings. Changes are stored persistently in NVS and are applied after next restart. Use "show" to display the current config.
 
 Enter the `help` command get a full list of all available commands.
 
@@ -23,7 +23,7 @@ esptool.py --chip esp32 --port /dev/ttyUSB0 \
 ```
 
 ## Building the Binaries
-The following are the steps required to complie this project on the ESP32.
+The following are the steps required to compile this project on the ESP32.
 
 ### Step 1 - Setup ESP-IDF
 Download and setup the ESP-IDF.
