@@ -1,9 +1,14 @@
 # ESP32 NAT Router
 
-A firmware to use the ESP32 as WiFi NAT router. For configuration you can use a serial console (Putty or GtkTerm with 115200 bps).
-Use the "set_sta" and the "set_ap" command to configure the WiFi settings.
+This is a firmware to use the ESP32 as WiFi NAT router, based on the [Console Component](https://docs.espressif.com/projects/esp-idf/en/latest/api-guides/console.html#console) and the [esp-idf-nat-example](https://github.com/jonask1337/esp-idf-nat-example).
 
-Based on the [Console Component](https://docs.espressif.com/projects/esp-idf/en/latest/api-guides/console.html#console) and the [esp-idf-nat-example](https://github.com/jonask1337/esp-idf-nat-example).
+## Usage
+
+For configuration you have to use a serial console (Putty or GtkTerm with 115200 bps).
+Use the "set_sta" and the "set_ap" command to configure the WiFi settings.
+Enter the `help` command get a full list of all available commands.
+
+If you want to enter non-ASCII or special characters you can use HTTP-style hex encoding (e.g. "My%20AccessPoint" results in a string "My AccessPoint").
 
 ## Building the Binaries
 The following are the steps required to complie this project on the ESP32.
@@ -35,12 +40,6 @@ A detailed instruction on how to build, configure and flash a ESP-IDF project ca
 ### DNS
 By Default the DNS-Server which is offerd to clients connecting to the ESP32 AP is set to 8.8.8.8.
 Replace the value of the *MY_DNS_IP_ADDR* with your desired DNS-Server IP address (in hex) if you want to use a different one.
-
-## Usage
-
-Enter the `help` command get a full list of all available commands.
-
-If you want to enter non-ASCII or special characters you can use HTTP-style hex encoding (e.g. "My%20AccessPoint" results in a string "My AccessPoint").
 
 ## Troubleshooting
 
@@ -83,7 +82,7 @@ Main loop inside `app_main()` function illustrates how to use `linenoise` and `e
 
 ### Argument parsing
 
-Several commands implemented in `cmd_wifi.c` and `cmd_system.c` use the Argtable3 library to parse and check the arguments.
+Several commands implemented e.g. in `cmd_system.c` use the Argtable3 library to parse and check the arguments.
 
 ### Command history
 
