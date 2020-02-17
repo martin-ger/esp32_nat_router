@@ -165,7 +165,6 @@ static esp_err_t wifi_event_handler(void *ctx, system_event_t *event)
   return ESP_OK;
 }
 
-
 const int CONNECTED_BIT = BIT0;
 #define JOIN_TIMEOUT_MS (2000)
 
