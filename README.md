@@ -10,6 +10,17 @@ Enter the `help` command get a full list of all available commands.
 
 If you want to enter non-ASCII or special characters you can use HTTP-style hex encoding (e.g. "My%20AccessPoint" results in a string "My AccessPoint").
 
+## Flashing the prebuild Binaries
+Install [esptool](https://github.com/espressif/esptool), go to the project directory, and enter:
+```
+esptool.py --chip esp32 --port /dev/ttyUSB0 \
+--baud 115200 --before default_reset --after hard_reset write_flash \
+-z --flash_mode dio --flash_freq 40m --flash_size detect \
+0x1000 build/bootloader/bootloader.bin \
+0x10000 build/console.bin \
+0x8000 build/partitions_example.bin
+```
+
 ## Building the Binaries
 The following are the steps required to complie this project on the ESP32.
 
