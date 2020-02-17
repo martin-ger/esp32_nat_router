@@ -20,9 +20,11 @@
 #include "argtable3/argtable3.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "cmd_router.h"
 #include "sdkconfig.h"
 #include "nvs.h"
+
+#include "router_globals.h"
+#include "cmd_router.h"
 
 #ifdef CONFIG_FREERTOS_USE_STATS_FORMATTING_FUNCTIONS
 #define WITH_TASKS_INFO 1
@@ -243,15 +245,18 @@ static int show(int argc, char **argv)
     get_config_param_str("ap_ssid", &ap_ssid);
     get_config_param_str("ap_passwd", &ap_passwd);
 
-    printf("STA SSID: %s PASSWORD: %s\n", ssid != NULL?ssid:"<undef>",
+    printf("STA SSID: %s Password: %s\n", ssid != NULL?ssid:"<undef>",
         passwd != NULL?passwd:"<undef>");
-    printf("AP SSID: %s PASSWORD: %s\n", ap_ssid != NULL?ap_ssid:"<undef>",
+    printf("AP SSID: %s Password: %s\n", ap_ssid != NULL?ap_ssid:"<undef>",
         ap_passwd != NULL?ap_passwd:"<undef>");
 
     if (ssid != NULL) free (ssid);
     if (passwd != NULL) free (passwd);
     if (ap_ssid != NULL) free (ap_ssid);
     if (ap_passwd != NULL) free (ap_passwd);
+
+    printf("Uplink AP %sconnected\n", ap_connect?"":"not ");
+    printf("%d Stations connected\n", connect_count);
 
     return 0;
 }

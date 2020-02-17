@@ -16,7 +16,6 @@
 #include "driver/uart.h"
 #include "linenoise/linenoise.h"
 #include "argtable3/argtable3.h"
-#include "cmd_decl.h"
 #include "esp_vfs_fat.h"
 #include "nvs.h"
 #include "nvs_flash.h"
@@ -27,6 +26,9 @@
 #include "lwip/opt.h"
 #include "lwip/err.h"
 #include "lwip/sys.h"
+
+#include "cmd_decl.h"
+#include "router_globals.h"
 
 #if IP_NAPT
 #include "lwip/lwip_napt.h"
@@ -40,6 +42,9 @@ static EventGroupHandle_t wifi_event_group;
 const int WIFI_CONNECTED_BIT = BIT0;
 
 #define MY_DNS_IP_ADDR 0x08080808 // 8.8.8.8
+
+uint16_t connect_count = 0;
+bool ap_connect = false;
 
 static const char *TAG = "ESP32 NAT router";
 
@@ -145,19 +150,23 @@ static esp_err_t wifi_event_handler(void *ctx, system_event_t *event)
         esp_wifi_connect();
         break;
     case SYSTEM_EVENT_STA_GOT_IP:
+        ap_connect = true;
         ESP_LOGI(TAG, "got ip:" IPSTR, IP2STR(&event->event_info.got_ip.ip_info.ip));
         xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);
         break;
     case SYSTEM_EVENT_STA_DISCONNECTED:
         ESP_LOGI(TAG,"disconnected - retry to connect to the AP");
+        ap_connect = false;
         esp_wifi_connect();
         xEventGroupClearBits(wifi_event_group, WIFI_CONNECTED_BIT);
         break;
     case SYSTEM_EVENT_AP_STACONNECTED:
-        ESP_LOGI(TAG,"station connected");
+        connect_count++;
+        ESP_LOGI(TAG,"%d. station connected", connect_count);
         break;
     case SYSTEM_EVENT_AP_STADISCONNECTED:
-        ESP_LOGI(TAG,"station disconnected");
+        connect_count--;
+        ESP_LOGI(TAG,"station disconnected - %d remain", connect_count);
         break;
     default:
         break;
