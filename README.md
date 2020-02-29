@@ -10,7 +10,7 @@ Connect to this WiFi network and do the basic configuration either via a simple 
 ## Web Config Interface
 The web interface allows for the configuration of all parameters. Point your browser to "http://192.168.4.1". This page should appear:
 
-<img src="https://raw.githubusercontent.com/martin-ger/esp_wifi_repeater/master/WebConfig.jpg">
+<img src="https://raw.githubusercontent.com/martin-ger/esp32_nat_router/master/ESP32_NAT_UI.JPG">
 
 First enter the appropriate values for the uplink WiFi network, the "STA Settings". Leave password blank for open networks. Click "Connect". The ESP32 reboots and will connect to your WiFi router.
 
@@ -36,13 +36,13 @@ esptool.py --chip esp32 --port /dev/ttyUSB0 \
 --baud 115200 --before default_reset --after hard_reset write_flash \
 -z --flash_mode dio --flash_freq 40m --flash_size detect \
 0x1000 build/bootloader/bootloader.bin \
-0x10000 build/console.bin \
+0x10000 build/esp32_nat_router.bin \
 0x8000 build/partitions_example.bin
 ```
 
 As an alternative you might use [Espressif's Flash Download Tools](https://www.espressif.com/en/products/hardware/esp32/resources) with the parameters given in the figure below (thanks to mahesh2000):
 
-![image](https://user-images.githubusercontent.com/1047754/74902819-27bfad00-539f-11ea-86a5-36112eb52acf.png)
+![image](https://raw.githubusercontent.com/martin-ger/esp32_nat_router/master/FlasherUI.jpg)
 
 ## Building the Binaries
 The following are the steps required to compile this project:
