@@ -3,6 +3,7 @@
 This is a firmware to use the ESP32 as WiFi NAT router. It can be used as
 - Simple range extender for an existing WiFi network
 - Setting up an additional WiFi network with different SSID/password for guests or IOT devices
+
 It can achieve a bandwidth of more than 15mbps.
 
 The code is based on the [Console Component](https://docs.espressif.com/projects/esp-idf/en/latest/api-guides/console.html#console) and the [esp-idf-nat-example](https://github.com/jonask1337/esp-idf-nat-example). 
