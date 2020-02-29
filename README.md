@@ -18,7 +18,17 @@ Now you can reconnect and reload the page and change the "Soft AP Settings". Cli
 
 If you want to enter a '+' in the web interface you have to use HTTP-style hex encoding like "Mine%2bYours". This will result in a string "Mine+Yours". With this hex encoding you can enter any byte value you like, except for 0 (for C-internal reasons).
 
-If you made a mistake and have lost all contact with the ESP you can still use the serial console to reconfigure it.
+It you want to disable the web interface (e.g. for security reasons), go to the CLI and enter:
+```
+nvs_namespace esp32_nat
+nvs_set lock str -v 1
+```
+After restart, no webserver is started any more. You can only re-enable it with:
+```
+nvs_namespace esp32_nat
+nvs_set lock str -v 0
+```
+If you made a mistake and have lost all contact with the ESP you can still use the serial console to reconfigure it. All parameter settings are stored in NVS (non volatile storage), which is *not* erased by simple re-flashing the binaries. If you want to wipe it out, use "esptool.py -p /dev/ttyUSB0 erase_flash".
 
 # Command Line Interface
 

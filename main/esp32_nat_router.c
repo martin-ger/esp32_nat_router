@@ -294,7 +294,16 @@ void app_main(void)
     ESP_LOGI(TAG, "NAT is enabled");
 #endif
 
-    start_webserver();
+    char* lock = NULL;
+    get_config_param_str("lock", &lock);
+    if (lock == NULL) {
+        lock = param_set_default("0");
+    }
+    if (strcmp(lock, "0") ==0) {
+        ESP_LOGI(TAG,"Starting config web server");
+        start_webserver();
+    }
+    free(lock);
 
     initialize_console();
 
