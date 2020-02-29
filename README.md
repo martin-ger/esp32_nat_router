@@ -2,14 +2,32 @@
 
 This is a firmware to use the ESP32 as WiFi NAT router, based on the [Console Component](https://docs.espressif.com/projects/esp-idf/en/latest/api-guides/console.html#console) and the [esp-idf-nat-example](https://github.com/jonask1337/esp-idf-nat-example). It can achieve a bandwidth of more than 15mbps.
 
-## Usage
+## First Boot
+After first boot the ESP32 NAT Router will offer a WiFi network with an open AP and the ssid "ESP32_NAT_Router".
+
+Connect to this WiFi network and do the basic configuration either via a simple web interface or do the config via the serial console. 
+
+## Web Config Interface
+The web interface allows for the configuration of all parameters. Point your browser to "http://192.168.4.1". This page should appear:
+
+<img src="https://raw.githubusercontent.com/martin-ger/esp_wifi_repeater/master/WebConfig.jpg">
+
+First enter the appropriate values for the uplink WiFi network, the "STA Settings". Leave password blank for open networks. Click "Connect". The ESP32 reboots and will connect to your WiFi router.
+
+Now you can reconnect and reload the page and change the "Soft AP Settings". Click "Set" and again the ESP32 reboots. Now it is ready for forwarding traffic over the newly configured Soft AP. Be aware that these changes also affect the config interface, i.e. to do further configuration, connect to the ESP32 through one of the newly configured WiFi networks.
+
+If you want to enter a '+' in the web interface you have to use HTTP-style hex encoding like "Mine%2bYours". This will result in a string "Mine+Yours". With this hex encoding you can enter any byte value you like, except for 0 (for C-internal reasons).
+
+If you made a mistake and have lost all contact with the ESP you can still use the serial console to reconfigure it.
+
+# Command Line Interface
 
 For configuration you have to use a serial console (Putty or GtkTerm with 115200 bps).
 Use the "set_sta" and the "set_ap" command to configure the WiFi settings. Changes are stored persistently in NVS and are applied after next restart. Use "show" to display the current config.
 
 Enter the `help` command get a full list of all available commands.
 
-If you want to enter non-ASCII or special characters you can use HTTP-style hex encoding (e.g. "My%20AccessPoint" results in a string "My AccessPoint").
+If you want to enter non-ASCII or special characters (incl. ' ') you can use HTTP-style hex encoding (e.g. "My%20AccessPoint" results in a string "My AccessPoint").
 
 ## Flashing the prebuild Binaries
 Install [esptool](https://github.com/espressif/esptool), go to the project directory, and enter:

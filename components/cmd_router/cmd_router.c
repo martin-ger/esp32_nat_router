@@ -57,8 +57,9 @@ void preprocess_string(char* str)
                 a += toupper(*p) - 'A' + 10;
             *q++ = a;
         }
-        else
-        {
+        else if (*(p) == '+') {
+            *q++ = ' ';
+        } else {
             *q++ = *p;
         }
     }
@@ -119,7 +120,7 @@ static struct {
 } set_sta_arg;
 
 /* 'set_sta' command */
-static int set_sta(int argc, char **argv)
+int set_sta(int argc, char **argv)
 {
     esp_err_t err;
     nvs_handle_t nvs;
@@ -176,7 +177,7 @@ static struct {
 } set_ap_args;
 
 /* 'set_ap' command */
-static int set_ap(int argc, char **argv)
+int set_ap(int argc, char **argv)
 {
     esp_err_t err;
     nvs_handle_t nvs;
@@ -191,8 +192,7 @@ static int set_ap(int argc, char **argv)
     preprocess_string((char*)set_ap_args.password->sval[0]);
 
     if (strlen(set_ap_args.password->sval[0]) < 8) {
-        printf("Password must be at least 8 chars.\n");
-        return 1;
+        printf("AP will be open (no passwd needed).\n");
     }
 
     err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);

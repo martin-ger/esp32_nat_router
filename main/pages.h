@@ -9,7 +9,7 @@
 if (window.location.search.substr(1) != '')\
 {\
 document.getElementById('config').display = 'none';\
-document.body.innerHTML ='<h1>ESP WiFi NAT Router Config</h1>The new settings have been sent to the device...';\
+document.body.innerHTML ='<h1>ESP32 NAT Router Config</h1>The new settings have been sent to the device...';\
 setTimeout(\"location.href = '/'\",10000);\
 }\
 </script>\
@@ -44,40 +44,13 @@ setTimeout(\"location.href = '/'\",10000);\
 <td><input type='text' name='ap_password' value='%s'/></td>\
 </tr>\
 <tr>\
-<td>Security:</td>\
-<td>\
- <select name='ap_open'>\
- <option value='open'%s>Open</option>\
- <option value='wpa2'%s>WPA2</option>\
-</select>\
-</td>\
-</tr>\
-<tr>\
-<td>Subnet:</td>\
-<td><input type='text' name='network' value='%d.%d.%d.%d'/></td>\
-</tr>\
-<tr>\
 <td></td>\
 <td><input type='submit' value='Set' /></td>\
 </tr>\
 </table>\
 <small>\
-<i>Password: </i>min. 8 chars<br />\
+<i>Password: </i>less than 8 chars = open<br />\
 </small>\
-</form>\
-\
-<h2>Lock Config</h2>\
-<form action='' method='GET'>\
-<table>\
-<tr>\
-<td>Lock Device:</td>\
-<td><input type='checkbox' name='lock' value='l'></td>\
-</tr>\
-<tr>\
-<td></td>\
-<td><input type='submit' name='dolock' value='Lock'/></td>\
-</tr>\
-</table>\
 </form>\
 \
 <h2>Device Management</h2>\

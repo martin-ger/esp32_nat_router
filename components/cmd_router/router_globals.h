@@ -10,14 +10,10 @@
 extern "C" {
 #endif
 
-#include <esp_http_server.h>
-
 #define PARAM_NAMESPACE "esp32_nat"
 
 extern uint16_t connect_count;
 extern bool ap_connect;
-
-httpd_handle_t start_webserver(void);
 
 esp_err_t get_config_param_int(char* name, int* param);
 esp_err_t get_config_param_str(char* name, char** param);

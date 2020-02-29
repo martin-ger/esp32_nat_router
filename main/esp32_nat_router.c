@@ -29,10 +29,13 @@
 
 #include "cmd_decl.h"
 #include "router_globals.h"
+#include <esp_http_server.h>
 
 #if IP_NAPT
 #include "lwip/lwip_napt.h"
 #endif
+
+#include "esp32_nat_router.h"
 
 /* FreeRTOS event group to signal when we are connected*/
 static EventGroupHandle_t wifi_event_group;
@@ -190,27 +193,35 @@ void wifi_init(const char* ssid, const char* passwd, const char* ap_ssid, const 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
 
-    /* ESP STATION CONFIG */
+    /* ESP WIFI CONFIG */
     wifi_config_t wifi_config = { 0 };
-	strlcpy((char*)wifi_config.sta.ssid, ssid, sizeof(wifi_config.sta.ssid));
-	strlcpy((char*)wifi_config.sta.password, passwd, sizeof(wifi_config.sta.password));
-
-    /* ESP AP CONFIG */
-    wifi_config_t ap_config = {
-	.ap = {
-	    .channel = 0,
-	    .authmode = WIFI_AUTH_WPA2_PSK,
-	    .ssid_hidden = 0,
-	    .max_connection = 8,
-	    .beacon_interval = 100,
-	}
+        wifi_config_t ap_config = {
+        .ap = {
+            .channel = 0,
+            .authmode = WIFI_AUTH_WPA2_PSK,
+            .ssid_hidden = 0,
+            .max_connection = 8,
+            .beacon_interval = 100,
+        }
     };
-	strlcpy((char*)ap_config.sta.ssid, ap_ssid, sizeof(ap_config.sta.ssid));
-	strlcpy((char*)ap_config.sta.password, ap_passwd, sizeof(ap_config.sta.password));
 
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA) );
-    ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config) );
-    ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &ap_config) );
+    strlcpy((char*)ap_config.sta.ssid, ap_ssid, sizeof(ap_config.sta.ssid));
+    if (strlen(ap_passwd) < 8) {
+        ap_config.ap.authmode = WIFI_AUTH_OPEN;
+    } else {
+	    strlcpy((char*)ap_config.sta.password, ap_passwd, sizeof(ap_config.sta.password));
+    }
+
+    if (strlen(ssid) > 0) {
+        strlcpy((char*)wifi_config.sta.ssid, ssid, sizeof(wifi_config.sta.ssid));
+        strlcpy((char*)wifi_config.sta.password, passwd, sizeof(wifi_config.sta.password));
+        ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA) );
+        ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config) );
+        ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &ap_config) );
+    } else {
+        ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP) );
+        ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &ap_config) );        
+    }
 
     // Enable DNS (offer) for dhcp server
     dhcps_offer_t dhcps_dns_value = OFFER_DNS;
@@ -228,14 +239,27 @@ void wifi_init(const char* ssid, const char* passwd, const char* ap_ssid, const 
         pdFALSE, pdTRUE, JOIN_TIMEOUT_MS / portTICK_PERIOD_MS);
     ESP_ERROR_CHECK(esp_wifi_start());
 
-    ESP_LOGI(TAG, "wifi_init_apsta finished.");
-    ESP_LOGI(TAG, "connect to ap SSID: %s ", ssid);
+    if (strlen(ssid) > 0) {
+        ESP_LOGI(TAG, "wifi_init_apsta finished.");
+        ESP_LOGI(TAG, "connect to ap SSID: %s ", ssid);
+    } else {
+        ESP_LOGI(TAG, "wifi_init_ap with default finished.");      
+    }
+}
+
+char* ssid = NULL;
+char* passwd = NULL;
+char* ap_ssid = NULL;
+char* ap_passwd = NULL;
+
+char* param_set_default(const char* def_val) {
+    char * retval = malloc(strlen(def_val)+1);
+    strcpy(retval, def_val);
+    return retval;
 }
 
 void app_main(void)
 {
-    bool unconf = true;
-
     initialize_nvs();
 
 #if CONFIG_STORE_HISTORY
@@ -245,28 +269,24 @@ void app_main(void)
     ESP_LOGI(TAG, "Command history disabled");
 #endif
 
-    char* ssid = NULL;
-    char* passwd = NULL;
-    char* ap_ssid = NULL;
-    char* ap_passwd = NULL;
-
     get_config_param_str("ssid", &ssid);
-    get_config_param_str("passwd", &passwd);
-    get_config_param_str("ap_ssid", &ap_ssid);
-    get_config_param_str("ap_passwd", &ap_passwd);
-
-    // Setup WIFI
-    if (ssid != NULL && passwd != NULL && ap_ssid != NULL && ap_passwd != NULL ) {
-        wifi_init(ssid, passwd, ap_ssid, ap_passwd);
-        unconf = false;
-    } else {
-        ESP_LOGI(TAG, "Could not start WiFi - incomplete config\n");
+    if (ssid == NULL) {
+        ssid = param_set_default("");
     }
-
-    if (ssid != NULL) free (ssid);
-    if (passwd != NULL) free (passwd);
-    if (ap_ssid != NULL) free (ap_ssid);
-    if (ap_passwd != NULL) free (ap_passwd);
+    get_config_param_str("passwd", &passwd);
+    if (passwd == NULL) {
+        passwd = param_set_default("");
+    }
+    get_config_param_str("ap_ssid", &ap_ssid);
+    if (ap_ssid == NULL) {
+        ap_ssid = param_set_default("ESP32_NAT_Router");
+    }   
+    get_config_param_str("ap_passwd", &ap_passwd);
+    if (ap_passwd == NULL) {
+        ap_passwd = param_set_default("");
+    }
+    // Setup WIFI
+    wifi_init(ssid, passwd, ap_ssid, ap_passwd);
 
 #if IP_NAPT
     u32_t napt_netif_ip = 0xC0A80401; // Set to ip address of softAP netif (Default is 192.168.4.1)
@@ -274,9 +294,7 @@ void app_main(void)
     ESP_LOGI(TAG, "NAT is enabled");
 #endif
 
-    if (!unconf) {
-        //start_webserver();
-    }
+    start_webserver();
 
     initialize_console();
 
@@ -297,7 +315,7 @@ void app_main(void)
            "Use UP/DOWN arrows to navigate through command history.\n"
            "Press TAB when typing command name to auto-complete.\n");
 
-    if (unconf) {
+    if (strlen(ssid) == 0) {
          printf("\n"
                "Unconfigured WiFi\n"
                "Configure using 'set_sta' and 'set_ap' and restart.\n");       
