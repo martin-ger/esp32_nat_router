@@ -1,14 +1,17 @@
 # ESP32 NAT Router
 
-This is a firmware to use the ESP32 as WiFi NAT router, based on the [Console Component](https://docs.espressif.com/projects/esp-idf/en/latest/api-guides/console.html#console) and the [esp-idf-nat-example](https://github.com/jonask1337/esp-idf-nat-example). It can achieve a bandwidth of more than 15mbps.
+This is a firmware to use the ESP32 as WiFi NAT router. It can be used as
+- Simple range extender for an existing WiFi network
+- Setting up an additional WiFi network with different SSID/password for guests or IOT devices
+It can achieve a bandwidth of more than 15mbps.
+
+The code is based on the [Console Component](https://docs.espressif.com/projects/esp-idf/en/latest/api-guides/console.html#console) and the [esp-idf-nat-example](https://github.com/jonask1337/esp-idf-nat-example). 
 
 ## First Boot
-After first boot the ESP32 NAT Router will offer a WiFi network with an open AP and the ssid "ESP32_NAT_Router".
-
-Connect to this WiFi network and do the basic configuration either via a simple web interface or do the config via the serial console. 
+After first boot the ESP32 NAT Router will offer a WiFi network with an open AP and the ssid "ESP32_NAT_Router". Configuration can either be done via a simple web interface or via the serial console. 
 
 ## Web Config Interface
-The web interface allows for the configuration of all parameters. Point your browser to "http://192.168.4.1". This page should appear:
+The web interface allows for the configuration of all parameters. Connect you PC or smartphone to the WiFi SSID "ESP32_NAT_Router" and point your browser to "http://192.168.4.1". This page should appear:
 
 <img src="https://raw.githubusercontent.com/martin-ger/esp32_nat_router/master/ESP32_NAT_UI.JPG">
 
