@@ -186,8 +186,19 @@ void wifi_init(const char* ssid, const char* passwd, const char* ap_ssid, const 
     //tcpip_adapter_dns_info_t dnsinfo;
 
     wifi_event_group = xEventGroupCreate();
+  
+    esp_netif_init();
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
+    esp_netif_t* wifiAP = esp_netif_create_default_wifi_ap();
+    esp_netif_t* wifiSTA = esp_netif_create_default_wifi_sta();
 
-    tcpip_adapter_init();
+    esp_netif_ip_info_t ipInfo;
+
+    IP4_ADDR(&ipInfo.ip, 192,168,4,1);
+	IP4_ADDR(&ipInfo.gw, 192,168,4,1);
+	IP4_ADDR(&ipInfo.netmask, 255,255,255,0);
+	esp_netif_set_ip_info(wifiAP, &ipInfo);
+   
     ESP_ERROR_CHECK(esp_event_loop_init(wifi_event_handler, NULL) );
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
