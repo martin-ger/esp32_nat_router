@@ -198,8 +198,8 @@ void wifi_init(const char* ssid, const char* passwd, const char* ap_ssid, const 
 	IP4_ADDR(&ipInfo.gw, 192,168,0,1);
 	IP4_ADDR(&ipInfo.netmask, 255,255,254,0);
     esp_netif_dhcps_stop(wifiAP); // stop before setting ip WifiAP
-	esp_netif_set_ip_info(wifiAP, &ipInfo);
-	esp_netif_dhcps_start(wifiAP);
+    esp_netif_set_ip_info(wifiAP, &ipInfo);
+    esp_netif_dhcps_start(wifiAP);
 
     ESP_ERROR_CHECK(esp_event_loop_init(wifi_event_handler, NULL) );
 
