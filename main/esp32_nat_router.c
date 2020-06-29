@@ -197,7 +197,7 @@ void wifi_init(const char* ssid, const char* passwd, const char* ap_ssid, const 
     IP4_ADDR(&ipInfo.ip, 192,168,4,1);
 	IP4_ADDR(&ipInfo.gw, 192,168,4,1);
 	IP4_ADDR(&ipInfo.netmask, 255,255,255,0);
-	esp_netif_set_ip_info(wifiAP, &ipInfo);
+    esp_netif_set_ip_info(wifiAP, &ipInfo);
    
     ESP_ERROR_CHECK(esp_event_loop_init(wifi_event_handler, NULL) );
 
