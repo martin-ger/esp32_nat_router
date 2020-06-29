@@ -93,14 +93,14 @@ Note: With IDF v4.2-dev this step is not necessary.
 ### Step 4 - Build and flash the esp-idf-nat-example project
 1. Configure and set the option "Enable copy between Layer2 and Layer3 packets" in the ESP-IDF project configuration.
     1. In the project directory run `make menuconfig` (or `idf.py menuconfig` for cmake).
-    2. Go to *Component config -> LWIP > [*] Enable copy between Layer2 and Layer3 packets.
+    2. Go to *Component config -> LWIP > [x] Enable copy between Layer2 and Layer3 packets.
 2. Build the project and flash it to the ESP32.
 
 A detailed instruction on how to build, configure and flash a ESP-IDF project can also be found the official ESP-IDF guide.
 
 Note: With IDF v4.2-dev also: 
-    Component config > LWIP > [*] Enable IP forwarding
-    Component config > LWIP > [*] Enable NAT (new/experimental)
+    Component config > LWIP > [x] Enable IP forwarding
+    Component config > LWIP > [x] Enable NAT (new/experimental)
  
 
 ### DNS
