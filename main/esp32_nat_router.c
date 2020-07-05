@@ -194,9 +194,9 @@ void wifi_init(const char* ssid, const char* passwd, const char* ap_ssid, const 
 
     esp_netif_ip_info_t ipInfo;
 
-    IP4_ADDR(&ipInfo.ip, 192,168,0,1);
-    IP4_ADDR(&ipInfo.gw, 192,168,0,1);
-    IP4_ADDR(&ipInfo.netmask, 255,255,254,0);
+    IP4_ADDR(&ipInfo.ip, 192,168,4,1);
+    IP4_ADDR(&ipInfo.gw, 192,168,4,1);
+    IP4_ADDR(&ipInfo.netmask, 255,255,255,0);
     esp_netif_dhcps_stop(wifiAP); // stop before setting ip WifiAP
     esp_netif_set_ip_info(wifiAP, &ipInfo);
     esp_netif_dhcps_start(wifiAP);
@@ -302,7 +302,7 @@ void app_main(void)
     wifi_init(ssid, passwd, ap_ssid, ap_passwd);
 
 #if IP_NAPT
-    u32_t napt_netif_ip = 0xC0A80001; // Set to ip address of softAP netif (Default is 192.168.4.1 0xC0A80401--> changed to 192.168.0.1 0xC0A80001)
+    u32_t napt_netif_ip = 0xC0A80401; // Set to ip address of softAP netif (Default is 192.168.4.1)
     ip_napt_enable(htonl(napt_netif_ip), 1);
     ESP_LOGI(TAG, "NAT is enabled");
 #endif
