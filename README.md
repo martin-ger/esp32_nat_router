@@ -72,36 +72,15 @@ As an alternative you might use [Espressif's Flash Download Tools](https://www.e
 ## Building the Binaries
 The following are the steps required to compile this project:
 
-### Step 1 - Setup ESP-IDF
-Download and setup the ESP-IDF.
+1. Download and setup the ESP-IDF.
 
-### Step 2 - Get the lwIP library with NAT
-Download the repository of the NAT lwIP library using the follwing command:
+2. In the project directory run `make menuconfig` (or `idf.py menuconfig` for cmake).
+    1. *Component config -> LWIP > [x] Enable copy between Layer2 and Layer3 packets.
+    2. *Component config -> LWIP > [x] Enable IP forwarding.
+    3. *Component config -> LWIP > [x] Enable NAT (new/experimental).
+3. Build the project and flash it to the ESP32.
 
-`git clone https://github.com/martin-ger/esp-lwip.git`
-
-Note: It is important to clone the repository. If it is only downloaded it will be replaced by the orginal lwIP library during the build.
-
-### Step 3 - Replace original ESP-IDF lwIP library with NAT lwIP library
-1. Go to the folder where the ESP-IDF is installed.
-2. Rename or delete the *esp-idf/component/lwip/lwip* directory.
-3. Move the lwIP library with NAT repository folder from Step 2 to *esp-idf/component/lwip/*
-4. Rename the lwIP library with NAT repository folder from *esp-lwip* to *lwip*.
-
-Note: With IDF v4.2-dev this step is not necessary.
-
-### Step 4 - Build and flash the esp-idf-nat-example project
-1. Configure and set the option "Enable copy between Layer2 and Layer3 packets" in the ESP-IDF project configuration.
-    1. In the project directory run `make menuconfig` (or `idf.py menuconfig` for cmake).
-    2. Go to *Component config -> LWIP > [x] Enable copy between Layer2 and Layer3 packets.
-2. Build the project and flash it to the ESP32.
-
-A detailed instruction on how to build, configure and flash a ESP-IDF project can also be found the official ESP-IDF guide.
-
-Note: With IDF v4.2-dev also: 
-    Component config > LWIP > [x] Enable IP forwarding
-    Component config > LWIP > [x] Enable NAT (new/experimental)
- 
+A detailed instruction on how to build, configure and flash a ESP-IDF project can also be found the official ESP-IDF guide. 
 
 ### DNS
 By Default the DNS-Server which is offerd to clients connecting to the ESP32 AP is set to 8.8.8.8.
