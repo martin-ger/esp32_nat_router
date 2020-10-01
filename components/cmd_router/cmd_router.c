@@ -31,6 +31,7 @@
 static const char *TAG = "cmd_router";
 
 static void register_set_sta(void);
+static void register_set_sta_static(void);
 static void register_set_ap(void);
 static void register_show(void);
 
@@ -108,11 +109,12 @@ esp_err_t get_config_param_int(char* name, int* param)
 void register_router(void)
 {
     register_set_sta();
+    register_set_sta_static();
     register_set_ap();
     register_show();
 }
 
-/** Arguments used by 'set_ap' function */
+/** Arguments used by 'set_sta' function */
 static struct {
     struct arg_str *ssid;
     struct arg_str *password;
@@ -165,6 +167,69 @@ static void register_set_sta(void)
         .hint = NULL,
         .func = &set_sta,
         .argtable = &set_sta_arg
+    };
+    ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
+}
+
+/** Arguments used by 'set_sta_static' function */
+static struct {
+    struct arg_str *static_ip;
+    struct arg_str *subnet_mask;
+    struct arg_str *gateway_addr;
+    struct arg_end *end;
+} set_sta_static_arg;
+
+/* 'set_sta_static' command */
+int set_sta_static(int argc, char **argv)
+{
+    esp_err_t err;
+    nvs_handle_t nvs;
+
+    int nerrors = arg_parse(argc, argv, (void **) &set_sta_static_arg);
+    if (nerrors != 0) {
+        arg_print_errors(stderr, set_sta_static_arg.end, argv[0]);
+        return 1;
+    }
+
+    preprocess_string((char*)set_sta_static_arg.static_ip->sval[0]);
+    preprocess_string((char*)set_sta_static_arg.subnet_mask->sval[0]);
+    preprocess_string((char*)set_sta_static_arg.gateway_addr->sval[0]);
+
+    err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = nvs_set_str(nvs, "static_ip", set_sta_static_arg.static_ip->sval[0]);
+    if (err == ESP_OK) {
+        err = nvs_set_str(nvs, "subnet_mask", set_sta_static_arg.subnet_mask->sval[0]);
+        if (err == ESP_OK) {
+            err = nvs_set_str(nvs, "gateway_addr", set_sta_static_arg.gateway_addr->sval[0]);
+            if (err == ESP_OK) {
+              err = nvs_commit(nvs);
+                if (err == ESP_OK) {
+                    ESP_LOGI(TAG, "STA Static IP settings %s/%s/%s stored.", set_sta_static_arg.static_ip->sval[0], set_sta_static_arg.subnet_mask->sval[0], set_sta_static_arg.gateway_addr->sval[0]);
+                }
+            }
+        }
+    }
+    nvs_close(nvs);
+    return err;
+}
+
+static void register_set_sta_static(void)
+{
+    set_sta_static_arg.static_ip = arg_str1(NULL, NULL, "<ip>", "IP");
+    set_sta_static_arg.subnet_mask = arg_str1(NULL, NULL, "<subnet>", "Subnet Mask");
+    set_sta_static_arg.gateway_addr = arg_str1(NULL, NULL, "<gw>", "Gateway Address");
+    set_sta_static_arg.end = arg_end(3);
+
+    const esp_console_cmd_t cmd = {
+        .command = "set_sta_static",
+        .help = "Set Static IP for the STA interface",
+        .hint = NULL,
+        .func = &set_sta_static,
+        .argtable = &set_sta_static_arg
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }
@@ -235,11 +300,17 @@ static int show(int argc, char **argv)
 {
     char* ssid = NULL;
     char* passwd = NULL;
+    char* static_ip = NULL;
+    char* subnet_mask = NULL;
+    char* gateway_addr = NULL;
     char* ap_ssid = NULL;
     char* ap_passwd = NULL;
 
     get_config_param_str("ssid", &ssid);
     get_config_param_str("passwd", &passwd);
+    get_config_param_str("static_ip", &static_ip);
+    get_config_param_str("subnet_mask", &subnet_mask);
+    get_config_param_str("gateway_addr", &gateway_addr);
     get_config_param_str("ap_ssid", &ap_ssid);
     get_config_param_str("ap_passwd", &ap_passwd);
 
@@ -250,6 +321,9 @@ static int show(int argc, char **argv)
 
     if (ssid != NULL) free (ssid);
     if (passwd != NULL) free (passwd);
+    if (static_ip != NULL) free (static_ip);
+    if (subnet_mask != NULL) free (subnet_mask);
+    if (gateway_addr != NULL) free (gateway_addr);
     if (ap_ssid != NULL) free (ap_ssid);
     if (ap_passwd != NULL) free (ap_passwd);
 
