@@ -180,7 +180,7 @@ static esp_err_t wifi_event_handler(void *ctx, system_event_t *event)
 const int CONNECTED_BIT = BIT0;
 #define JOIN_TIMEOUT_MS (2000)
 
-void wifi_init(const char* ssid, const char* passwd, const char* ap_ssid, const char* ap_passwd)
+void wifi_init(const char* ssid, const char* passwd, const char* static_ip, const char* subnet_mask, const char* gateway_addr, const char* ap_ssid, const char* ap_passwd)
 {
     ip_addr_t dnsserver;
     //tcpip_adapter_dns_info_t dnsinfo;
@@ -192,13 +192,21 @@ void wifi_init(const char* ssid, const char* passwd, const char* ap_ssid, const 
     esp_netif_t* wifiAP = esp_netif_create_default_wifi_ap();
     esp_netif_t* wifiSTA = esp_netif_create_default_wifi_sta();
 
-    esp_netif_ip_info_t ipInfo;
+    tcpip_adapter_ip_info_t ipInfo_sta;
+    if ((strlen(ssid) > 0) && (strlen(static_ip) > 0) && (strlen(subnet_mask) > 0) && (strlen(gateway_addr) > 0)) {
+        ipInfo_sta.ip.addr = ipaddr_addr(static_ip);
+        ipInfo_sta.gw.addr = ipaddr_addr(gateway_addr);
+        ipInfo_sta.netmask.addr = ipaddr_addr(subnet_mask);
+        tcpip_adapter_dhcpc_stop(TCPIP_ADAPTER_IF_STA); // Don't run a DHCP client
+        tcpip_adapter_set_ip_info(TCPIP_ADAPTER_IF_STA, &ipInfo_sta);
+    }
 
-    IP4_ADDR(&ipInfo.ip, 192,168,4,1);
-    IP4_ADDR(&ipInfo.gw, 192,168,4,1);
-    IP4_ADDR(&ipInfo.netmask, 255,255,255,0);
+    esp_netif_ip_info_t ipInfo_ap;
+    IP4_ADDR(&ipInfo_ap.ip, 192,168,4,1);
+    IP4_ADDR(&ipInfo_ap.gw, 192,168,4,1);
+    IP4_ADDR(&ipInfo_ap.netmask, 255,255,255,0);
     esp_netif_dhcps_stop(wifiAP); // stop before setting ip WifiAP
-    esp_netif_set_ip_info(wifiAP, &ipInfo);
+    esp_netif_set_ip_info(wifiAP, &ipInfo_ap);
     esp_netif_dhcps_start(wifiAP);
 
     ESP_ERROR_CHECK(esp_event_loop_init(wifi_event_handler, NULL) );
@@ -262,6 +270,9 @@ void wifi_init(const char* ssid, const char* passwd, const char* ap_ssid, const 
 
 char* ssid = NULL;
 char* passwd = NULL;
+char* static_ip = NULL;
+char* subnet_mask = NULL;
+char* gateway_addr = NULL;
 char* ap_ssid = NULL;
 char* ap_passwd = NULL;
 
@@ -290,6 +301,18 @@ void app_main(void)
     if (passwd == NULL) {
         passwd = param_set_default("");
     }
+    get_config_param_str("static_ip", &static_ip);
+    if (static_ip == NULL) {
+        static_ip = param_set_default("");
+    }
+    get_config_param_str("subnet_mask", &subnet_mask);
+    if (subnet_mask == NULL) {
+        subnet_mask = param_set_default("");
+    }
+    get_config_param_str("gateway_addr", &gateway_addr);
+    if (gateway_addr == NULL) {
+        gateway_addr = param_set_default("");
+    }
     get_config_param_str("ap_ssid", &ap_ssid);
     if (ap_ssid == NULL) {
         ap_ssid = param_set_default("ESP32_NAT_Router");
@@ -299,7 +322,7 @@ void app_main(void)
         ap_passwd = param_set_default("");
     }
     // Setup WIFI
-    wifi_init(ssid, passwd, ap_ssid, ap_passwd);
+    wifi_init(ssid, passwd, static_ip, subnet_mask, gateway_addr, ap_ssid, ap_passwd);
 
 #if IP_NAPT
     u32_t napt_netif_ip = 0xC0A80401; // Set to ip address of softAP netif (Default is 192.168.4.1)

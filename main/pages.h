@@ -13,6 +13,27 @@ document.body.innerHTML ='<h1>ESP32 NAT Router Config</h1>The new settings have 
 setTimeout(\"location.href = '/'\",10000);\
 }\
 </script>\
+<h2>AP Settings</h2>\
+<form action='' method='GET'>\
+<table>\
+<tr>\
+<td>SSID:</td>\
+<td><input type='text' name='ap_ssid' value='%s'/></td>\
+</tr>\
+<tr>\
+<td>Password:</td>\
+<td><input type='text' name='ap_password' value='%s'/></td>\
+</tr>\
+<tr>\
+<td></td>\
+<td><input type='submit' value='Set' /></td>\
+</tr>\
+</table>\
+<small>\
+<i>Password: </i>less than 8 chars = open<br />\
+</small>\
+</form>\
+\
 <h2>STA Settings</h2>\
 <form action='' method='GET'>\
 <table>\
@@ -32,24 +53,29 @@ setTimeout(\"location.href = '/'\",10000);\
 </table>\
 </form>\
 \
-<h2>AP Settings</h2>\
+<h2>STA Static IP Settings</h2>\
 <form action='' method='GET'>\
 <table>\
 <tr>\
-<td>SSID:</td>\
-<td><input type='text' name='ap_ssid' value='%s'/></td>\
+<td>Static IP:</td>\
+<td><input type='text' name='staticip' value='%s'/></td>\
 </tr>\
 <tr>\
-<td>Password:</td>\
-<td><input type='text' name='ap_password' value='%s'/></td>\
+<td>Subnet Mask:</td>\
+<td><input type='text' name='subnetmask' value='%s'/></td>\
+</tr>\
+<tr>\
+<td>Gateway:</td>\
+<td><input type='text' name='gateway' value='%s'/></td>\
 </tr>\
 <tr>\
 <td></td>\
-<td><input type='submit' value='Set' /></td>\
+<td><input type='submit' value='Connect'/></td>\
 </tr>\
+\
 </table>\
 <small>\
-<i>Password: </i>less than 8 chars = open<br />\
+<i>Leave it in blank if you want station get IP by DHCP.</i>\
 </small>\
 </form>\
 \
