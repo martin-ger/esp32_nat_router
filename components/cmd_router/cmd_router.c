@@ -49,13 +49,13 @@ void preprocess_string(char* str)
             if (*p <= '9')
                 a = *p - '0';
             else
-                a = toupper(*p) - 'A' + 10;
+                a = toupper((unsigned char)*p) - 'A' + 10;
             a <<= 4;
             p++;
             if (*p <= '9')
                 a += *p - '0';
             else
-                a += toupper(*p) - 'A' + 10;
+                a += toupper((unsigned char)*p) - 'A' + 10;
             *q++ = a;
         }
         else if (*(p) == '+') {
