@@ -49,6 +49,9 @@ const int WIFI_CONNECTED_BIT = BIT0;
 uint16_t connect_count = 0;
 bool ap_connect = false;
 
+esp_netif_t* wifiAP;
+esp_netif_t* wifiSTA;
+
 static const char *TAG = "ESP32 NAT router";
 
 /* Console command history can be stored to and loaded from a file.
@@ -148,6 +151,8 @@ static void initialize_console(void)
 
 static esp_err_t wifi_event_handler(void *ctx, system_event_t *event)
 {
+  esp_netif_dns_info_t dns;
+
   switch(event->event_id) {
     case SYSTEM_EVENT_STA_START:
         esp_wifi_connect();
@@ -155,6 +160,10 @@ static esp_err_t wifi_event_handler(void *ctx, system_event_t *event)
     case SYSTEM_EVENT_STA_GOT_IP:
         ap_connect = true;
         ESP_LOGI(TAG, "got ip:" IPSTR, IP2STR(&event->event_info.got_ip.ip_info.ip));
+        if (esp_netif_get_dns_info(wifiSTA, ESP_NETIF_DNS_MAIN, &dns) == ESP_OK) {
+            dhcps_dns_setserver(&dns.ip);
+            ESP_LOGI(TAG, "set dns to:" IPSTR, IP2STR(&dns.ip.u_addr.ip4));
+        }
         xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);
         break;
     case SYSTEM_EVENT_STA_DISCONNECTED:
@@ -189,8 +198,8 @@ void wifi_init(const char* ssid, const char* passwd, const char* static_ip, cons
   
     esp_netif_init();
     ESP_ERROR_CHECK(esp_event_loop_create_default());
-    esp_netif_t* wifiAP = esp_netif_create_default_wifi_ap();
-    esp_netif_t* wifiSTA = esp_netif_create_default_wifi_sta();
+    wifiAP = esp_netif_create_default_wifi_ap();
+    wifiSTA = esp_netif_create_default_wifi_sta();
 
     tcpip_adapter_ip_info_t ipInfo_sta;
     if ((strlen(ssid) > 0) && (strlen(static_ip) > 0) && (strlen(subnet_mask) > 0) && (strlen(gateway_addr) > 0)) {
