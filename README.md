@@ -45,6 +45,21 @@ nvs_set lock str -v 0
 ```
 If you made a mistake and have lost all contact with the ESP you can still use the serial console to reconfigure it. All parameter settings are stored in NVS (non volatile storage), which is *not* erased by simple re-flashing the binaries. If you want to wipe it out, use "esptool.py -p /dev/ttyUSB0 erase_flash".
 
+## Interpreting the on board LED
+
+If the ESP32 is connected to the upstream AP then the on board LED should be on, otherwise off.
+If there are devices connected to the ESP32 then the on board LED will keep blinking as many times as the number of devices connected.
+
+For example:
+
+One device connected to the ESP32, and the ESP32 is connected to upstream: 
+
+`*****.*****`
+
+Two devices are connected to the ESP32, but the ESP32 is not connected to upstream: 
+
+`....*.*....`
+
 # Command Line Interface
 
 For configuration you have to use a serial console (Putty or GtkTerm with 115200 bps).
