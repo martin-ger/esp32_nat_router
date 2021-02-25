@@ -9,6 +9,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <pthread.h>
 #include "esp_system.h"
 #include "esp_log.h"
 #include "esp_console.h"
@@ -36,6 +37,9 @@
 #endif
 
 #include "esp32_nat_router.h"
+
+// On board LED
+#define BLINK_GPIO 2
 
 /* FreeRTOS event group to signal when we are connected*/
 static EventGroupHandle_t wifi_event_group;
@@ -147,6 +151,27 @@ static void initialize_console(void)
     /* Load command history from filesystem */
     linenoiseHistoryLoad(HISTORY_PATH);
 #endif
+}
+
+void * led_status_thread(void * p)
+{
+    gpio_reset_pin(BLINK_GPIO);
+    gpio_set_direction(BLINK_GPIO, GPIO_MODE_OUTPUT);
+
+    while (true)
+    {
+        gpio_set_level(BLINK_GPIO, ap_connect);
+
+        for (int i = 0; i < connect_count; i++)
+        {
+            gpio_set_level(BLINK_GPIO, 1 - ap_connect);
+            vTaskDelay(50 / portTICK_PERIOD_MS);
+            gpio_set_level(BLINK_GPIO, ap_connect);
+            vTaskDelay(50 / portTICK_PERIOD_MS);
+        }
+
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
+    }
 }
 
 static esp_err_t wifi_event_handler(void *ctx, system_event_t *event)
@@ -332,6 +357,9 @@ void app_main(void)
     }
     // Setup WIFI
     wifi_init(ssid, passwd, static_ip, subnet_mask, gateway_addr, ap_ssid, ap_passwd);
+
+    pthread_t t1;
+    pthread_create(&t1, NULL, led_status_thread, NULL);
 
 #if IP_NAPT
     u32_t napt_netif_ip = 0xC0A80401; // Set to ip address of softAP netif (Default is 192.168.4.1)
