@@ -1,4 +1,5 @@
-build/**
-!build/bootloader
-!build/esp32_nat_router.bin
-!build/partitions_example.bin
+bin/**
+!bin/bootloader
+!bin/esp32_nat_router.bin
+!bin/partitions_example.bin
+sdkconfig*
