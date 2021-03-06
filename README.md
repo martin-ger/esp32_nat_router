@@ -181,15 +181,35 @@ As an alternative you might use [Espressif's Flash Download Tools](https://www.e
 ## Building the Binaries
 The following are the steps required to compile this project:
 
-1. Download and setup the ESP-IDF.
+1. Download and setup ESP-IDF (current project code support to be used with ESP-IDF v4.3).
 
-2. In the project directory run `make menuconfig` (or `idf.py menuconfig` for cmake).
+2. In the project directory, set target device to build.
+
+For standard ESP32:
+
+```bash
+idf.py --preview set-target esp32
+```
+
+For ESP32-C3:
+
+```bash
+idf.py --preview set-target esp32-c3
+```
+
+3. Run `idf.py menuconfig` and check next configurations to enable NAT functionality.
     1. *Component config -> LWIP > [x] Enable copy between Layer2 and Layer3 packets.
     2. *Component config -> LWIP > [x] Enable IP forwarding.
     3. *Component config -> LWIP > [x] Enable NAT (new/experimental).
-3. Build the project and flash it to the ESP32.
 
-A detailed instruction on how to build, configure and flash a ESP-IDF project can also be found the official ESP-IDF guide. 
+4. Build the project and flash it to the ESP32.
+
+```bash
+idf.py all
+idf.py flash
+```
+
+A detailed instruction on how to build, configure and flash a ESP-IDF project can also be found the official ESP-IDF guide.
 
 ### DNS
 As soon as the ESP32 STA has learned a DNS IP from its upstream DNS server on first connect, it passes that to newly connected clients.
