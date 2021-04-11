@@ -29,14 +29,14 @@
 #include "lwip/sys.h"
 
 #include "cmd_decl.h"
-#include "router_globals.h"
 #include <esp_http_server.h>
 
-#if IP_NAPT
-#include "lwip/lwip_napt.h"
+#if !IP_NAPT
+#error "IP_NAPT must be defined"
 #endif
+#include "lwip/lwip_napt.h"
 
-#include "esp32_nat_router.h"
+#include "router_globals.h"
 
 // On board LED
 #define BLINK_GPIO 2
@@ -50,11 +50,25 @@ const int WIFI_CONNECTED_BIT = BIT0;
 
 #define MY_DNS_IP_ADDR 0x08080808 // 8.8.8.8
 
+/* Global vars */
 uint16_t connect_count = 0;
 bool ap_connect = false;
+bool has_static_ip = false;
+uint32_t my_ip;
+
+struct portmap_table_entry {
+  u32_t daddr;
+  u16_t mport;
+  u16_t dport;
+  u8_t proto;
+  u8_t valid;
+};
+struct portmap_table_entry portmap_tab[IP_PORTMAP_MAX];
 
 esp_netif_t* wifiAP;
 esp_netif_t* wifiSTA;
+
+httpd_handle_t start_webserver(void);
 
 static const char *TAG = "ESP32 NAT router";
 
@@ -90,6 +104,123 @@ static void initialize_nvs(void)
         err = nvs_flash_init();
     }
     ESP_ERROR_CHECK(err);
+}
+
+esp_err_t apply_portmap_tab() {
+    for (int i = 0; i<IP_PORTMAP_MAX; i++) {
+        if (portmap_tab[i].valid) {
+            ip_portmap_add(portmap_tab[i].proto, my_ip, portmap_tab[i].mport, portmap_tab[i].daddr, portmap_tab[i].dport);
+        }
+    }
+    return ESP_OK;
+}
+
+esp_err_t delete_portmap_tab() {
+    for (int i = 0; i<IP_PORTMAP_MAX; i++) {
+        if (portmap_tab[i].valid) {
+            ip_portmap_remove(portmap_tab[i].proto, portmap_tab[i].mport);
+        }
+    }
+    return ESP_OK;
+}
+
+void print_portmap_tab() {
+    for (int i = 0; i<IP_PORTMAP_MAX; i++) {
+        if (portmap_tab[i].valid) {
+            printf ("%s", portmap_tab[i].proto == PROTO_TCP?"TCP ":"UDP ");
+            ip4_addr_t addr;
+            addr.addr = my_ip;
+            printf (IPSTR":%d -> ", IP2STR(&addr), portmap_tab[i].mport);
+            addr.addr = portmap_tab[i].daddr;
+            printf (IPSTR":%d\n", IP2STR(&addr), portmap_tab[i].dport);
+        }
+    }
+}
+
+esp_err_t get_portmap_tab() {
+    esp_err_t err;
+    nvs_handle_t nvs;
+    size_t len;
+
+    err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err != ESP_OK) {
+        return err;
+    }
+    err = nvs_get_blob(nvs, "portmap_tab", NULL, &len);
+    if (err == ESP_OK) {
+        if (len != sizeof(portmap_tab)) {
+            err = ESP_ERR_NVS_INVALID_LENGTH;
+        } else {
+            err = nvs_get_blob(nvs, "portmap_tab", portmap_tab, &len);
+            if (err != ESP_OK) {
+                memset(portmap_tab, 0, sizeof(portmap_tab));
+            }
+        }
+    }
+    nvs_close(nvs);
+
+    return err;
+}
+
+esp_err_t add_portmap(u8_t proto, u16_t mport, u32_t daddr, u16_t dport) {
+    esp_err_t err;
+    nvs_handle_t nvs;
+
+    for (int i = 0; i<IP_PORTMAP_MAX; i++) {
+        if (!portmap_tab[i].valid) {
+            portmap_tab[i].proto = proto;
+            portmap_tab[i].mport = mport;
+            portmap_tab[i].daddr = daddr;
+            portmap_tab[i].dport = dport;
+            portmap_tab[i].valid = 1;
+
+            err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
+            if (err != ESP_OK) {
+                return err;
+            }
+            err = nvs_set_blob(nvs, "portmap_tab", portmap_tab, sizeof(portmap_tab));
+            if (err == ESP_OK) {
+                err = nvs_commit(nvs);
+                if (err == ESP_OK) {
+                    ESP_LOGI(TAG, "New portmap table stored.");
+                }
+            }
+            nvs_close(nvs);
+
+            ip_portmap_add(proto, my_ip, mport, daddr, dport);
+
+            return ESP_OK;
+        }
+    }
+    return ESP_ERR_NO_MEM;
+}
+
+esp_err_t del_portmap(u8_t proto, u16_t mport) {
+    esp_err_t err;
+    nvs_handle_t nvs;
+
+    for (int i = 0; i<IP_PORTMAP_MAX; i++) {
+        if (portmap_tab[i].valid && portmap_tab[i].mport == mport && portmap_tab[i].proto == proto) {
+            portmap_tab[i].valid = 0;
+
+            err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
+            if (err != ESP_OK) {
+                return err;
+            }
+            err = nvs_set_blob(nvs, "portmap_tab", portmap_tab, sizeof(portmap_tab));
+            if (err == ESP_OK) {
+                err = nvs_commit(nvs);
+                if (err == ESP_OK) {
+                    ESP_LOGI(TAG, "New portmap table stored.");
+                }
+            }
+            nvs_close(nvs);
+
+            ip_portmap_remove(proto, mport);
+            return ESP_OK;
+        }
+    }
+    return ESP_OK;
 }
 
 static void initialize_console(void)
@@ -185,15 +316,20 @@ static esp_err_t wifi_event_handler(void *ctx, system_event_t *event)
     case SYSTEM_EVENT_STA_GOT_IP:
         ap_connect = true;
         ESP_LOGI(TAG, "got ip:" IPSTR, IP2STR(&event->event_info.got_ip.ip_info.ip));
+        my_ip = event->event_info.got_ip.ip_info.ip.addr;
         if (esp_netif_get_dns_info(wifiSTA, ESP_NETIF_DNS_MAIN, &dns) == ESP_OK) {
-            dhcps_dns_setserver(&dns.ip);
+            dhcps_dns_setserver((const ip_addr_t *)&dns.ip);
             ESP_LOGI(TAG, "set dns to:" IPSTR, IP2STR(&dns.ip.u_addr.ip4));
         }
+        apply_portmap_tab();
         xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);
         break;
     case SYSTEM_EVENT_STA_DISCONNECTED:
         ESP_LOGI(TAG,"disconnected - retry to connect to the AP");
         ap_connect = false;
+        if (!has_static_ip) {
+            delete_portmap_tab();
+        }
         esp_wifi_connect();
         xEventGroupClearBits(wifi_event_group, WIFI_CONNECTED_BIT);
         break;
@@ -228,11 +364,13 @@ void wifi_init(const char* ssid, const char* passwd, const char* static_ip, cons
 
     tcpip_adapter_ip_info_t ipInfo_sta;
     if ((strlen(ssid) > 0) && (strlen(static_ip) > 0) && (strlen(subnet_mask) > 0) && (strlen(gateway_addr) > 0)) {
-        ipInfo_sta.ip.addr = ipaddr_addr(static_ip);
+        has_static_ip = true;
+        my_ip = ipInfo_sta.ip.addr = ipaddr_addr(static_ip);
         ipInfo_sta.gw.addr = ipaddr_addr(gateway_addr);
         ipInfo_sta.netmask.addr = ipaddr_addr(subnet_mask);
         tcpip_adapter_dhcpc_stop(TCPIP_ADAPTER_IF_STA); // Don't run a DHCP client
         tcpip_adapter_set_ip_info(TCPIP_ADAPTER_IF_STA, &ipInfo_sta);
+        apply_portmap_tab();
     }
 
     esp_netif_ip_info_t ipInfo_ap;
@@ -355,17 +493,18 @@ void app_main(void)
     if (ap_passwd == NULL) {
         ap_passwd = param_set_default("");
     }
+
+    get_portmap_tab();
+
     // Setup WIFI
     wifi_init(ssid, passwd, static_ip, subnet_mask, gateway_addr, ap_ssid, ap_passwd);
 
     pthread_t t1;
     pthread_create(&t1, NULL, led_status_thread, NULL);
 
-#if IP_NAPT
     u32_t napt_netif_ip = 0xC0A80401; // Set to ip address of softAP netif (Default is 192.168.4.1)
     ip_napt_enable(htonl(napt_netif_ip), 1);
     ESP_LOGI(TAG, "NAT is enabled");
-#endif
 
     char* lock = NULL;
     get_config_param_str("lock", &lock);

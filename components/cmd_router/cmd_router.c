@@ -20,6 +20,13 @@
 #include "freertos/task.h"
 #include "sdkconfig.h"
 #include "nvs.h"
+#include "esp_wifi.h"
+
+#include "lwip/ip4_addr.h"
+#if !IP_NAPT
+#error "IP_NAPT must be defined"
+#endif
+#include "lwip/lwip_napt.h"
 
 #include "router_globals.h"
 #include "cmd_router.h"
@@ -34,6 +41,7 @@ static void register_set_sta(void);
 static void register_set_sta_static(void);
 static void register_set_ap(void);
 static void register_show(void);
+static void register_portmap(void);
 
 void preprocess_string(char* str)
 {
@@ -106,11 +114,35 @@ esp_err_t get_config_param_int(char* name, int* param)
     return ESP_OK;
 }
 
+esp_err_t get_config_param_blob(char* name, uint8_t* blob,  size_t blob_len)
+{
+    nvs_handle_t nvs;
+
+    esp_err_t err = nvs_open(PARAM_NAMESPACE, NVS_READONLY, &nvs);
+    if (err == ESP_OK) {
+        size_t len;
+        if ( (err = nvs_get_blob(nvs, name, NULL, &len)) == ESP_OK) {
+            if (len != blob_len) {
+                return ESP_ERR_NVS_INVALID_LENGTH;
+            }
+            err = nvs_get_blob(nvs, name, blob, &len);
+            ESP_LOGI(TAG, "%s: %d", name, len);
+        } else {
+            return err;
+        }
+        nvs_close(nvs);
+    } else {
+        return err;
+    }
+    return ESP_OK;
+}
+
 void register_router(void)
 {
     register_set_sta();
     register_set_sta_static();
     register_set_ap();
+    register_portmap();
     register_show();
 }
 
@@ -295,6 +327,79 @@ static void register_set_ap(void)
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }
 
+/** Arguments used by 'portmap' function */
+static struct {
+    struct arg_str *add_del;
+    struct arg_str *TCP_UDP;
+    struct arg_int *ext_port;
+    struct arg_str *int_ip;
+    struct arg_int *int_port;
+    struct arg_end *end;
+} portmap_args;
+
+/* 'portmap' command */
+int portmap(int argc, char **argv)
+{
+    int nerrors = arg_parse(argc, argv, (void **) &portmap_args);
+    if (nerrors != 0) {
+        arg_print_errors(stderr, portmap_args.end, argv[0]);
+        return 1;
+    }
+
+    bool add ;
+    if (strcmp((char *)portmap_args.add_del->sval[0], "add")== 0) {
+        add = true;
+    } else if (strcmp((char *)portmap_args.add_del->sval[0], "del")== 0) {
+        add = false;
+    } else {
+        printf("Must be 'add' or 'del'\n");
+        return 1;
+    }
+
+    uint8_t tcp_udp;
+    if (strcmp((char *)portmap_args.TCP_UDP->sval[0], "TCP")== 0) {
+        tcp_udp = PROTO_TCP;
+    } else if (strcmp((char *)portmap_args.TCP_UDP->sval[0], "UDP")== 0) {
+        tcp_udp = PROTO_UDP;
+    } else {
+        printf("Must be 'TCP' or 'UDP'\n");
+        return 1;
+    }
+
+    uint16_t ext_port = portmap_args.ext_port->ival[0];
+    uint32_t int_ip = ipaddr_addr((char *)portmap_args.int_ip->sval[0]);
+    uint16_t int_port = portmap_args.int_port->ival[0];
+
+    //printf("portmap %d %d %x %d %x %d\n", add, tcp_udp, my_ip, ext_port, int_ip, int_port);
+
+    if (add) {
+        add_portmap(tcp_udp, ext_port, int_ip, int_port);
+    } else {
+        del_portmap(tcp_udp, ext_port);
+    }
+
+    return ESP_OK;
+}
+
+static void register_portmap(void)
+{
+    portmap_args.add_del = arg_str1(NULL, NULL, "[add|del]", "add or delete portmapping");
+    portmap_args.TCP_UDP = arg_str1(NULL, NULL, "[TCP|UDP]", "TCP or UDP port");
+    portmap_args.ext_port = arg_int1(NULL, NULL, "<ext_portno>", "external port number");
+    portmap_args.int_ip = arg_str1(NULL, NULL, "<int_ip>", "internal IP");
+    portmap_args.int_port = arg_int1(NULL, NULL, "<int_portno>", "internal port number");
+    portmap_args.end = arg_end(5);
+
+    const esp_console_cmd_t cmd = {
+        .command = "portmap",
+        .help = "Add or delete a portmapping to the router",
+        .hint = NULL,
+        .func = &portmap,
+        .argtable = &portmap_args
+    };
+    ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
+}
+
 /* 'show' command */
 static int show(int argc, char **argv)
 {
@@ -328,7 +433,14 @@ static int show(int argc, char **argv)
     if (ap_passwd != NULL) free (ap_passwd);
 
     printf("Uplink AP %sconnected\n", ap_connect?"":"not ");
+    if (ap_connect) {
+        ip4_addr_t addr;
+        addr.addr = my_ip;
+        printf ("IP: " IPSTR "\n", IP2STR(&addr));
+    }
     printf("%d Stations connected\n", connect_count);
+
+    print_portmap_tab();
 
     return 0;
 }
@@ -343,3 +455,4 @@ static void register_show(void)
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }
+

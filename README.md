@@ -157,6 +157,14 @@ set_ap  <ssid> <passwd>
         <ssid>  SSID of AP
       <passwd>  Password of AP
 
+portmap  [add|del] [TCP|UDP] <ext_portno> <int_ip> <int_portno>
+  Add or delete a portmapping to the router
+     [add|del]  add or delete portmapping
+     [TCP|UDP]  TCP or UDP port
+  <ext_portno>  external port number
+      <int_ip>  internal IP
+  <int_portno>  internal port number
+
 show 
   Get status and config of the router
 ```
