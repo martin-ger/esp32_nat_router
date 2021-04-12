@@ -21,7 +21,7 @@
 #include <esp_http_server.h>
 
 #include "pages.h"
-#include "esp32_nat_router.h"
+#include "router_globals.h"
 
 static const char *TAG = "HTTPServer";
 
