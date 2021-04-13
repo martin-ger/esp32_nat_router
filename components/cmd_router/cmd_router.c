@@ -40,6 +40,7 @@ static const char *TAG = "cmd_router";
 static void register_set_sta(void);
 static void register_set_sta_static(void);
 static void register_set_ap(void);
+static void register_set_ap_ip(void);
 static void register_show(void);
 static void register_portmap(void);
 
@@ -142,6 +143,7 @@ void register_router(void)
     register_set_sta();
     register_set_sta_static();
     register_set_ap();
+    register_set_ap_ip();
     register_portmap();
     register_show();
 }
@@ -202,6 +204,7 @@ static void register_set_sta(void)
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }
+
 
 /** Arguments used by 'set_sta_static' function */
 static struct {
@@ -327,6 +330,55 @@ static void register_set_ap(void)
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }
 
+/** Arguments used by 'set_ap_ip' function */
+static struct {
+    struct arg_str *ap_ip_str;
+    struct arg_end *end;
+} set_ap_ip_arg;
+
+
+/* 'set_ap_ip' command */
+int set_ap_ip(int argc, char **argv)
+{
+    esp_err_t err;
+    nvs_handle_t nvs;
+
+    int nerrors = arg_parse(argc, argv, (void **) &set_ap_ip_arg);
+    if (nerrors != 0) {
+        arg_print_errors(stderr, set_ap_ip_arg.end, argv[0]);
+        return 1;
+    }
+
+    preprocess_string((char*)set_ap_ip_arg.ap_ip_str->sval[0]);
+
+    err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = nvs_set_str(nvs, "ap_ip", set_ap_ip_arg.ap_ip_str->sval[0]);
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "AP IP address %s stored.", set_ap_ip_arg.ap_ip_str->sval[0]);
+    }
+    nvs_close(nvs);
+    return err;
+}
+
+static void register_set_ap_ip(void)
+{
+    set_ap_ip_arg.ap_ip_str = arg_str1(NULL, NULL, "<ip>", "IP");
+    set_ap_ip_arg.end = arg_end(1);
+
+    const esp_console_cmd_t cmd = {
+        .command = "set_ap_ip",
+        .help = "Set IP for the AP interface",
+        .hint = NULL,
+        .func = &set_ap_ip,
+        .argtable = &set_ap_ip_arg
+    };
+    ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
+}
+
 /** Arguments used by 'portmap' function */
 static struct {
     struct arg_str *add_del;
@@ -423,6 +475,9 @@ static int show(int argc, char **argv)
         passwd != NULL?passwd:"<undef>");
     printf("AP SSID: %s Password: %s\n", ap_ssid != NULL?ap_ssid:"<undef>",
         ap_passwd != NULL?ap_passwd:"<undef>");
+    ip4_addr_t addr;
+    addr.addr = my_ap_ip;
+    printf("AP IP address: " IPSTR "\n", IP2STR(&addr));
 
     if (ssid != NULL) free (ssid);
     if (passwd != NULL) free (passwd);
@@ -434,7 +489,6 @@ static int show(int argc, char **argv)
 
     printf("Uplink AP %sconnected\n", ap_connect?"":"not ");
     if (ap_connect) {
-        ip4_addr_t addr;
         addr.addr = my_ip;
         printf ("IP: " IPSTR "\n", IP2STR(&addr));
     }

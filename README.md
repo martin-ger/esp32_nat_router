@@ -154,8 +154,12 @@ set_sta_static  <ip> <subnet> <gw>
 
 set_ap  <ssid> <passwd>
   Set SSID and password of the SoftAP
-        <ssid>  SSID of AP
+        <ssid>  SSID of APgit 
       <passwd>  Password of AP
+
+set_ap_ip  <ip>
+  Set IP for the AP interface
+          <ip>  IP
 
 portmap  [add|del] [TCP|UDP] <ext_portno> <int_ip> <int_portno>
   Add or delete a portmapping to the router
