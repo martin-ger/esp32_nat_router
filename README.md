@@ -154,7 +154,7 @@ set_sta_static  <ip> <subnet> <gw>
 
 set_ap  <ssid> <passwd>
   Set SSID and password of the SoftAP
-        <ssid>  SSID of APgit 
+        <ssid>  SSID of AP
       <passwd>  Password of AP
 
 set_ap_ip  <ip>
