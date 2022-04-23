@@ -112,7 +112,7 @@ static esp_err_t index_get_handler(httpd_req_t *req)
                                 argv[argc++] = "-u";
                                 argv[argc++] = param3;
                             }
-                            //Anon Id
+                            //Identity
                             if(strlen(param3)) {
                                 argv[argc++] = "-a";
                                 argv[argc++] = param4;
