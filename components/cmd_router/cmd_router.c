@@ -150,9 +150,11 @@ void register_router(void)
 
 /** Arguments used by 'set_sta' function */
 static struct {
-    struct arg_str *ssid;
-    struct arg_str *password;
-    struct arg_end *end;
+    struct arg_str* ssid;
+    struct arg_str* password;
+    struct arg_str* ent_username;
+    struct arg_str* ent_identity;
+    struct arg_end* end;
 } set_sta_arg;
 
 /* 'set_sta' command */
@@ -179,10 +181,28 @@ int set_sta(int argc, char **argv)
     if (err == ESP_OK) {
         err = nvs_set_str(nvs, "passwd", set_sta_arg.password->sval[0]);
         if (err == ESP_OK) {
+            if (set_sta_arg.ent_username->count > 0) {
+                err = nvs_set_str(nvs, "ent_username", set_sta_arg.ent_username->sval[0]);
+            }
+            else {
+                err = nvs_set_str(nvs, "ent_username", "");
+            }
+
+            if (err == ESP_OK) {
+                if (set_sta_arg.ent_identity->count > 0) {
+                    err = nvs_set_str(nvs, "ent_identity", set_sta_arg.ent_identity->sval[0]);
+                }
+                else {
+                    err = nvs_set_str(nvs, "ent_identity", "");
+                }
+
+        if (err == ESP_OK) {
             err = nvs_commit(nvs);
             if (err == ESP_OK) {
                 ESP_LOGI(TAG, "STA settings %s/%s stored.", set_sta_arg.ssid->sval[0], set_sta_arg.password->sval[0]);
             }
+        }
+    }
         }
     }
     nvs_close(nvs);
@@ -193,6 +213,8 @@ static void register_set_sta(void)
 {
     set_sta_arg.ssid = arg_str1(NULL, NULL, "<ssid>", "SSID");
     set_sta_arg.password = arg_str1(NULL, NULL, "<passwd>", "Password");
+    set_sta_arg.ent_username = arg_str0("-u", "--username", "<ent_username>", "Enterprise username");
+    set_sta_arg.ent_identity = arg_str0("-a", "--anan", "<ent_identity>", "Enterprise identity");
     set_sta_arg.end = arg_end(2);
 
     const esp_console_cmd_t cmd = {
@@ -398,7 +420,7 @@ int portmap(int argc, char **argv)
         return 1;
     }
 
-    bool add ;
+    bool add;
     if (strcmp((char *)portmap_args.add_del->sval[0], "add")== 0) {
         add = true;
     } else if (strcmp((char *)portmap_args.add_del->sval[0], "del")== 0) {
@@ -456,6 +478,8 @@ static void register_portmap(void)
 static int show(int argc, char **argv)
 {
     char* ssid = NULL;
+    char* ent_username = NULL;
+    char* ent_identity = NULL;
     char* passwd = NULL;
     char* static_ip = NULL;
     char* subnet_mask = NULL;
@@ -464,6 +488,8 @@ static int show(int argc, char **argv)
     char* ap_passwd = NULL;
 
     get_config_param_str("ssid", &ssid);
+    get_config_param_str("ent_username", &ent_username);
+    get_config_param_str("ent_identity", &ent_identity);
     get_config_param_str("passwd", &passwd);
     get_config_param_str("static_ip", &static_ip);
     get_config_param_str("subnet_mask", &subnet_mask);
@@ -471,21 +497,27 @@ static int show(int argc, char **argv)
     get_config_param_str("ap_ssid", &ap_ssid);
     get_config_param_str("ap_passwd", &ap_passwd);
 
-    printf("STA SSID: %s Password: %s\n", ssid != NULL?ssid:"<undef>",
-        passwd != NULL?passwd:"<undef>");
-    printf("AP SSID: %s Password: %s\n", ap_ssid != NULL?ap_ssid:"<undef>",
-        ap_passwd != NULL?ap_passwd:"<undef>");
+    printf("STA SSID: %s Password: %s Enterprise: %s %s\n",
+        ssid != NULL ? ssid : "<undef>",
+        passwd != NULL ? passwd : "<undef>",
+        ((ent_username != NULL) && (strlen(ent_username) > 0)) ? ent_username : "<not active>",
+        ((ent_username != NULL) && (strlen(ent_username) > 0) && (ent_identity != NULL) && (strlen(ent_identity) > 0)) ? ent_identity : ""
+    );
+    printf("AP SSID: %s Password: %s\n", ap_ssid != NULL ? ap_ssid : "<undef>",
+        ap_passwd != NULL ? ap_passwd : "<undef>");
     ip4_addr_t addr;
     addr.addr = my_ap_ip;
     printf("AP IP address: " IPSTR "\n", IP2STR(&addr));
 
-    if (ssid != NULL) free (ssid);
-    if (passwd != NULL) free (passwd);
-    if (static_ip != NULL) free (static_ip);
-    if (subnet_mask != NULL) free (subnet_mask);
-    if (gateway_addr != NULL) free (gateway_addr);
-    if (ap_ssid != NULL) free (ap_ssid);
-    if (ap_passwd != NULL) free (ap_passwd);
+    if (ssid != NULL) free(ssid);
+    if (ent_username != NULL) free(ent_username);
+    if (ent_identity != NULL) free(ent_identity);
+    if (passwd != NULL) free(passwd);
+    if (static_ip != NULL) free(static_ip);
+    if (subnet_mask != NULL) free(subnet_mask);
+    if (gateway_addr != NULL) free(gateway_addr);
+    if (ap_ssid != NULL) free(ap_ssid);
+    if (ap_passwd != NULL) free(ap_passwd);
 
     printf("Uplink AP %sconnected\n", ap_connect?"":"not ");
     if (ap_connect) {

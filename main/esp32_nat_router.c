@@ -23,6 +23,7 @@
 
 #include "freertos/event_groups.h"
 #include "esp_wifi.h"
+#include "esp_wpa2.h"
 
 #include "lwip/opt.h"
 #include "lwip/err.h"
@@ -353,7 +354,7 @@ static esp_err_t wifi_event_handler(void *ctx, system_event_t *event)
 const int CONNECTED_BIT = BIT0;
 #define JOIN_TIMEOUT_MS (2000)
 
-void wifi_init(const char* ssid, const char* passwd, const char* static_ip, const char* subnet_mask, const char* gateway_addr, const char* ap_ssid, const char* ap_passwd, const char* ap_ip)
+void wifi_init(const char* ssid, const char* ent_username, const char* ent_identity, const char* passwd, const char* static_ip, const char* subnet_mask, const char* gateway_addr, const char* ap_ssid, const char* ap_passwd, const char* ap_ip)
 {
     ip_addr_t dnsserver;
     //tcpip_adapter_dns_info_t dnsinfo;
@@ -411,10 +412,28 @@ void wifi_init(const char* ssid, const char* passwd, const char* static_ip, cons
     }
 
     if (strlen(ssid) > 0) {
-        strlcpy((char*)wifi_config.sta.ssid, ssid, sizeof(wifi_config.sta.ssid));
-        strlcpy((char*)wifi_config.sta.password, passwd, sizeof(wifi_config.sta.password));
         ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA) );
+
+        //Set SSID
+        strlcpy((char*)wifi_config.sta.ssid, ssid, sizeof(wifi_config.sta.ssid));
+        //Set passwprd
+        if(strlen(ent_username) == 0) {
+            ESP_LOGI(TAG, "STA regular connection");
+            strlcpy((char*)wifi_config.sta.password, passwd, sizeof(wifi_config.sta.password));
+        }
         ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config) );
+        if(strlen(ent_username) != 0 && strlen(ent_identity) != 0) {
+            ESP_LOGI(TAG, "STA enterprise connection");
+            if(strlen(ent_username) != 0 && strlen(ent_identity) != 0) {
+                esp_wifi_sta_wpa2_ent_set_identity((uint8_t *)ent_identity, strlen(ent_identity)); //provide identity
+            } else {
+                esp_wifi_sta_wpa2_ent_set_identity((uint8_t *)ent_username, strlen(ent_username));
+            }
+            esp_wifi_sta_wpa2_ent_set_username((uint8_t *)ent_username, strlen(ent_username)); //provide username
+            esp_wifi_sta_wpa2_ent_set_password((uint8_t *)passwd, strlen(passwd)); //provide password
+            esp_wifi_sta_wpa2_ent_enable();
+        }
+
         ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &ap_config) );
     } else {
         ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP) );
@@ -446,6 +465,8 @@ void wifi_init(const char* ssid, const char* passwd, const char* static_ip, cons
 }
 
 char* ssid = NULL;
+char* ent_username = NULL;
+char* ent_identity = NULL;
 char* passwd = NULL;
 char* static_ip = NULL;
 char* subnet_mask = NULL;
@@ -474,6 +495,14 @@ void app_main(void)
     get_config_param_str("ssid", &ssid);
     if (ssid == NULL) {
         ssid = param_set_default("");
+    }
+    get_config_param_str("ent_username", &ent_username);
+    if (ent_username == NULL) {
+        ent_username = param_set_default("");
+    }
+    get_config_param_str("ent_identity", &ent_identity);
+    if (ent_identity == NULL) {
+        ent_identity = param_set_default("");
     }
     get_config_param_str("passwd", &passwd);
     if (passwd == NULL) {
@@ -507,7 +536,7 @@ void app_main(void)
     get_portmap_tab();
 
     // Setup WIFI
-    wifi_init(ssid, passwd, static_ip, subnet_mask, gateway_addr, ap_ssid, ap_passwd, ap_ip);
+    wifi_init(ssid, ent_username, ent_identity, passwd, static_ip, subnet_mask, gateway_addr, ap_ssid, ap_passwd, ap_ip);
 
     pthread_t t1;
     pthread_create(&t1, NULL, led_status_thread, NULL);

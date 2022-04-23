@@ -16,6 +16,8 @@ extern "C" {
 #define PROTO_UDP 17
 
 extern char* ssid;
+extern char* ent_username;
+extern char* ent_identity;
 extern char* passwd;
 extern char* static_ip;
 extern char* subnet_mask;
