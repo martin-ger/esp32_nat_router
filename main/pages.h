@@ -106,6 +106,17 @@ setTimeout(\"location.href = '/'\",10000);\
 <td><input type='text' name='password' value='%s' placeholder='Password of existing network'/></td>\
 </tr>\
 <tr>\
+<td colspan='2'>WPA2 Enterprise settings. Leave blank for regular</td>\
+</tr>\
+<tr>\
+<td>Enterprise username</td>\
+<td><input type='text' name='ent_username' value='%s' placeholder='WPA2 Enterprise username'/></td>\
+</tr>\
+<tr>\
+<td>Enterprise identity</td>\
+<td><input type='text' name='ent_identity' value='%s' placeholder='WPA2 Enterprise identity'/></td>\
+</tr>\
+<tr>\
 <td></td>\
 <td><input type='submit' value='Connect' class='ok-button'/></td>\
 </tr>\

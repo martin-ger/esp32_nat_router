@@ -1,8 +1,10 @@
-# ESP32 NAT Router
+# ESP32 NAT Router with WPA2 Enterprise support
 
 This is a firmware to use the ESP32 as WiFi NAT router. It can be used as
 - Simple range extender for an existing WiFi network
 - Setting up an additional WiFi network with different SSID/password for guests or IOT devices
+- Convert a corporate (WPA2-Enterprise) network to a regular network, for simple devices.
+
 
 It can achieve a bandwidth of more than 15mbps.
 
@@ -25,7 +27,7 @@ After first boot the ESP32 NAT Router will offer a WiFi network with an open AP 
 ## Web Config Interface
 The web interface allows for the configuration of all parameters. Connect you PC or smartphone to the WiFi SSID "ESP32_NAT_Router" and point your browser to "http://192.168.4.1". This page should appear:
 
-<img src="https://raw.githubusercontent.com/martin-ger/esp32_nat_router/master/ESP32_NAT_UI2.JPG">
+<img src="https://raw.githubusercontent.com/marci07iq/esp32_nat_router/master/ESP32_NAT_UI3.png">
 
 First enter the appropriate values for the uplink WiFi network, the "STA Settings". Leave password blank for open networks. Click "Connect". The ESP32 reboots and will connect to your WiFi router.
 
@@ -145,6 +147,8 @@ set_sta  <ssid> <passwd>
   Set SSID and password of the STA interface
         <ssid>  SSID
       <passwd>  Password
+  --, -u, ----username=<ent_username>  Enterprise username
+  --, -a, ----anan=<ent_identity>  Enterprise identity
 
 set_sta_static  <ip> <subnet> <gw>
   Set Static IP for the STA interface
@@ -190,7 +194,9 @@ As an alternative you might use [Espressif's Flash Download Tools](https://www.e
 
 ![image](https://raw.githubusercontent.com/martin-ger/esp32_nat_router/master/FlasherUI.jpg)
 
-## Building the Binaries
+Note that the prebuilt binaries do not include WPA2 Enterprise support.
+
+## Building the Binaries (Method 1 - ESPIDF)
 The following are the steps required to compile this project:
 
 1. Download and setup the ESP-IDF.
@@ -202,6 +208,13 @@ The following are the steps required to compile this project:
 3. Build the project and flash it to the ESP32.
 
 A detailed instruction on how to build, configure and flash a ESP-IDF project can also be found the official ESP-IDF guide. 
+
+## Building the Binaries (Method 2 - Platformio)
+The following are the steps required to compile this project:
+
+1. Download Visual Studio Code, and the Platform IO extension.
+2. In Platformio, install the ESP-IDF framework.
+3. Build the project and flash it to the ESP32.
 
 ### DNS
 As soon as the ESP32 STA has learned a DNS IP from its upstream DNS server on first connect, it passes that to newly connected clients.
