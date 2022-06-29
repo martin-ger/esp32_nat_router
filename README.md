@@ -180,15 +180,43 @@ show
 If you want to enter non-ASCII or special characters (incl. ' ') you can use HTTP-style hex encoding (e.g. "My%20AccessPoint" results in a string "My AccessPoint").
 
 ## Flashing the prebuild Binaries
-Install [esptool](https://github.com/espressif/esptool), go to the project directory, and enter:
+
+Get and install [esptool](https://github.com/espressif/esptool):
+
 ```
-esptool.py --chip esp32 --port /dev/ttyUSB0 \
---baud 115200 --before default_reset --after hard_reset write_flash \
+cd ~
+python3 -m pip install pyserial
+git clone https://github.com/espressif/esptool
+cd esptool
+python3 setup.py install
+```
+
+Go to esp32_nat_router project directory and build for any kind of esp32 target.
+
+For esp32:
+
+```bash
+esptool.py --chip esp32 \
+--before default_reset --after hard_reset write_flash \
 -z --flash_mode dio --flash_freq 40m --flash_size detect \
-0x1000 build/bootloader/bootloader.bin \
-0x10000 build/esp32_nat_router.bin \
-0x8000 build/partitions_example.bin
+0x1000 build/esp32/bootloader.bin \
+0x8000 build/esp32/partitions.bin \
+0x10000 build/esp32/firmware.bin
 ```
+
+For esp32c3:
+
+```bash
+esptool.py --chip esp32c3 \
+--before default_reset --after hard_reset write_flash \
+-z --flash_size detect \
+0x0 build/esp32c3/bootloader.bin \
+0x8000 build/esp32c3/partitions.bin \
+0x10000 build/esp32c3/firmware.bin
+```
+
+python esptool.py -p /dev/tty.usbserial-0001  - --chip esp32  write_flash --flash_mode dio --flash_size detect --flash_freq 40m 0x1000 build/bootloader/bootloader.bin 0x8000 build/partition_table/partition-table.bin 0x10000 build/hello_world.bin
+e
 
 As an alternative you might use [Espressif's Flash Download Tools](https://www.espressif.com/en/products/hardware/esp32/resources) with the parameters given in the figure below (thanks to mahesh2000):
 
