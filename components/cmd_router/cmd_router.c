@@ -103,7 +103,7 @@ esp_err_t get_config_param_int(char* name, int* param)
 
     esp_err_t err = nvs_open(PARAM_NAMESPACE, NVS_READONLY, &nvs);
     if (err == ESP_OK) {
-        if ( (err = nvs_get_i32(nvs, name, param)) == ESP_OK) {
+        if ( (err = nvs_get_i32(nvs, name, (int32_t*)(param))) == ESP_OK) {
             ESP_LOGI(TAG, "%s %d", name, *param);
         } else {
             return err;
