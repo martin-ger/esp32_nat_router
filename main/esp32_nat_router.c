@@ -335,6 +335,7 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
     {
         ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
         ESP_LOGI(TAG, "got ip:" IPSTR, IP2STR(&event->ip_info.ip));
+	ap_connect = true;   
         if (esp_netif_get_dns_info(wifiSTA, ESP_NETIF_DNS_MAIN, &dns) == ESP_OK)
         {
             dnsserver.type = IPADDR_TYPE_V4;
@@ -344,12 +345,12 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
         }
         xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);
     }
-    else if (event_base == IP_EVENT && event_id == WIFI_EVENT_AP_STACONNECTED)
+    else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_AP_STACONNECTED)
     {
         connect_count++;
         ESP_LOGI(TAG,"%d. station connected", connect_count);
     }
-    else if (event_base == IP_EVENT && event_id == WIFI_EVENT_AP_STADISCONNECTED)
+    else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_AP_STADISCONNECTED)
     {
         connect_count--;
         ESP_LOGI(TAG,"station disconnected - %d remain", connect_count);
