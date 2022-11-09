@@ -65,7 +65,7 @@ static esp_err_t index_get_handler(httpd_req_t *req)
         buf = malloc(buf_len);
         if (httpd_req_get_url_query_str(req, buf, buf_len) == ESP_OK) {
             ESP_LOGI(TAG, "Found URL query => %s", buf);
-            if (strcmp(buf, "reset=Restart") == 0) {
+            if (strcmp(buf, "reset=Reboot") == 0) {
                 esp_timer_start_once(restart_timer, 500000);
             }
             char param1[64];
