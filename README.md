@@ -61,7 +61,7 @@ portmap add TCP 8080 192.168.4.2 80
                   ↑ exposed port in the local router's network
 ```
      
-Assuming the esp32NAT's ip address in your `local router`` is `192.168.0.57` you can acces the server by typing `192.168.0.57:8080` into your browser now.
+Assuming the esp32NAT's ip address in your `local router` is `192.168.0.57` you can acces the server by typing `192.168.0.57:8080` into your browser now.
 
 ## Interpreting the on board LED
 
