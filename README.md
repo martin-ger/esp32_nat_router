@@ -52,16 +52,16 @@ If you made a mistake and have lost all contact with the ESP you can still use t
 If you want to access a device behind the esp32 NAT router? `PC -> local router -> esp32NAT -> server`
 
 Lets say "server" is exposing a webserver on port 80 and you want to access that from your PC.  
-For that you need to configure a netmap (e.g. by connecting via the arduino IDE uart monitor through USB)
+For that you need to configure a portmap (e.g. by connecting via the arduino IDE uart monitor through USB)
 
 ```
 portmap add TCP 8080 192.168.4.2 80
                                  ↑ port of the webserver
-                            ↑ servers ip in esp32NAT network
-                  ↑ exposed port in the local router
+                            ↑ server's ip in esp32NAT network
+                  ↑ exposed port in the local router's network
 ```
      
-Assuming the ESP NATs ip address in your `local router`` is `192.168.0.57` you can acces the server by typing `192.168.0.57:8080` into your browser now.
+Assuming the esp32NAT's ip address in your `local router`` is `192.168.0.57` you can acces the server by typing `192.168.0.57:8080` into your browser now.
 
 ## Interpreting the on board LED
 
