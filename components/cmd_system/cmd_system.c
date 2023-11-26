@@ -16,13 +16,13 @@
 #include "esp_sleep.h"
 #include "esp_flash.h"
 #include "esp_chip_info.h"
+#include "driver/rtc_io.h"
 #include "driver/uart.h"
 #include "argtable3/argtable3.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "cmd_system.h"
 #include "sdkconfig.h"
-#include "driver/gpio.h"
 
 #ifdef CONFIG_FREERTOS_USE_STATS_FORMATTING_FUNCTIONS
 #define WITH_TASKS_INFO 1
