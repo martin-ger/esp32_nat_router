@@ -40,8 +40,8 @@ esp_err_t get_config_param_int(char* name, int* param);
 esp_err_t get_config_param_str(char* name, char** param);
 
 void print_portmap_tab();
-esp_err_t add_portmap(u8_t proto, u16_t mport, u32_t daddr, u16_t dport);
-esp_err_t del_portmap(u8_t proto, u16_t mport);
+esp_err_t add_portmap(uint8_t proto, uint16_t mport, uint32_t daddr, uint16_t dport);
+esp_err_t del_portmap(uint8_t proto, uint16_t mport);
 
 #ifdef __cplusplus
 }
