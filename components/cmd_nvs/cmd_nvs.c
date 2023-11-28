@@ -372,9 +372,9 @@ static esp_err_t erase_all(const char *name)
 
 static int list(const char *part, const char *name, const char *str_type)
 {
-    nvs_type_t type = str_to_type(str_type);
-    nvs_iterator_t it = NULL;
-    esp_err_t nvs_entry_find(part, name, type, it);
+    //nvs_type_t type = str_to_type(str_type);
+    nvs_iterator_t it = NULL; 
+    ESP_ERROR_CHECK(nvs_entry_find(part, name, NVS_TYPE_ANY, &it)); 
     if (it == NULL) {
         ESP_LOGE(TAG, "No such enty was found");
         return 1;
@@ -383,10 +383,10 @@ static int list(const char *part, const char *name, const char *str_type)
     do {
         nvs_entry_info_t info;
         nvs_entry_info(it, &info);
-        esp_err_t nvs_entry_next(it);
+        ESP_ERROR_CHECK(nvs_entry_next(&it));
 
         printf("namespace '%s', key '%s', type '%s' \n",
-               info.namespace_name, info.key, type_to_str(info.type));
+            info.namespace_name, info.key, type_to_str(info.type));
     } while (it != NULL);
 
     return 0;
