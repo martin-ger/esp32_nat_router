@@ -164,8 +164,7 @@ setTimeout(\"location.href = '/'\",10000);\
 </html>\
 "
 
-#define LOCK_PAGE "HTTP/1.0 200 OK\r\nContent-Type: text/html\r\n\r\n\
-<html>\
+#define LOCK_PAGE "<html>\
 <head></head>\
 <meta name='viewport' content='width=device-width, initial-scale=1'>\
 <style>\
