@@ -1,9 +1,13 @@
 build/**
-!build/bootloader
-!build/esp32_nat_router.bin
-!build/partitions_example.bin
+!build/esp32
+!build/esp32/*
+!build/esp32c3
+!build/esp32c3/*
+!build/esp32s3
+!build/esp32s3/*
 .pio*
 .vscode
 .vscode/*
 sdkconfig.*
+sdkconfig.old
 !sdkconfig.defaults
