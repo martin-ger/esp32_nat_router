@@ -23,11 +23,14 @@
 
 #include "freertos/event_groups.h"
 #include "esp_wifi.h"
-#include "esp_wpa2.h"
+#include "esp_eap_client.h"
 
 #include "lwip/opt.h"
 #include "lwip/err.h"
 #include "lwip/sys.h"
+
+#include "dhcpserver/dhcpserver.h"
+#include "dhcpserver/dhcpserver_options.h"
 
 #include "cmd_decl.h"
 #include <esp_http_server.h>
@@ -40,7 +43,11 @@
 #include "router_globals.h"
 
 // On board LED
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+#define BLINK_GPIO 44
+#else
 #define BLINK_GPIO 2
+#endif
 
 /* FreeRTOS event group to signal when we are connected*/
 static EventGroupHandle_t wifi_event_group;
@@ -92,7 +99,7 @@ static void initialize_filesystem(void)
             .max_files = 4,
             .format_if_mount_failed = true
     };
-    esp_err_t err = esp_vfs_fat_spiflash_mount(MOUNT_PATH, "storage", &mount_config, &wl_handle);
+    esp_err_t err = esp_vfs_fat_spiflash_mount_rw_wl(MOUNT_PATH, "storage", &mount_config, &wl_handle);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to mount FATFS (%s)", esp_err_to_name(err));
         return;
@@ -317,7 +324,6 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
                                 int32_t event_id, void* event_data)
 {
     esp_netif_dns_info_t dns;
-    ip_addr_t dnsserver;
 
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START)
     {
@@ -341,10 +347,8 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
         apply_portmap_tab();
         if (esp_netif_get_dns_info(wifiSTA, ESP_NETIF_DNS_MAIN, &dns) == ESP_OK)
         {
-            dnsserver.type = IPADDR_TYPE_V4;
-            dnsserver.u_addr.ip4.addr = dns.ip.u_addr.ip4.addr;
-            dhcps_dns_setserver(&dnsserver);
-            ESP_LOGI(TAG, "set dns to:" IPSTR, IP2STR(&(dnsserver.u_addr.ip4)));
+            esp_netif_set_dns_info(wifiAP, ESP_NETIF_DNS_MAIN, &dns);
+            ESP_LOGI(TAG, "set dns to:" IPSTR, IP2STR(&(dns.ip.u_addr.ip4)));
         }
         xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);
     }
@@ -363,10 +367,11 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
 const int CONNECTED_BIT = BIT0;
 #define JOIN_TIMEOUT_MS (2000)
 
+
 void wifi_init(const char* ssid, const char* ent_username, const char* ent_identity, const char* passwd, const char* static_ip, const char* subnet_mask, const char* gateway_addr, const char* ap_ssid, const char* ap_passwd, const char* ap_ip)
 {
-    ip_addr_t dnsserver;
-    //tcpip_adapter_dns_info_t dnsinfo;
+    esp_netif_dns_info_t dnsserver;
+    // esp_netif_dns_info_t dnsinfo;
 
     wifi_event_group = xEventGroupCreate();
   
@@ -375,23 +380,23 @@ void wifi_init(const char* ssid, const char* ent_username, const char* ent_ident
     wifiAP = esp_netif_create_default_wifi_ap();
     wifiSTA = esp_netif_create_default_wifi_sta();
 
-    tcpip_adapter_ip_info_t ipInfo_sta;
+    esp_netif_ip_info_t ipInfo_sta;
     if ((strlen(ssid) > 0) && (strlen(static_ip) > 0) && (strlen(subnet_mask) > 0) && (strlen(gateway_addr) > 0)) {
         has_static_ip = true;
-        my_ip = ipInfo_sta.ip.addr = ipaddr_addr(static_ip);
-        ipInfo_sta.gw.addr = ipaddr_addr(gateway_addr);
-        ipInfo_sta.netmask.addr = ipaddr_addr(subnet_mask);
-        tcpip_adapter_dhcpc_stop(TCPIP_ADAPTER_IF_STA); // Don't run a DHCP client
-        tcpip_adapter_set_ip_info(TCPIP_ADAPTER_IF_STA, &ipInfo_sta);
+        ipInfo_sta.ip.addr = esp_ip4addr_aton(static_ip);
+        ipInfo_sta.gw.addr = esp_ip4addr_aton(gateway_addr);
+        ipInfo_sta.netmask.addr = esp_ip4addr_aton(subnet_mask);
+        esp_netif_dhcpc_stop(ESP_IF_WIFI_STA); // Don't run a DHCP client
+        esp_netif_set_ip_info(ESP_IF_WIFI_STA, &ipInfo_sta);
         apply_portmap_tab();
     }
 
-    my_ap_ip = ipaddr_addr(ap_ip);
+    my_ap_ip = esp_ip4addr_aton(ap_ip);
 
     esp_netif_ip_info_t ipInfo_ap;
     ipInfo_ap.ip.addr = my_ap_ip;
     ipInfo_ap.gw.addr = my_ap_ip;
-    IP4_ADDR(&ipInfo_ap.netmask, 255,255,255,0);
+    esp_netif_set_ip4_addr(&ipInfo_ap.netmask, 255,255,255,0);
     esp_netif_dhcps_stop(wifiAP); // stop before setting ip WifiAP
     esp_netif_set_ip_info(wifiAP, &ipInfo_ap);
     esp_netif_dhcps_start(wifiAP);
@@ -417,7 +422,7 @@ void wifi_init(const char* ssid, const char* ent_username, const char* ent_ident
         wifi_config_t ap_config = {
         .ap = {
             .channel = 0,
-            .authmode = WIFI_AUTH_WPA2_PSK,
+            .authmode = WIFI_AUTH_WPA2_WPA3_PSK,
             .ssid_hidden = 0,
             .max_connection = 8,
             .beacon_interval = 100,
@@ -445,13 +450,13 @@ void wifi_init(const char* ssid, const char* ent_username, const char* ent_ident
         if(strlen(ent_username) != 0 && strlen(ent_identity) != 0) {
             ESP_LOGI(TAG, "STA enterprise connection");
             if(strlen(ent_username) != 0 && strlen(ent_identity) != 0) {
-                esp_wifi_sta_wpa2_ent_set_identity((uint8_t *)ent_identity, strlen(ent_identity)); //provide identity
+                esp_eap_client_set_identity((uint8_t *)ent_identity, strlen(ent_identity)); //provide identity
             } else {
-                esp_wifi_sta_wpa2_ent_set_identity((uint8_t *)ent_username, strlen(ent_username));
+                esp_eap_client_set_identity((uint8_t *)ent_username, strlen(ent_username));
             }
-            esp_wifi_sta_wpa2_ent_set_username((uint8_t *)ent_username, strlen(ent_username)); //provide username
-            esp_wifi_sta_wpa2_ent_set_password((uint8_t *)passwd, strlen(passwd)); //provide password
-            esp_wifi_sta_wpa2_ent_enable();
+            esp_eap_client_set_username((uint8_t *)ent_username, strlen(ent_username)); //provide username
+            esp_eap_client_set_password((uint8_t *)passwd, strlen(passwd)); //provide password
+            esp_wifi_sta_enterprise_enable();
         }
 
         ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &ap_config) );
@@ -460,17 +465,19 @@ void wifi_init(const char* ssid, const char* ent_username, const char* ent_ident
         ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &ap_config) );        
     }
 
+
+
     // Enable DNS (offer) for dhcp server
     dhcps_offer_t dhcps_dns_value = OFFER_DNS;
-    dhcps_set_option_info(6, &dhcps_dns_value, sizeof(dhcps_dns_value));
+    esp_netif_dhcps_option(wifiAP,ESP_NETIF_OP_SET, ESP_NETIF_DOMAIN_NAME_SERVER, &dhcps_dns_value, sizeof(dhcps_dns_value));
 
-    // Set custom dns server address for dhcp server
-    dnsserver.u_addr.ip4.addr = ipaddr_addr(DEFAULT_DNS);;
-    dnsserver.type = IPADDR_TYPE_V4;
-    dhcps_dns_setserver(&dnsserver);
+    // // Set custom dns server address for dhcp server
+    dnsserver.ip.u_addr.ip4.addr = esp_ip4addr_aton(DEFAULT_DNS);
+    dnsserver.ip.type = ESP_IPADDR_TYPE_V4;
+    esp_netif_set_dns_info(wifiAP, ESP_NETIF_DNS_MAIN, &dnsserver);
 
-//    tcpip_adapter_get_dns_info(TCPIP_ADAPTER_IF_AP, TCPIP_ADAPTER_DNS_MAIN, &dnsinfo);
-//    ESP_LOGI(TAG, "DNS IP:" IPSTR, IP2STR(&dnsinfo.ip.u_addr.ip4));
+    // esp_netif_get_dns_info(ESP_IF_WIFI_AP, ESP_NETIF_DNS_MAIN, &dnsinfo);
+    // ESP_LOGI(TAG, "DNS IP:" IPSTR, IP2STR(&dnsinfo.ip.u_addr.ip4));
 
     xEventGroupWaitBits(wifi_event_group, CONNECTED_BIT,
         pdFALSE, pdTRUE, JOIN_TIMEOUT_MS / portTICK_PERIOD_MS);

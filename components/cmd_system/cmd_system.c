@@ -14,7 +14,8 @@
 #include "esp_console.h"
 #include "esp_system.h"
 #include "esp_sleep.h"
-#include "esp_spi_flash.h"
+#include "esp_flash.h"
+#include "esp_chip_info.h"
 #include "driver/rtc_io.h"
 #include "driver/uart.h"
 #include "argtable3/argtable3.h"
@@ -57,16 +58,18 @@ static int get_version(int argc, char **argv)
 {
     esp_chip_info_t info;
     esp_chip_info(&info);
+    uint32_t size_flash_chip;
+    esp_flash_get_size(NULL, &size_flash_chip);
     printf("IDF Version:%s\r\n", esp_get_idf_version());
     printf("Chip info:\r\n");
     printf("\tmodel:%s\r\n", info.model == CHIP_ESP32 ? "ESP32" : "Unknow");
     printf("\tcores:%d\r\n", info.cores);
-    printf("\tfeature:%s%s%s%s%d%s\r\n",
+    printf("\tfeature:%s%s%s%s%lu%s\r\n",
            info.features & CHIP_FEATURE_WIFI_BGN ? "/802.11bgn" : "",
            info.features & CHIP_FEATURE_BLE ? "/BLE" : "",
            info.features & CHIP_FEATURE_BT ? "/BT" : "",
            info.features & CHIP_FEATURE_EMB_FLASH ? "/Embedded-Flash:" : "/External-Flash:",
-           spi_flash_get_chip_size() / (1024 * 1024), " MB");
+           size_flash_chip / (1024 * 1024), " MB");
     printf("\trevision number:%d\r\n", info.revision);
     return 0;
 }
@@ -105,7 +108,7 @@ static void register_restart(void)
 
 static int free_mem(int argc, char **argv)
 {
-    printf("%d\n", esp_get_free_heap_size());
+    printf("%lu\n", esp_get_free_heap_size());
     return 0;
 }
 
@@ -124,7 +127,7 @@ static void register_free(void)
 static int heap_size(int argc, char **argv)
 {
     uint32_t heap_size = heap_caps_get_minimum_free_size(MALLOC_CAP_DEFAULT);
-    ESP_LOGI(TAG, "min heap size: %u", heap_size);
+    ESP_LOGI(TAG, "min heap size: %lu", heap_size);
     return 0;
 }
 
@@ -199,7 +202,7 @@ static int deep_sleep(int argc, char **argv)
     }
     if (deep_sleep_args.wakeup_gpio_num->count) {
         int io_num = deep_sleep_args.wakeup_gpio_num->ival[0];
-        if (!rtc_gpio_is_valid_gpio(io_num)) {
+        if (!GPIO_IS_VALID_DIGITAL_IO_PAD(io_num)) {
             ESP_LOGE(TAG, "GPIO %d is not an RTC IO", io_num);
             return 1;
         }
