@@ -196,10 +196,10 @@ show
 If you want to enter non-ASCII or special characters (incl. ' ') you can use HTTP-style hex encoding (e.g. "My%20AccessPoint" results in a string "My AccessPoint").
 
 ## Set console output to UART or USB_SERIAL_JTAG (USB-OTG)
-All newer ESP32 boards comes with a built in [USB Serial/JTAG Controller](https://docs.espressif.com/projects/esp-idf/en/latest/esp32c3/api-guides/usb-serial-jtag-console.html). 
-In many cases the USB port your ESP32 board, is connected directly to the USB Serial/JTAG Controller on the chip, in that case you wont be able connect over UART, unless you have a external USB to Serial chip connected to the UART pins on the board.
+All newer ESP32 boards have a built in [USB Serial/JTAG Controller](https://docs.espressif.com/projects/esp-idf/en/latest/esp32c3/api-guides/usb-serial-jtag-console.html). 
+If the USB port is connected directly to the USB Serial/JTAG Controller, you wont be able to use the console over UART.
 
-If your board does not have a dedicated USB to serial chip, you can change the console output to USB_SERIAL_JTAG.
+You can change the console output to USB_SERIAL_JTAG:
 
 **Menuconfig:**
 `Component config` -> `ESP System Settings` -> `Channel for console output` -> `USB Serial/JTAG Controller`
