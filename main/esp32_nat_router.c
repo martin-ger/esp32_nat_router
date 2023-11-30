@@ -236,21 +236,18 @@ esp_err_t del_portmap(u8_t proto, u16_t mport) {
     return ESP_OK;
 }
 
-#if CONFIG_ESP_CONSOLE_UART_DEFAULT || CONFIG_ESP_CONSOLE_UART_CUSTOM
-static void initialize_console(void)
-{
+static void initialize_console(void) {
     /* Drain stdout before reconfiguring it */
     fflush(stdout);
     fsync(fileno(stdout));
-
     /* Disable buffering on stdin */
     setvbuf(stdin, NULL, _IONBF, 0);
 
+#if CONFIG_ESP_CONSOLE_UART_DEFAULT || CONFIG_ESP_CONSOLE_UART_CUSTOM
      /* Minicom, screen, idf_monitor send CR when ENTER key is pressed */
      esp_vfs_dev_uart_port_set_rx_line_endings(0, ESP_LINE_ENDINGS_CR);
      /* Move the caret to the beginning of the next line on '\n' */
      esp_vfs_dev_uart_port_set_tx_line_endings(0, ESP_LINE_ENDINGS_CRLF);
-
     /* Configure UART. Note that REF_TICK is used so that the baud rate remains
      * correct while APB frequency is changing in light sleep mode.
      */
@@ -269,63 +266,24 @@ static void initialize_console(void)
     ESP_ERROR_CHECK( uart_driver_install(CONFIG_ESP_CONSOLE_UART_NUM,
         256, 0, 0, NULL, 0) );
     ESP_ERROR_CHECK( uart_param_config(CONFIG_ESP_CONSOLE_UART_NUM, &uart_config) );
-
      /* Tell VFS to use UART driver */
      esp_vfs_dev_uart_use_driver(CONFIG_ESP_CONSOLE_UART_NUM);
-
-    /* Initialize the console */
-    esp_console_config_t console_config = {
-    .max_cmdline_args = 8,
-    .max_cmdline_length = 256,
-#if CONFIG_LOG_COLORS
-    .hint_color = atoi(LOG_COLOR_CYAN)
-#endif
-    };
-    ESP_ERROR_CHECK( esp_console_init(&console_config) );
-
-    /* Configure linenoise line completion library */
-    /* Enable multiline editing. If not set, long commands will scroll within
-     * single line.
-     */
-    linenoiseSetMultiLine(1);
-
-    /* Tell linenoise where to get command completions and hints */
-    linenoiseSetCompletionCallback(&esp_console_get_completion);
-    linenoiseSetHintsCallback((linenoiseHintsCallback*) &esp_console_get_hint);
-
-     /* Set command history size */
-     linenoiseHistorySetMaxLen(100);
-
-#if CONFIG_STORE_HISTORY
-    /* Load command history from filesystem */
-    linenoiseHistoryLoad(HISTORY_PATH);
-#endif
-}
 #endif
 
 #if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
-static void initialize_console(void){
-    /* Disable buffering on stdin */
-    setvbuf(stdin, NULL, _IONBF, 0);
-
     /* Minicom, screen, idf_monitor send CR when ENTER key is pressed */
     esp_vfs_dev_usb_serial_jtag_set_rx_line_endings(ESP_LINE_ENDINGS_CR);
     /* Move the caret to the beginning of the next line on '\n' */
     esp_vfs_dev_usb_serial_jtag_set_tx_line_endings(ESP_LINE_ENDINGS_CRLF);
-
-    /* Enable non-blocking mode on stdin and stdout */
-    fcntl(fileno(stdout), F_SETFL, 0);
-    fcntl(fileno(stdin), F_SETFL, 0);
-
     usb_serial_jtag_driver_config_t usb_serial_jtag_config = {
         .tx_buffer_size = 256,
         .rx_buffer_size = 256,
     };
     /* Install USB-SERIAL-JTAG driver for interrupt-driven reads and writes */
     usb_serial_jtag_driver_install(&usb_serial_jtag_config);
-
     /* Tell vfs to use usb-serial-jtag driver */
     esp_vfs_usb_serial_jtag_use_driver();
+#endif
 
     /* Initialize the console */
     esp_console_config_t console_config = {
@@ -336,26 +294,21 @@ static void initialize_console(void){
 #endif
     };
     ESP_ERROR_CHECK( esp_console_init(&console_config) );
-
     /* Configure linenoise line completion library */
     /* Enable multiline editing. If not set, long commands will scroll within
      * single line.
      */
     linenoiseSetMultiLine(1);
-
     /* Tell linenoise where to get command completions and hints */
     linenoiseSetCompletionCallback(&esp_console_get_completion);
     linenoiseSetHintsCallback((linenoiseHintsCallback*) &esp_console_get_hint);
-
-    /* Set command history size */
-    linenoiseHistorySetMaxLen(100);
-
+     /* Set command history size */
+     linenoiseHistorySetMaxLen(100);
 #if CONFIG_STORE_HISTORY
     /* Load command history from filesystem */
     linenoiseHistoryLoad(HISTORY_PATH);
 #endif
 }
-#endif
 
 void * led_status_thread(void * p)
 {
