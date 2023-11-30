@@ -237,13 +237,13 @@ esp_err_t del_portmap(u8_t proto, u16_t mport) {
 }
 
 static void initialize_console(void) {
-    /* Drain stdout before reconfiguring it */
-    fflush(stdout);
-    fsync(fileno(stdout));
-    /* Disable buffering on stdin */
+    // /* Disable buffering on stdin */
     setvbuf(stdin, NULL, _IONBF, 0);
 
 #if CONFIG_ESP_CONSOLE_UART_DEFAULT || CONFIG_ESP_CONSOLE_UART_CUSTOM
+    /* Drain stdout before reconfiguring it */
+    fflush(stdout);
+    fsync(fileno(stdout));
      /* Minicom, screen, idf_monitor send CR when ENTER key is pressed */
      esp_vfs_dev_uart_port_set_rx_line_endings(0, ESP_LINE_ENDINGS_CR);
      /* Move the caret to the beginning of the next line on '\n' */
@@ -271,6 +271,8 @@ static void initialize_console(void) {
 #endif
 
 #if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+    fcntl(fileno(stdout), F_SETFL, O_NONBLOCK);
+    fcntl(fileno(stdin), F_SETFL, O_NONBLOCK);
     /* Minicom, screen, idf_monitor send CR when ENTER key is pressed */
     esp_vfs_dev_usb_serial_jtag_set_rx_line_endings(ESP_LINE_ENDINGS_CR);
     /* Move the caret to the beginning of the next line on '\n' */
@@ -602,70 +604,67 @@ void app_main(void)
     register_router();
 
     /* Prompt to be printed before each line.
-     * This can be customized, made dynamic, etc.
-     */
-        const char* prompt = LOG_COLOR_I "esp32> " LOG_RESET_COLOR;
+    * This can be customized, made dynamic, etc.
+    */
+    const char* prompt = LOG_COLOR_I "esp32> " LOG_RESET_COLOR;
 
+    printf("\n"
+            "ESP32 NAT ROUTER\n"
+            "Type 'help' to get the list of commands.\n"
+            "Use UP/DOWN arrows to navigate through command history.\n"
+            "Press TAB when typing command name to auto-complete.\n");
+
+    if (strlen(ssid) == 0) {
         printf("\n"
-                      "ESP32 NAT ROUTER\n"
-                      "Type 'help' to get the list of commands.\n"
-                      "Use UP/DOWN arrows to navigate through command history.\n"
-                      "Press TAB when typing command name to auto-complete.\n");
+                "Unconfigured WiFi\n"
+                "Configure using 'set_sta' and 'set_ap' and restart.\n");       
+    }
 
-        if (strlen(ssid) == 0) {
-                  printf("\n"
-                              "Unconfigured WiFi\n"
-                              "Configure using 'set_sta' and 'set_ap' and restart.\n");       
-        }
-
-        /* Figure out if the terminal supports escape sequences */
-        int probe_status = linenoiseProbe();
-        if (probe_status) { /* zero indicates success */
-                printf("\n"
-                              "Your terminal application does not support escape sequences.\n"
-                              "Line editing and history features are disabled.\n"
-                              "On Windows, try using Putty instead.\n");
-                linenoiseSetDumbMode(1);
+    /* Figure out if the terminal supports escape sequences */
+    int probe_status = linenoiseProbe();
+    if (probe_status) { /* zero indicates success */
+        printf("\n"
+                "Your terminal application does not support escape sequences.\n"
+                "Line editing and history features are disabled.\n"
+                "On Windows, try using Putty instead.\n");
+        //linenoiseSetDumbMode(1);
 #if CONFIG_LOG_COLORS
-                /* Since the terminal doesn't support escape sequences,
-                  * don't use color codes in the prompt.
-                  */
-                prompt = "esp32> ";
+        /* Since the terminal doesn't support escape sequences,
+            * don't use color codes in the prompt.
+            */
+        prompt = "esp32> ";
 #endif //CONFIG_LOG_COLORS
         }
-
+        linenoiseAllowEmpty(0);
         /* Main loop */
-        while(true) {
-                /* Get a line using linenoise.
-                  * The line is returned when ENTER is pressed.
-                  */
-                char* line = linenoise(prompt);
-                if (line == NULL) { /* Ignore empty lines */
-                        continue;
-                }
+    while(true) {
+        /* Get a line using linenoise.
+            * The line is returned when ENTER is pressed.
+            */
+        char* line = linenoise(prompt);
+        if (line == NULL) { /* Ignore empty lines */
+                continue;
+        }
         /* Add the command to the history */
-                linenoiseHistoryAdd(line);
+        linenoiseHistoryAdd(line);
 #if CONFIG_STORE_HISTORY
-                /* Save command history to filesystem */
-                linenoiseHistorySave(HISTORY_PATH);
+        /* Save command history to filesystem */
+        linenoiseHistorySave(HISTORY_PATH);
 #endif
 
-                /* Try to run the command */
-                int ret;
-                esp_err_t err = esp_console_run(line, &ret);
-                if (err == ESP_ERR_NOT_FOUND) {
-                        printf("Unrecognized command\n");
-                } else if (err == ESP_ERR_INVALID_ARG) {
-                        // command was empty
-                } else if (err == ESP_OK && ret != ESP_OK) {
-                        printf("Command returned non-zero error code: 0x%x (%s)\n", ret, esp_err_to_name(ret));
-                } else if (err != ESP_OK) {
-                        printf("Internal error: %s\n", esp_err_to_name(err));
-                }
-        /* linenoise allocates line buffer on the heap, so need to free it */
-                linenoiseFree(line);
+        /* Try to run the command */
+        int ret;
+        esp_err_t err = esp_console_run(line, &ret);
+        if (err == ESP_ERR_NOT_FOUND) {
+                printf("Unrecognized command\n");
+        } else if (err == ESP_ERR_INVALID_ARG) {
+                // command was empty
+        } else if (err == ESP_OK && ret != ESP_OK) {
+                printf("Command returned non-zero error code: 0x%x (%s)\n", ret, esp_err_to_name(ret));
+        } else if (err != ESP_OK) {
+                printf("Internal error: %s\n", esp_err_to_name(err));
         }
-
-    ESP_LOGE(TAG, "Error or end-of-input, terminating console");
-    esp_console_deinit();
+        /* linenoise allocates line buffer on the heap, so need to free it */
+        linenoiseFree(line);
+    }
 }
