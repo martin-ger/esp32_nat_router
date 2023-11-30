@@ -634,7 +634,7 @@ void app_main(void)
     }
     free(lock);
 
-    //initialize_console_usb();
+    initialize_console();
 
     /* Register commands */
     esp_console_register_help_command();
@@ -665,67 +665,67 @@ void app_main(void)
     /* Prompt to be printed before each line.
      * This can be customized, made dynamic, etc.
      */
-//     const char* prompt = LOG_COLOR_I "esp32> " LOG_RESET_COLOR;
+    //     const char* prompt = LOG_COLOR_I "esp32> " LOG_RESET_COLOR;
 
-//     printf("\n"
-//            "ESP32 NAT ROUTER\n"
-//            "Type 'help' to get the list of commands.\n"
-//            "Use UP/DOWN arrows to navigate through command history.\n"
-//            "Press TAB when typing command name to auto-complete.\n");
+    //     printf("\n"
+           //            "ESP32 NAT ROUTER\n"
+           //            "Type 'help' to get the list of commands.\n"
+           //            "Use UP/DOWN arrows to navigate through command history.\n"
+           //            "Press TAB when typing command name to auto-complete.\n");
 
-//     if (strlen(ssid) == 0) {
-//          printf("\n"
-//                "Unconfigured WiFi\n"
-//                "Configure using 'set_sta' and 'set_ap' and restart.\n");       
-//     }
+    //     if (strlen(ssid) == 0) {
+         //          printf("\n"
+               //                "Unconfigured WiFi\n"
+               //                "Configure using 'set_sta' and 'set_ap' and restart.\n");       
+    //     }
 
-//     /* Figure out if the terminal supports escape sequences */
-//     int probe_status = linenoiseProbe();
-//     if (probe_status) { /* zero indicates success */
-//         printf("\n"
-//                "Your terminal application does not support escape sequences.\n"
-//                "Line editing and history features are disabled.\n"
-//                "On Windows, try using Putty instead.\n");
-//         linenoiseSetDumbMode(1);
+    //     /* Figure out if the terminal supports escape sequences */
+    //     int probe_status = linenoiseProbe();
+    //     if (probe_status) { /* zero indicates success */
+        //         printf("\n"
+               //                "Your terminal application does not support escape sequences.\n"
+               //                "Line editing and history features are disabled.\n"
+               //                "On Windows, try using Putty instead.\n");
+        //         linenoiseSetDumbMode(1);
 // #if CONFIG_LOG_COLORS
-//         /* Since the terminal doesn't support escape sequences,
-//          * don't use color codes in the prompt.
-//          */
-//         prompt = "esp32> ";
+        //         /* Since the terminal doesn't support escape sequences,
+         //          * don't use color codes in the prompt.
+         //          */
+        //         prompt = "esp32> ";
 // #endif //CONFIG_LOG_COLORS
-//     }
+    //     }
 
-//     /* Main loop */
-//     while(true) {
-//         /* Get a line using linenoise.
-//          * The line is returned when ENTER is pressed.
-//          */
-//         char* line = linenoise(prompt);
-//         if (line == NULL) { /* Ignore empty lines */
-//             continue;
-//         }
+    //     /* Main loop */
+    //     while(true) {
+        //         /* Get a line using linenoise.
+         //          * The line is returned when ENTER is pressed.
+         //          */
+        //         char* line = linenoise(prompt);
+        //         if (line == NULL) { /* Ignore empty lines */
+            //             continue;
+        //         }
 //         /* Add the command to the history */
-//         linenoiseHistoryAdd(line);
+        //         linenoiseHistoryAdd(line);
 // #if CONFIG_STORE_HISTORY
-//         /* Save command history to filesystem */
-//         linenoiseHistorySave(HISTORY_PATH);
+        //         /* Save command history to filesystem */
+        //         linenoiseHistorySave(HISTORY_PATH);
 // #endif
 
-//         /* Try to run the command */
-//         int ret;
-//         esp_err_t err = esp_console_run(line, &ret);
-//         if (err == ESP_ERR_NOT_FOUND) {
-//             printf("Unrecognized command\n");
-//         } else if (err == ESP_ERR_INVALID_ARG) {
-//             // command was empty
-//         } else if (err == ESP_OK && ret != ESP_OK) {
-//             printf("Command returned non-zero error code: 0x%x (%s)\n", ret, esp_err_to_name(ret));
-//         } else if (err != ESP_OK) {
-//             printf("Internal error: %s\n", esp_err_to_name(err));
-//         }
+        //         /* Try to run the command */
+        //         int ret;
+        //         esp_err_t err = esp_console_run(line, &ret);
+        //         if (err == ESP_ERR_NOT_FOUND) {
+            //             printf("Unrecognized command\n");
+        //         } else if (err == ESP_ERR_INVALID_ARG) {
+            //             // command was empty
+        //         } else if (err == ESP_OK && ret != ESP_OK) {
+            //             printf("Command returned non-zero error code: 0x%x (%s)\n", ret, esp_err_to_name(ret));
+        //         } else if (err != ESP_OK) {
+            //             printf("Internal error: %s\n", esp_err_to_name(err));
+        //         }
 //         /* linenoise allocates line buffer on the heap, so need to free it */
-//         linenoiseFree(line);
-//     }
+        //         linenoiseFree(line);
+    //     }
 
 //     ESP_LOGE(TAG, "Error or end-of-input, terminating console");
 //     esp_console_deinit();
