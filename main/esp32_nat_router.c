@@ -627,7 +627,7 @@ void app_main(void)
                 "Your terminal application does not support escape sequences.\n"
                 "Line editing and history features are disabled.\n"
                 "On Windows, try using Putty instead.\n");
-        //linenoiseSetDumbMode(1);
+        linenoiseSetDumbMode(1);
 #if CONFIG_LOG_COLORS
         /* Since the terminal doesn't support escape sequences,
             * don't use color codes in the prompt.
