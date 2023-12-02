@@ -15,6 +15,8 @@
 #include "esp_console.h"
 #include "esp_vfs_dev.h"
 #include "driver/uart.h"
+#include "esp_vfs_usb_serial_jtag.h"
+#include "driver/usb_serial_jtag.h"
 #include "linenoise/linenoise.h"
 #include "argtable3/argtable3.h"
 #include "esp_vfs_fat.h"
@@ -236,13 +238,14 @@ esp_err_t del_portmap(u8_t proto, u16_t mport) {
 
 static void initialize_console(void)
 {
-    /* Drain stdout before reconfiguring it */
-    fflush(stdout);
-    fsync(fileno(stdout));
-
     /* Disable buffering on stdin */
     setvbuf(stdin, NULL, _IONBF, 0);
 
+#if CONFIG_ESP_CONSOLE_UART_DEFAULT || CONFIG_ESP_CONSOLE_UART_CUSTOM
+    /* Drain stdout before reconfiguring it */
+    fflush(stdout);
+    fsync(fileno(stdout));
+    
     /* Minicom, screen, idf_monitor send CR when ENTER key is pressed */
     esp_vfs_dev_uart_port_set_rx_line_endings(0, ESP_LINE_ENDINGS_CR);
     /* Move the caret to the beginning of the next line on '\n' */
@@ -269,6 +272,29 @@ static void initialize_console(void)
 
     /* Tell VFS to use UART driver */
     esp_vfs_dev_uart_use_driver(CONFIG_ESP_CONSOLE_UART_NUM);
+#endif
+
+#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+    /* Enable non-blocking mode on stdin and stdout */
+    fcntl(fileno(stdout), F_SETFL, O_NONBLOCK);
+    fcntl(fileno(stdin), F_SETFL, O_NONBLOCK);
+
+    /* Minicom, screen, idf_monitor send CR when ENTER key is pressed */
+    esp_vfs_dev_usb_serial_jtag_set_rx_line_endings(ESP_LINE_ENDINGS_CR);
+
+    /* Move the caret to the beginning of the next line on '\n' */
+    esp_vfs_dev_usb_serial_jtag_set_tx_line_endings(ESP_LINE_ENDINGS_CRLF);
+    usb_serial_jtag_driver_config_t usb_serial_jtag_config = {
+        .tx_buffer_size = 256,
+        .rx_buffer_size = 256,
+    };
+
+    /* Install USB-SERIAL-JTAG driver for interrupt-driven reads and writes */
+    usb_serial_jtag_driver_install(&usb_serial_jtag_config);
+
+    /* Tell vfs to use usb-serial-jtag driver */
+    esp_vfs_usb_serial_jtag_use_driver();
+#endif
 
     /* Initialize the console */
     esp_console_config_t console_config = {
