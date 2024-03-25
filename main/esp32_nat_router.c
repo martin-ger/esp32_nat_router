@@ -394,7 +394,7 @@ const int CONNECTED_BIT = BIT0;
 #define JOIN_TIMEOUT_MS (2000)
 
 
-void wifi_init(const char* ssid, const char* ent_username, const char* ent_identity, const char* passwd, const char* static_ip, const char* subnet_mask, const char* gateway_addr, const char* ap_ssid, const char* ap_passwd, const char* ap_ip)
+void wifi_init(const uint8_t* mac, const char* ssid, const char* ent_username, const char* ent_identity, const char* passwd, const char* static_ip, const char* subnet_mask, const char* gateway_addr, const uint8_t* ap_mac, const char* ap_ssid, const char* ap_passwd, const char* ap_ip)
 {
     esp_netif_dns_info_t dnsserver;
     // esp_netif_dns_info_t dnsinfo;
@@ -484,11 +484,19 @@ void wifi_init(const char* ssid, const char* ent_username, const char* ent_ident
             esp_eap_client_set_password((uint8_t *)passwd, strlen(passwd)); //provide password
             esp_wifi_sta_enterprise_enable();
         }
+
+        if (mac != NULL) {
+            ESP_ERROR_CHECK(esp_wifi_set_mac(ESP_IF_WIFI_STA, mac));
+        }
     } else {
         ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP) );
     }
 
     ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &ap_config) );
+
+    if (ap_mac != NULL) {
+        ESP_ERROR_CHECK(esp_wifi_set_mac(ESP_IF_WIFI_AP, ap_mac));
+    }
 
 
     // Enable DNS (offer) for dhcp server
@@ -587,7 +595,7 @@ void app_main(void)
     get_portmap_tab();
 
     // Setup WIFI
-    wifi_init(ssid, ent_username, ent_identity, passwd, static_ip, subnet_mask, gateway_addr, ap_ssid, ap_passwd, ap_ip);
+    wifi_init(NULL, ssid, ent_username, ent_identity, passwd, static_ip, subnet_mask, gateway_addr, NULL, ap_ssid, ap_passwd, ap_ip);
 
     pthread_t t1;
     pthread_create(&t1, NULL, led_status_thread, NULL);
