@@ -394,7 +394,7 @@ const int CONNECTED_BIT = BIT0;
 #define JOIN_TIMEOUT_MS (2000)
 
 
-void wifi_init(const char* ssid, const char* ent_username, const char* ent_identity, const char* passwd, const char* static_ip, const char* subnet_mask, const char* gateway_addr, const char* ap_ssid, const char* ap_passwd, const char* ap_ip)
+void wifi_init(const uint8_t* mac, const char* ssid, const char* ent_username, const char* ent_identity, const char* passwd, const char* static_ip, const char* subnet_mask, const char* gateway_addr, const uint8_t* ap_mac, const char* ap_ssid, const char* ap_passwd, const char* ap_ip)
 {
     esp_netif_dns_info_t dnsserver;
     // esp_netif_dns_info_t dnsinfo;
@@ -485,12 +485,18 @@ void wifi_init(const char* ssid, const char* ent_username, const char* ent_ident
             esp_wifi_sta_enterprise_enable();
         }
 
-        ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &ap_config) );
+        if (mac != NULL) {
+            ESP_ERROR_CHECK(esp_wifi_set_mac(ESP_IF_WIFI_STA, mac));
+        }
     } else {
         ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP) );
-        ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &ap_config) );        
     }
 
+    ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &ap_config) );
+
+    if (ap_mac != NULL) {
+        ESP_ERROR_CHECK(esp_wifi_set_mac(ESP_IF_WIFI_AP, ap_mac));
+    }
 
 
     // Enable DNS (offer) for dhcp server
@@ -517,6 +523,7 @@ void wifi_init(const char* ssid, const char* ent_username, const char* ent_ident
     }
 }
 
+uint8_t* mac = NULL;
 char* ssid = NULL;
 char* ent_username = NULL;
 char* ent_identity = NULL;
@@ -524,6 +531,7 @@ char* passwd = NULL;
 char* static_ip = NULL;
 char* subnet_mask = NULL;
 char* gateway_addr = NULL;
+uint8_t* ap_mac = NULL;
 char* ap_ssid = NULL;
 char* ap_passwd = NULL;
 char* ap_ip = NULL;
@@ -545,6 +553,7 @@ void app_main(void)
     ESP_LOGI(TAG, "Command history disabled");
 #endif
 
+    get_config_param_blob("mac", &mac, 6);
     get_config_param_str("ssid", &ssid);
     if (ssid == NULL) {
         ssid = param_set_default("");
@@ -573,6 +582,7 @@ void app_main(void)
     if (gateway_addr == NULL) {
         gateway_addr = param_set_default("");
     }
+    get_config_param_blob("ap_mac", &ap_mac, 6);
     get_config_param_str("ap_ssid", &ap_ssid);
     if (ap_ssid == NULL) {
         ap_ssid = param_set_default("ESP32_NAT_Router");
@@ -589,7 +599,7 @@ void app_main(void)
     get_portmap_tab();
 
     // Setup WIFI
-    wifi_init(ssid, ent_username, ent_identity, passwd, static_ip, subnet_mask, gateway_addr, ap_ssid, ap_passwd, ap_ip);
+    wifi_init(mac, ssid, ent_username, ent_identity, passwd, static_ip, subnet_mask, gateway_addr, ap_mac, ap_ssid, ap_passwd, ap_ip);
 
     pthread_t t1;
     pthread_create(&t1, NULL, led_status_thread, NULL);

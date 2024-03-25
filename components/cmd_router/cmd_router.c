@@ -39,6 +39,7 @@ static const char *TAG = "cmd_router";
 
 static void register_set_sta(void);
 static void register_set_sta_static(void);
+static void register_set_mac(void);
 static void register_set_ap(void);
 static void register_set_ap_ip(void);
 static void register_show(void);
@@ -115,7 +116,7 @@ esp_err_t get_config_param_int(char* name, int* param)
     return ESP_OK;
 }
 
-esp_err_t get_config_param_blob(char* name, uint8_t* blob,  size_t blob_len)
+esp_err_t get_config_param_blob(char* name, uint8_t** blob, size_t blob_len)
 {
     nvs_handle_t nvs;
 
@@ -126,7 +127,8 @@ esp_err_t get_config_param_blob(char* name, uint8_t* blob,  size_t blob_len)
             if (len != blob_len) {
                 return ESP_ERR_NVS_INVALID_LENGTH;
             }
-            err = nvs_get_blob(nvs, name, blob, &len);
+            *blob = (uint8_t *)malloc(len);
+            err = nvs_get_blob(nvs, name, *blob, &len);
             ESP_LOGI(TAG, "%s: %d", name, len);
         } else {
             return err;
@@ -142,6 +144,7 @@ void register_router(void)
 {
     register_set_sta();
     register_set_sta_static();
+    register_set_mac();
     register_set_ap();
     register_set_ap_ip();
     register_portmap();
@@ -289,6 +292,81 @@ static void register_set_sta_static(void)
         .argtable = &set_sta_static_arg
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
+}
+
+/** Arguments used by 'set_mac' function */
+static struct {
+    struct arg_int *mac0;
+    struct arg_int *mac1;
+    struct arg_int *mac2;
+    struct arg_int *mac3;
+    struct arg_int *mac4;
+    struct arg_int *mac5;
+    struct arg_end *end;
+} set_mac_arg;
+
+esp_err_t set_mac(const char *key, const char *interface, int argc, char **argv) {
+    esp_err_t err;
+    nvs_handle_t nvs;
+
+    int nerrors = arg_parse(argc, argv, (void **) &set_mac_arg);
+    if (nerrors != 0) {
+        arg_print_errors(stderr, set_mac_arg.end, argv[0]);
+        return 1;
+    }
+
+    err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    uint8_t mac[] = {set_mac_arg.mac0->ival[0], set_mac_arg.mac1->ival[0], set_mac_arg.mac2->ival[0], set_mac_arg.mac3->ival[0], set_mac_arg.mac4->ival[0], set_mac_arg.mac5->ival[0]};
+    err = nvs_set_blob(nvs, key, mac, sizeof(mac));
+    if (err == ESP_OK) {
+        err = nvs_commit(nvs);
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "%s mac address %02X:%02X:%02X:%02X:%02X:%02X stored.", interface, mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+        }
+    }
+    nvs_close(nvs);
+    return err;
+}
+
+int set_sta_mac(int argc, char **argv) {
+    return set_mac("mac", "STA", argc, argv);
+}
+
+int set_ap_mac(int argc, char **argv) {
+    return set_mac("ap_mac", "AP", argc, argv);
+}
+
+static void register_set_mac(void)
+{
+    set_mac_arg.mac0 = arg_int1(NULL, NULL, "<octet>", "First octet");
+    set_mac_arg.mac1 = arg_int1(NULL, NULL, "<octet>", "Second octet");
+    set_mac_arg.mac2 = arg_int1(NULL, NULL, "<octet>", "Third octet");
+    set_mac_arg.mac3 = arg_int1(NULL, NULL, "<octet>", "Fourth octet");
+    set_mac_arg.mac4 = arg_int1(NULL, NULL, "<octet>", "Fifth octet");
+    set_mac_arg.mac5 = arg_int1(NULL, NULL, "<octet>", "Sixth octet");
+    set_mac_arg.end = arg_end(6);
+
+    const esp_console_cmd_t cmd_sta = {
+        .command = "set_sta_mac",
+        .help = "Set MAC address of the STA interface",
+        .hint = NULL,
+        .func = &set_sta_mac,
+        .argtable = &set_mac_arg
+    };
+    ESP_ERROR_CHECK( esp_console_cmd_register(&cmd_sta) );
+
+    const esp_console_cmd_t cmd_ap = {
+        .command = "set_ap_mac",
+        .help = "Set MAC address of the AP interface",
+        .hint = NULL,
+        .func = &set_ap_mac,
+        .argtable = &set_mac_arg
+    };
+    ESP_ERROR_CHECK( esp_console_cmd_register(&cmd_ap) );
 }
 
 /** Arguments used by 'set_ap' function */
