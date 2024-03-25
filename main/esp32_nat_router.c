@@ -484,13 +484,11 @@ void wifi_init(const char* ssid, const char* ent_username, const char* ent_ident
             esp_eap_client_set_password((uint8_t *)passwd, strlen(passwd)); //provide password
             esp_wifi_sta_enterprise_enable();
         }
-
-        ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &ap_config) );
     } else {
         ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP) );
-        ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &ap_config) );        
     }
 
+    ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &ap_config) );
 
 
     // Enable DNS (offer) for dhcp server
