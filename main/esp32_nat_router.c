@@ -531,6 +531,7 @@ char* passwd = NULL;
 char* static_ip = NULL;
 char* subnet_mask = NULL;
 char* gateway_addr = NULL;
+uint8_t* ap_mac = NULL;
 char* ap_ssid = NULL;
 char* ap_passwd = NULL;
 char* ap_ip = NULL;
@@ -581,6 +582,7 @@ void app_main(void)
     if (gateway_addr == NULL) {
         gateway_addr = param_set_default("");
     }
+    get_config_param_blob("ap_mac", &ap_mac, 6);
     get_config_param_str("ap_ssid", &ap_ssid);
     if (ap_ssid == NULL) {
         ap_ssid = param_set_default("ESP32_NAT_Router");
@@ -597,7 +599,7 @@ void app_main(void)
     get_portmap_tab();
 
     // Setup WIFI
-    wifi_init(mac, ssid, ent_username, ent_identity, passwd, static_ip, subnet_mask, gateway_addr, NULL, ap_ssid, ap_passwd, ap_ip);
+    wifi_init(mac, ssid, ent_username, ent_identity, passwd, static_ip, subnet_mask, gateway_addr, ap_mac, ap_ssid, ap_passwd, ap_ip);
 
     pthread_t t1;
     pthread_create(&t1, NULL, led_status_thread, NULL);
