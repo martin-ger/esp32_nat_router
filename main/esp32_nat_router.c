@@ -523,6 +523,7 @@ void wifi_init(const uint8_t* mac, const char* ssid, const char* ent_username, c
     }
 }
 
+uint8_t* mac = NULL;
 char* ssid = NULL;
 char* ent_username = NULL;
 char* ent_identity = NULL;
@@ -551,6 +552,7 @@ void app_main(void)
     ESP_LOGI(TAG, "Command history disabled");
 #endif
 
+    get_config_param_blob("mac", &mac, 6);
     get_config_param_str("ssid", &ssid);
     if (ssid == NULL) {
         ssid = param_set_default("");
@@ -595,7 +597,7 @@ void app_main(void)
     get_portmap_tab();
 
     // Setup WIFI
-    wifi_init(NULL, ssid, ent_username, ent_identity, passwd, static_ip, subnet_mask, gateway_addr, NULL, ap_ssid, ap_passwd, ap_ip);
+    wifi_init(mac, ssid, ent_username, ent_identity, passwd, static_ip, subnet_mask, gateway_addr, NULL, ap_ssid, ap_passwd, ap_ip);
 
     pthread_t t1;
     pthread_create(&t1, NULL, led_status_thread, NULL);
