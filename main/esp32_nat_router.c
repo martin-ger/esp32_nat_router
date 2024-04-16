@@ -35,6 +35,7 @@
 #include "dhcpserver/dhcpserver_options.h"
 
 #include "cmd_decl.h"
+#include "led_status.h"
 #include <esp_http_server.h>
 
 #if !IP_NAPT
@@ -323,27 +324,6 @@ static void initialize_console(void)
     /* Load command history from filesystem */
     linenoiseHistoryLoad(HISTORY_PATH);
 #endif
-}
-
-void * led_status_thread(void * p)
-{
-    gpio_reset_pin(BLINK_GPIO);
-    gpio_set_direction(BLINK_GPIO, GPIO_MODE_OUTPUT);
-
-    while (true)
-    {
-        gpio_set_level(BLINK_GPIO, ap_connect);
-
-        for (int i = 0; i < connect_count; i++)
-        {
-            gpio_set_level(BLINK_GPIO, 1 - ap_connect);
-            vTaskDelay(50 / portTICK_PERIOD_MS);
-            gpio_set_level(BLINK_GPIO, ap_connect);
-            vTaskDelay(50 / portTICK_PERIOD_MS);
-        }
-
-        vTaskDelay(1000 / portTICK_PERIOD_MS);
-    }
 }
 
 static void wifi_event_handler(void* arg, esp_event_base_t event_base,
