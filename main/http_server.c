@@ -108,12 +108,12 @@ static esp_err_t index_get_handler(httpd_req_t *req)
                             //Password
                             argv[argc++] = param2;
                             //Username
-                            if(strlen(param2)) {
+                            if(strlen(param3)) {
                                 argv[argc++] = "-u";
                                 argv[argc++] = param3;
                             }
                             //Identity
-                            if(strlen(param3)) {
+                            if(strlen(param4)) {
                                 argv[argc++] = "-a";
                                 argv[argc++] = param4;
                             }
