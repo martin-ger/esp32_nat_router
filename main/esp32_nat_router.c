@@ -412,8 +412,8 @@ void wifi_init(const uint8_t* mac, const char* ssid, const char* ent_username, c
         ipInfo_sta.ip.addr = esp_ip4addr_aton(static_ip);
         ipInfo_sta.gw.addr = esp_ip4addr_aton(gateway_addr);
         ipInfo_sta.netmask.addr = esp_ip4addr_aton(subnet_mask);
-        esp_netif_dhcpc_stop(ESP_IF_WIFI_STA); // Don't run a DHCP client
-        esp_netif_set_ip_info(ESP_IF_WIFI_STA, &ipInfo_sta);
+        esp_netif_dhcpc_stop(wifiSTA); // Don't run a DHCP client
+        esp_netif_set_ip_info(wifiSTA, &ipInfo_sta);
         apply_portmap_tab();
     }
 
