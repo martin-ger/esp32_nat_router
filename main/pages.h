@@ -64,6 +64,14 @@ color: #fff;\
 </style>\
 <body>\
 <div id='config'>\
+<script>\
+if (window.location.search.substr(1) != '')\
+{\
+document.getElementById('config').display = 'none';\
+document.body.innerHTML ='<h1>ESP32 NAT Router Config</h1>The new settings have been sent to the device.<br/>The page will refresh soon automatically...';\
+setTimeout(\"location.href = '/'\",10000);\
+}\
+</script>\
 <h1>ESP32 NAT Router Config</h1>\
 <h2>AP Settings (Wi-Fi from the ESP32)</h2>\
 <form action='' method='GET'>\
