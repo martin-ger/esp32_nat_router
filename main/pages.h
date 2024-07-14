@@ -150,6 +150,35 @@ setTimeout(\"location.href = '/'\",10000);\
 </small>\
 </form>\
 \
+<h2>Portmap</h2>\
+<p>%s</p>\
+<form action='' method='GET'>\
+<table>\
+<tr>\
+<td>TCP/UDP</td>\
+<td><input type='text' name='add' placeholder='TCP or UDP'/></td>\
+</tr>\
+<tr>\
+<td>External port</td>\
+<td><input type='text' name='ex_port' placeholder='External port'/></td>\
+</tr>\
+<tr>\
+<td colspan='2'>Leave blank for delete portmap</td>\
+</tr>\
+<tr>\
+<td>Internal IP</td>\
+<td><input type='text' name='in_ip' placeholder='Internal IP, blank to delete portmap'/></td>\
+</tr>\
+<tr>\
+<td>Internal port</td>\
+<td><input type='text' name='in_port' placeholder='Internal port, blank to delete portmap'/></td>\
+</tr>\
+<tr>\
+<td></td>\
+<td><input type='submit' value='Add/Del' class='ok-button'/></td>\
+</tr>\
+</table>\
+</form>\
 <h2>Device Management</h2>\
 <form action='' method='GET'>\
 <table>\

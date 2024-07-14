@@ -60,6 +60,7 @@ const int WIFI_CONNECTED_BIT = BIT0;
 
 #define DEFAULT_AP_IP "192.168.4.1"
 #define DEFAULT_DNS "8.8.8.8"
+#define MAX_PORTMAP_INFO_LENGTH 40
 
 /* Global vars */
 uint16_t connect_count = 0;
@@ -234,6 +235,42 @@ esp_err_t del_portmap(u8_t proto, u16_t mport) {
         }
     }
     return ESP_OK;
+}
+
+void concatenate_strings(char *str1, const char *str2) {
+    while (*str1 != '\0')
+    {
+        str1++;
+    }
+
+    // Copy characters from the second string to the end of
+    // the first string
+    while (*str2 != '\0')
+    {
+        *str1 = *str2;
+        str1++;
+        str2++;
+    }
+
+    // Ensure the resulting string is null-terminated
+    *str1 = '\0';
+}
+
+void get_portmap_info(char **param) {
+    *param = (char *)malloc(MAX_PORTMAP_INFO_LENGTH * IP_PORTMAP_MAX * sizeof(char));
+    for (int i = 0; i < IP_PORTMAP_MAX; i++)
+     {
+        if (portmap_tab[i].valid)
+         {
+            ip4_addr_t addr;
+            addr.addr = my_ip;
+            addr.addr = portmap_tab[i].daddr;
+            char* portmap = (char*)malloc(MAX_PORTMAP_INFO_LENGTH * sizeof(char));
+            snprintf(portmap, MAX_PORTMAP_INFO_LENGTH * sizeof(char), "<br>%s:%d->" IPSTR ":%d", portmap_tab[i].proto == PROTO_TCP ? "TCP " : "UDP ", portmap_tab[i].mport, IP2STR(&addr), portmap_tab[i].dport);
+            concatenate_strings(*param, portmap);
+            free(portmap);
+        }
+    }
 }
 
 static void initialize_console(void)
@@ -535,6 +572,7 @@ uint8_t* ap_mac = NULL;
 char* ap_ssid = NULL;
 char* ap_passwd = NULL;
 char* ap_ip = NULL;
+char* portmap_info = NULL;
 
 char* param_set_default(const char* def_val) {
     char * retval = malloc(strlen(def_val)+1);
@@ -597,6 +635,8 @@ void app_main(void)
     }
 
     get_portmap_tab();
+
+    get_portmap_info(&portmap_info);
 
     // Setup WIFI
     wifi_init(mac, ssid, ent_username, ent_identity, passwd, static_ip, subnet_mask, gateway_addr, ap_mac, ap_ssid, ap_passwd, ap_ip);

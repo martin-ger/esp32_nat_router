@@ -144,6 +144,38 @@ static esp_err_t index_get_handler(httpd_req_t *req)
                     }
                 }
             }
+            if (httpd_query_key_value(buf, "add", param1, sizeof(param1)) == ESP_OK) {
+                ESP_LOGI(TAG, "Found URL query parameter => add=%s", param1);
+                preprocess_string(param1);
+                if (httpd_query_key_value(buf, "ex_port", param2, sizeof(param2)) == ESP_OK) {
+                    ESP_LOGI(TAG, "Found URL query parameter => ex_port=%s", param2);
+                    preprocess_string(param2);
+                    if (httpd_query_key_value(buf, "in_ip", param3, sizeof(param3)) == ESP_OK) {
+                        ESP_LOGI(TAG, "Found URL query parameter => in_ip=%s", param3);
+                        preprocess_string(param3);
+                        if (httpd_query_key_value(buf, "in_port", param4, sizeof(param4)) == ESP_OK) {
+                            ESP_LOGI(TAG, "Found URL query parameter => in_port=%s", param4);
+                            preprocess_string(param4);
+                            int argc = 6;
+                            char *argv[6];
+                            argv[0] = "portmap";
+                            argv[2] = param1;
+                            argv[3] = param2;
+                            if (strlen(param3)) {
+                                argv[4] = param3;
+                                argv[5] = param4;
+                                argv[1] = "add";
+                            } else {
+                                argv[1] = "del";
+                                argv[4] = "192.168.4.1";
+                                argv[5] = "80";
+                            }
+                            portmap(argc, argv);
+                            esp_timer_start_once(restart_timer, 500000);
+                        }
+                    }
+                }
+            }
         }
         free(buf);
     }
@@ -223,6 +255,7 @@ httpd_handle_t start_webserver(void)
         strlen(safe_passwd) +
         strlen(safe_ent_username) +
         strlen(safe_ent_identity) +
+        strlen(portmap_info) +
         256;
     char* config_page = malloc(sizeof(char) * page_len);
 
@@ -230,7 +263,7 @@ httpd_handle_t start_webserver(void)
         config_page, page_len, config_page_template,
         safe_ap_ssid, safe_ap_passwd,
         safe_ssid, safe_passwd, safe_ent_username, safe_ent_identity,
-            static_ip, subnet_mask, gateway_addr);
+            static_ip, subnet_mask, gateway_addr, portmap_info);
     indexp.user_ctx = config_page;
 
     free(safe_ap_ssid);
