@@ -156,7 +156,7 @@ setTimeout(\"location.href = '/'\",10000);\
 <table>\
 <tr>\
 <td>TCP/UDP</td>\
-<td><input type='text' name='add' placeholder='TCP or UDP'/></td>\
+<td><select name='portmethod'><option value='TCP'>TCP</option><option value='UDP'>UDP</option></select></td>\
 </tr>\
 <tr>\
 <td>External port</td>\
