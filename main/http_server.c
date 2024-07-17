@@ -108,12 +108,12 @@ static esp_err_t index_get_handler(httpd_req_t *req)
               //Password
               argv[argc++] = param2;
               //Username
-              if (strlen(param2)) {
+              if (strlen(param3)) {
                 argv[argc++] = "-u";
                 argv[argc++] = param3;
               }
               //Identity
-              if (strlen(param3)) {
+              if (strlen(param4)) {
                 argv[argc++] = "-a";
                 argv[argc++] = param4;
               }
@@ -144,10 +144,10 @@ static esp_err_t index_get_handler(httpd_req_t *req)
           }
         }
       }
-      auto portmethodOK = httpd_query_key_value(buf, "portmethod", param1, sizeof(param1));
-      auto wanportOK = httpd_query_key_value(buf, "wan_port", param2, sizeof(param2));
-      auto lanipOK = httpd_query_key_value(buf, "lan_ip", param3, sizeof(param3));
-      auto lanportOK = httpd_query_key_value(buf, "lan_port", param4, sizeof(param4));
+      int portmethodOK = httpd_query_key_value(buf, "portmethod", param1, sizeof(param1));
+      int wanportOK = httpd_query_key_value(buf, "wan_port", param2, sizeof(param2));
+      int lanipOK = httpd_query_key_value(buf, "lan_ip", param3, sizeof(param3));
+      int lanportOK = httpd_query_key_value(buf, "lan_port", param4, sizeof(param4));
       if (portmethodOK == ESP_OK && wanportOK == ESP_OK && lanipOK == ESP_OK && lanportOK == ESP_OK) {
         preprocess_string(param1);
         preprocess_string(param2);
