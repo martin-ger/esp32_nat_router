@@ -1,0 +1,160 @@
+name: Build Releases
+
+on: [push]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:     
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.platformio/.cache
+          key: ${{ runner.os }}-pio
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+      - name: Install PlatformIO Core
+        run: pip install --upgrade platformio
+      - name: Set environment variables
+        run: echo "VERSION=$(head -1 version)" >> $GITHUB_ENV
+      - name: Check if Git-Tag already exist
+        run: |
+            TAG="v${{ env.VERSION }}"
+            if git show-ref --tags --verify --quiet "refs/tags/${TAG}" && [[ "${TAG}" != *"DEV"* ]]; then
+              echo "Tag ${TAG} already exists"
+              exit 1
+            else
+              echo "Tag ${TAG} does not exist or is DEV-Branch"
+            fi   
+      - name: Check if version file contains linebreak at the end
+        run: |
+          if [ -n "$(tail -c 1 "version")" ]; then
+            echo "The version file has no linebreak at the end"
+            exit 1
+          fi                
+      - name: Update hash in Global properties
+        run: |
+          sed -i -e 's|*GLOBAL_HASH = "\(.*\)";|*GLOBAL_HASH = "'"$(git rev-parse --short HEAD)"'";|g'   components/cmd_system/cmd_system.c  
+          sed -i -e 's/DEV-VERSION/${{ env.VERSION }}/g' CMakeLists.txt    
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install htmlmin esptool
+      - name: Minify HTML files
+        run: python .github/workflows/shrinkHTML.py
+        shell: sh
+      - name: Build ESP32 firmware
+        run: platformio run -e esp32dev
+      - name: Build one binary for ESP32
+        run: |
+          folder=.pio/build/esp32dev
+          chip=esp32dev
+          mkdir -p release/ota/ESP32/
+          cp version release/ota/
+          cp $folder/firmware.bin release/ota/ESP32/firmware.bin 
+          mv $folder/firmware.bin $folder/${chip}nat_extended_v${{ env.VERSION }}.bin
+          esptool.py --chip $chip merge_bin -o $folder/${chip}nat_extended_full_v${{ env.VERSION }}.bin --flash_freq keep --flash_size keep 0x1000 $folder/bootloader.bin 0x10000 $folder/${chip}nat_extended_v${{ env.VERSION }}.bin 0x8000 $folder/partitions.bin
+          esptool.py --chip $chip merge_bin -o $folder/${chip}nat_extended_full_v${{ env.VERSION }}.bin --flash_freq keep --flash_size keep 0x1000 $folder/bootloader.bin 0x10000 $folder/${chip}nat_extended_v${{ env.VERSION }}.bin 0x8000 $folder/partitions.bin
+          mkdir -p release
+          esptool.py --chip $chip merge_bin -o $folder/${chip}nat_extended_full_v${{ env.VERSION }}.bin --flash_freq keep --flash_size keep 0x1000 $folder/bootloader.bin 0x10000 $folder/${chip}nat_extended_v${{ env.VERSION }}.bin 0x8000 $folder/partitions.bin          
+          mkdir -p release
+          zip -j release/${chip}nat_extended_update_v${{ env.VERSION }}.zip $folder/${chip}nat_extended_v${{ env.VERSION }}.bin
+          zip -j release/${chip}nat_extended_full_v${{ env.VERSION }}.zip $folder/${chip}nat_extended_full_v${{ env.VERSION }}.bin
+
+      - name: Build ESP32 C3 firmware
+        run: platformio run -e esp32-c3-devkitm-1
+      - name: Build one binary for ESP32 C3
+        run: |
+          folder=.pio/build/esp32-c3-devkitm-1
+          chip=esp32-c3-devkitm-1
+          mkdir -p release/ota/ESP32-C3/
+          cp $folder/firmware.bin release/ota/ESP32-C3/firmware.bin 
+          mv $folder/firmware.bin $folder/${chip}nat_extended_v${{ env.VERSION }}.bin
+          esptool.py --chip $chip merge_bin -o $folder/${chip}nat_extended_full_v${{ env.VERSION }}.bin --flash_freq keep --flash_size keep 0x0 $folder/bootloader.bin 0x10000 $folder/${chip}nat_extended_v${{ env.VERSION }}.bin 0x8000 $folder/partitions.bin
+          mkdir -p release/
+          zip -j release/${chip}nat_extended_update_v${{ env.VERSION }}.zip $folder/${chip}nat_extended_v${{ env.VERSION }}.bin
+          zip -j release/${chip}nat_extended_full_v${{ env.VERSION }}.zip $folder/${chip}nat_extended_full_v${{ env.VERSION }}.bin
+      - name: Build ESP32 S2 firmware
+        run: platformio run -e esp32-s2
+      - name: Build one binary for ESP32 S2
+        run: |
+          folder=.pio/build/esp32-s2
+          chip=esp32s2
+          mkdir -p release/ota/ESP32-S2/
+          cp $folder/firmware.bin release/ota/ESP32-S2/firmware.bin 
+          mv $folder/firmware.bin $folder/${chip}nat_extended_v${{ env.VERSION }}.bin
+          esptool.py --chip $chip merge_bin -o $folder/${chip}nat_extended_full_v${{ env.VERSION }}.bin --flash_freq keep --flash_size keep 0x1000 $folder/bootloader.bin 0x10000 $folder/${chip}nat_extended_v${{ env.VERSION }}.bin 0x8000 $folder/partitions.bin
+          mkdir -p release
+          zip -j release/${chip}nat_extended_update_v${{ env.VERSION }}.zip $folder/${chip}nat_extended_v${{ env.VERSION }}.bin
+          zip -j release/${chip}nat_extended_full_v${{ env.VERSION }}.zip $folder/${chip}nat_extended_full_v${{ env.VERSION }}.bin
+      - name: Build ESP32 S3 firmware
+        run: platformio run -e esp32-s3
+      - name: Build one binary for ESP32 S3
+        run: |
+          folder=.pio/build/esp32-s3
+          chip=esp32-s3
+          mkdir -p release/ota/ESP32-S3/
+          cp $folder/firmware.bin release/ota/ESP32-S3/firmware.bin 
+          mv $folder/firmware.bin $folder/${chip}nat_extended_v${{ env.VERSION }}.bin
+          esptool.py --chip $chip merge_bin -o $folder/${chip}nat_extended_full_v${{ env.VERSION }}.bin --flash_freq keep --flash_size keep 0x1000 $folder/bootloader.bin 0x10000 $folder/${chip}nat_extended_v${{ env.VERSION }}.bin 0x8000 $folder/partitions.bin
+          mkdir -p release
+          zip -j release/${chip}nat_extended_update_v${{ env.VERSION }}.zip $folder/${chip}nat_extended_v${{ env.VERSION }}.bin
+          zip -j release/${chip}nat_extended_full_v${{ env.VERSION }}.zip $folder/${chip}nat_extended_full_v${{ env.VERSION }}.bin
+      - name: Build ESP32 C6 firmware
+        run: platformio run -e esp32-c6
+      - name: Build one binary for ESP32 C6
+        run: |
+          folder=.pio/build/esp32-c6
+          chip=esp32c6
+          mkdir -p release/ota/ESP32-C6/
+          cp $folder/firmware.bin release/ota/ESP32-C6/firmware.bin 
+          mv $folder/firmware.bin $folder/${chip}nat_extended_v${{ env.VERSION }}.bin
+          esptool.py --chip $chip merge_bin -o $folder/${chip}nat_extended_full_v${{ env.VERSION }}.bin --flash_freq keep --flash_size keep 0x0 $folder/bootloader.bin 0x10000 $folder/${chip}nat_extended_v${{ env.VERSION }}.bin 0x8000 $folder/partitions.bin
+          mkdir -p release/
+          zip -j release/${chip}nat_extended_update_v${{ env.VERSION }}.zip $folder/${chip}nat_extended_v${{ env.VERSION }}.bin
+          zip -j release/${chip}nat_extended_full_v${{ env.VERSION }}.zip $folder/${chip}nat_extended_full_v${{ env.VERSION }}.bin
+      - name: Create draft release
+        uses: "marvinpinto/action-automatic-releases@latest"
+        if: github.ref == 'refs/heads/master'
+        with:
+          repo_token: "${{ secrets.GITHUB_TOKEN }}"
+          prerelease: false
+          draft: true
+          automatic_release_tag: v${{ env.VERSION }}
+          title: v${{ env.VERSION }}
+          files: |
+            release/*.zip
+      - name: Create changelog from version file
+        if: github.ref == 'refs/heads/master'
+        run: tail -n +3 version | sed 's/^/- /' > changelog           
+      - name: Set changelog
+        if: github.ref == 'refs/heads/master'
+        uses: ncipollo/release-action@v1
+        with:
+          allowUpdates: true
+          name: v${{ env.VERSION }}
+          tag: v${{ env.VERSION }}
+          draft: true
+          bodyFile: "changelog"             
+      - name: Set dev branch variable
+        if: github.ref == 'refs/heads/dev'
+        run: |
+          echo "RELEASE_BRANCH=releases-staging" >> $GITHUB_ENV  
+      - name: Set master branch variable
+        if: github.ref == 'refs/heads/master'
+        run: |
+            echo "RELEASE_BRANCH=releases-production" >> $GITHUB_ENV                       
+      - name: Deploy to Github Pages
+        if: github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/master'
+        uses: JamesIves/github-pages-deploy-action@v4        
+        with:
+          folder: release/ota/            
+          branch: ${{env.RELEASE_BRANCH}}
+ 
