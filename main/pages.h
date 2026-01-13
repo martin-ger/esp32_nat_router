@@ -64,7 +64,6 @@ color: #fff;\
 </style>\
 <body>\
 <div id='config'>\
-<h1>ESP32 NAT Router Config</h1>\
 <script>\
 if (window.location.search.substr(1) != '')\
 {\
@@ -73,7 +72,8 @@ document.body.innerHTML ='<h1>ESP32 NAT Router Config</h1>The new settings have 
 setTimeout(\"location.href = '/'\",10000);\
 }\
 </script>\
-<h2>AP Settings (the new network)</h2>\
+<h1>ESP32 NAT Router Config</h1>\
+<h2>AP Settings (Wi-Fi from the ESP32)</h2>\
 <form action='' method='GET'>\
 <table>\
 <tr>\
@@ -90,11 +90,11 @@ setTimeout(\"location.href = '/'\",10000);\
 </tr>\
 </table>\
 <small>\
-<i>Password </i>less than 8 chars = open<br />\
+<i>Password </i>less than 8 chars = No Authentication Required (Open)<br />\
 </small>\
 </form>\
-\
-<h2>STA Settings (uplink WiFi network)</h2>\
+<hr>\
+<h2>STA Settings (Uplink Wi-Fi Network)</h2>\
 <form action='' method='GET'>\
 <table>\
 <tr>\
@@ -120,10 +120,9 @@ setTimeout(\"location.href = '/'\",10000);\
 <td></td>\
 <td><input type='submit' value='Connect' class='ok-button'/></td>\
 </tr>\
-\
 </table>\
 </form>\
-\
+<hr>\
 <h2>STA Static IP Settings</h2>\
 <form action='' method='GET'>\
 <table>\
@@ -143,13 +142,41 @@ setTimeout(\"location.href = '/'\",10000);\
 <td></td>\
 <td><input type='submit' value='Connect' class='ok-button'/></td>\
 </tr>\
-\
 </table>\
 <small>\
 <i>Leave it in blank if you want your ESP32 to get an IP using DHCP</i>\
 </small>\
 </form>\
-\
+<hr>\
+<h2>Portmap</h2>\
+<p>Currently Opened Ports:</p>\
+<p>%s</p>\
+<form action='' method='GET'>\
+<table>\
+<tr>\
+<td>TCP/UDP</td>\
+<td><select name='portmethod'><option value='TCP'>TCP</option><option value='UDP'>UDP</option></select></td>\
+</tr>\
+<tr>\
+<td>External port</td>\
+<td><input type='text' name='wan_port' placeholder='External Port'/></td>\
+</tr>\
+<tr>\
+<td>Internal IP</td>\
+<td><input type='text' name='lan_ip' placeholder='LAN IP'/></td>\
+</tr>\
+<tr>\
+<td>Internal port</td>\
+<td><input type='text' name='lan_port' placeholder='LAN Port'/></td>\
+</tr>\
+<tr>\
+<td></td>\
+<td><input type='submit' value='Add/Del' class='ok-button'/></td>\
+</tr>\
+</table>\
+<small>To delete a port, Leave both LAN IP and port blank.</small>\
+</form>\
+<hr>\
 <h2>Device Management</h2>\
 <form action='' method='GET'>\
 <table>\
