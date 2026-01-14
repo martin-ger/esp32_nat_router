@@ -1,402 +1,176 @@
-#define CONFIG_PAGE "<html>\
-<head></head>\
-<meta name='viewport' content='width=device-width, initial-scale=1'>\
+/* Index Page - System Status with navigation buttons */
+#define INDEX_PAGE "<html>\
+<head>\
+<meta name='viewport' content='width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0'>\
+<meta charset='UTF-8'>\
+<title>ESP32 NAT Router</title>\
+</head>\
 <style>\
+* {\
+box-sizing: border-box;\
+margin: 0;\
+padding: 0;\
+}\
+\
 body {\
-font-family: apercu-pro, -apple-system, system-ui, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;\
-padding: 1em;\
-line-height: 2em;\
-font-weight: 100;\
-}\
-\
-td {\
-font-weight: 100;\
-min-height: 24px;\
-}\
-\
-td:first-child { \
-text-align: right;\
-min-width: 100px;\
-padding-right: 10px;\
+font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;\
+background: linear-gradient(135deg, #1a1a2e 0%%, #16213e 100%%);\
+color: #e0e0e0;\
+padding: 1rem;\
+min-height: 100vh;\
+line-height: 1.6;\
 }\
 \
 h1 {\
-font-size: 1.5em;\
-font-weight: 200;\
+font-size: 1.75rem;\
+font-weight: 600;\
+color: #00d9ff;\
+margin-bottom: 0.5rem;\
+text-align: center;\
+text-shadow: 0 0 20px rgba(0, 217, 255, 0.3);\
 }\
 \
 h2 {\
-font-size: 1.2em;\
-font-weight: 200;\
-margin-left: 5px;\
+font-size: 1.25rem;\
+font-weight: 500;\
+color: #00d9ff;\
+margin: 1.5rem 0 1rem 0;\
 }\
 \
-input {\
-border: 1px solid rgb(196, 196, 196);\
-color: rgb(76, 76, 76);\
-width: 240px;\
-border-radius: 3px;\
-height: 40px;\
-margin: 3px 0px;\
-padding: 0px 14px;\
-}\
-\
-input:focus {\
-border:1px solid black;\
-outline: none !important;\
-box-shadow: 0 0 10px #719ECE;\
-}\
-\
-#config {\
-width:400px; \
-margin:0 auto;\
-}\
-\
-.ok-button {\
-background-color: #0078e7;\
-color: #fff;\
-}\
-\
-.red-button {\
-background-color: #e72e00;\
-color: #fff;\
-}\
-</style>\
-<body>\
-<div id='config'>\
-<h1>ESP32 NAT Router Config</h1>\
-<div style='text-align: right; margin-bottom: 10px;'><a href='/advanced' style='color: #0078e7; text-decoration: none; font-size: 0.9em;'>Advanced Settings &rarr;</a></div>\
-<script>\
-if (window.location.search.substr(1) != '')\
-{\
-document.getElementById('config').display = 'none';\
-document.body.innerHTML ='<h1>ESP32 NAT Router Config</h1>The new settings have been sent to the device.<br/>The page will refresh soon automatically...';\
-setTimeout(\"location.href = '/'\",10000);\
-}\
-</script>\
-<h2>AP Settings (the new network)</h2>\
-<form action='' method='GET'>\
-<table>\
-<tr>\
-<td>SSID</td>\
-<td><input type='text' name='ap_ssid' value='%s' placeholder='SSID of the new network'/></td>\
-</tr>\
-<tr>\
-<td>Password</td>\
-<td><input type='text' name='ap_password' value='%s' placeholder='Password of the new network'/></td>\
-</tr>\
-<tr>\
-<td></td>\
-<td><input type='submit' value='Set' class='ok-button'/></td>\
-</tr>\
-</table>\
-<small>\
-<i>Password </i>less than 8 chars = open<br />\
-</small>\
-</form>\
-\
-<h2>STA Settings (uplink WiFi network)</h2>\
-<form action='' method='GET'>\
-<table>\
-<tr>\
-<td>SSID</td>\
-<td><input type='text' name='ssid' value='%s' placeholder='SSID of existing network'/></td>\
-</tr>\
-<tr>\
-<td>Password</td>\
-<td><input type='text' name='password' value='%s' placeholder='Password of existing network'/></td>\
-</tr>\
-<tr>\
-<td colspan='2'>WPA2 Enterprise settings. Leave blank for regular</td>\
-</tr>\
-<tr>\
-<td>Enterprise username</td>\
-<td><input type='text' name='ent_username' value='%s' placeholder='WPA2 Enterprise username'/></td>\
-</tr>\
-<tr>\
-<td>Enterprise identity</td>\
-<td><input type='text' name='ent_identity' value='%s' placeholder='WPA2 Enterprise identity'/></td>\
-</tr>\
-<tr>\
-<td></td>\
-<td><input type='submit' value='Connect' class='ok-button'/></td>\
-</tr>\
-\
-</table>\
-</form>\
-\
-<h2>STA Static IP Settings</h2>\
-<form action='' method='GET'>\
-<table>\
-<tr>\
-<td>Static IP</td>\
-<td><input type='text' name='staticip' value='%s'/></td>\
-</tr>\
-<tr>\
-<td>Subnet Mask</td>\
-<td><input type='text' name='subnetmask' value='%s'/></td>\
-</tr>\
-<tr>\
-<td>Gateway</td>\
-<td><input type='text' name='gateway' value='%s'/></td>\
-</tr>\
-<tr>\
-<td></td>\
-<td><input type='submit' value='Connect' class='ok-button'/></td>\
-</tr>\
-\
-</table>\
-<small>\
-<i>Leave it in blank if you want your ESP32 to get an IP using DHCP</i>\
-</small>\
-</form>\
-\
-<h2>Device Management</h2>\
-<form action='' method='GET'>\
-<table>\
-<tr>\
-<td>Device</td>\
-<td><input type='submit' name='reset' value='Reboot' class='red-button'/></td>\
-</tr>\
-</table>\
-</form>\
-</div>\
-</body>\
-</html>\
-"
-
-#define LOCK_PAGE "<html>\
-<head></head>\
-<meta name='viewport' content='width=device-width, initial-scale=1'>\
-<style>\
-body {\
-font-family: apercu-pro, -apple-system, system-ui, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;\
-padding: 1em;\
-line-height: 2em;\
-font-weight: 100;\
-}\
-\
-td {\
-font-weight: 100;\
-min-height: 24px;\
-}\
-\
-td:first-child { \
-text-align: right;\
-min-width: 100px;\
-padding-right: 10px;\
-}\
-\
-h1 {\
-font-size: 1.5em;\
-font-weight: 200;\
-}\
-\
-h2 {\
-font-size: 1.2em;\
-font-weight: 200;\
-margin-left: 5px;\
-}\
-\
-input {\
-border: 1px solid rgb(196, 196, 196);\
-color: rgb(76, 76, 76);\
-width: 240px;\
-border-radius: 3px;\
-height: 40px;\
-margin: 3px 0px;\
-padding: 0px 14px;\
-}\
-\
-input:focus {\
-border:1px solid black;\
-outline: none !important;\
-box-shadow: 0 0 10px #719ECE;\
-}\
-\
-#config {\
-width:400px; \
-margin:0 auto;\
-}\
-\
-.ok-button {\
-background-color: #0078e7;\
-color: #fff;\
-}\
-\
-.red-button {\
-background-color: #e72e00;\
-color: #fff;\
-}\
-</style>\
-<body>\
-<div id='config'>\
-<h1>ESP32 NAT Router Config</h1>\
-<script>\
-if (window.location.search.substr(1) != '')\
-{\
-document.getElementById('config').display = 'none';\
-document.body.innerHTML ='<h1>ESP32 NAT Router Config</h1>The new settings have been sent to the device.<br/>The page will refresh soon automatically...';\
-setTimeout(\"location.href = '/'\",1000);\
-}\
-</script>\
-<h2>Config Locked</h2>\
-<form autocomplete='off' action='' method='GET'>\
-<table>\
-<tr>\
-<td>Password:</td>\
-<td><input type='password' name='unlock_password'/></td>\
-</tr>\
-<tr>\
-<td></td>\
-<td><input type='submit' value='Unlock' class='red-button'/></td>\
-</tr>\
-\
-</table>\
-<small>\
-<i>Default: STA password to unlock<br />\
-</small>\
-</form>\
-</div>\
-</body>\
-</html>\
-"
-
-#define ADVANCED_PAGE "<html>\
-<head></head>\
-<meta name='viewport' content='width=device-width, initial-scale=1'>\
-<style>\
-body {\
-font-family: apercu-pro, -apple-system, system-ui, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;\
-padding: 1em;\
-line-height: 2em;\
-font-weight: 100;\
-}\
-\
-td {\
-font-weight: 100;\
-min-height: 24px;\
-padding: 5px 8px;\
-}\
-\
-td:first-child { \
-text-align: right;\
-min-width: 100px;\
-padding-right: 10px;\
-}\
-\
-h1 {\
-font-size: 1.5em;\
-font-weight: 200;\
-}\
-\
-h2 {\
-font-size: 1.2em;\
-font-weight: 200;\
-margin-left: 5px;\
-}\
-\
-input, select {\
-border: 1px solid rgb(196, 196, 196);\
-color: rgb(76, 76, 76);\
-width: 240px;\
-border-radius: 3px;\
-height: 40px;\
-margin: 3px 0px;\
-padding: 0px 14px;\
-}\
-\
-input:focus {\
-border:1px solid black;\
-outline: none !important;\
-box-shadow: 0 0 10px #719ECE;\
-}\
-\
-#config {\
-width:700px; \
-margin:0 auto;\
-}\
-\
-.ok-button {\
-background-color: #0078e7;\
-color: #fff;\
-}\
-\
-.red-button {\
-background-color: #e72e00;\
-color: #fff;\
-}\
-\
-.small-button {\
-width: 60px;\
-height: 30px;\
-font-size: 0.9em;\
-padding: 0px 10px;\
+#container {\
+max-width: 600px;\
+margin: 0 auto;\
+padding: 1.5rem;\
+background: rgba(30, 30, 46, 0.9);\
+border-radius: 16px;\
+box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);\
+backdrop-filter: blur(10px);\
 }\
 \
 .status-table {\
-background: #f5f5f5;\
-border-radius: 5px;\
-padding: 10px;\
-margin: 10px 0;\
+background: rgba(22, 33, 62, 0.6);\
+border-radius: 12px;\
+padding: 1rem;\
+margin: 1rem 0;\
+border: 1px solid rgba(0, 217, 255, 0.1);\
 }\
 \
-.portmap-table {\
+.status-table table {\
 width: 100%%;\
 border-collapse: collapse;\
-margin: 10px 0;\
 }\
 \
-.portmap-table th {\
-background: #e0e0e0;\
-padding: 8px;\
-text-align: left;\
+.status-table td {\
+padding: 0.75rem 0.5rem;\
+font-size: 0.95rem;\
+border-bottom: 1px solid rgba(255, 255, 255, 0.05);\
 }\
 \
-.portmap-table td {\
-border-bottom: 1px solid #e0e0e0;\
-padding: 8px;\
-text-align: left;\
+.status-table tr:last-child td {\
+border-bottom: none;\
 }\
 \
-.nav-link {\
-color: #0078e7;\
+.status-table td:first-child {\
+color: #888;\
+text-align: right;\
+padding-right: 1rem;\
+width: 45%%;\
+font-size: 0.9rem;\
+}\
+\
+.status-table td:last-child {\
+color: #e0e0e0;\
+font-weight: 500;\
+}\
+\
+.button-container {\
+display: grid;\
+grid-template-columns: 1fr 1fr;\
+gap: 1rem;\
+margin: 2rem 0 1rem 0;\
+}\
+\
+.nav-button {\
+background: linear-gradient(135deg, #667eea 0%%, #764ba2 100%%);\
+color: #fff;\
+border: none;\
+border-radius: 12px;\
+padding: 1.25rem 1rem;\
+font-size: 1rem;\
+font-weight: 600;\
 text-decoration: none;\
-font-size: 0.9em;\
+display: flex;\
+align-items: center;\
+justify-content: center;\
+cursor: pointer;\
+transition: all 0.3s ease;\
+box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);\
+text-align: center;\
 }\
 \
-.nav-link:hover {\
-text-decoration: underline;\
+.nav-button:hover {\
+transform: translateY(-2px);\
+box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);\
+}\
+\
+.nav-button:active {\
+transform: translateY(0);\
+}\
+\
+@media (max-width: 600px) {\
+body {\
+padding: 0.5rem;\
+}\
+\
+#container {\
+padding: 1rem;\
+border-radius: 12px;\
+}\
+\
+h1 {\
+font-size: 1.5rem;\
+}\
+\
+h2 {\
+font-size: 1.1rem;\
+}\
+\
+.button-container {\
+grid-template-columns: 1fr;\
+gap: 0.75rem;\
+}\
+\
+.status-table td {\
+padding: 0.5rem 0.25rem;\
+font-size: 0.85rem;\
+}\
+\
+.status-table td:first-child {\
+width: 50%%;\
+font-size: 0.8rem;\
+}\
 }\
 </style>\
 <body>\
-<div id='config'>\
-<a href='/' class='nav-link'>&larr; Back to Main Config</a>\
-<h1>ESP32 NAT Router - Advanced</h1>\
-<script>\
-if (window.location.search.indexOf('success=1') > -1) {\
-alert('Settings saved successfully!');\
-window.history.replaceState({}, document.title, window.location.pathname);\
-}\
-</script>\
-\
+<div id='container'>\
+<h1>ESP32 NAT Router</h1>\
 <h2>System Status</h2>\
 <div class='status-table'>\
 <table>\
 <tr>\
-<td>Connection Status:</td>\
+<td>Connection:</td>\
 <td><strong>%s</strong></td>\
 </tr>\
 <tr>\
-<td>STA IP Address:</td>\
+<td>STA IP:</td>\
 <td>%s</td>\
 </tr>\
 <tr>\
-<td>AP IP Address:</td>\
+<td>AP IP:</td>\
 <td>%s</td>\
 </tr>\
 <tr>\
-<td>Connected Clients:</td>\
+<td>Clients:</td>\
 <td>%d</td>\
 </tr>\
 <tr>\
@@ -405,15 +179,547 @@ window.history.replaceState({}, document.title, window.location.pathname);\
 </tr>\
 </table>\
 </div>\
+<div class='button-container'>\
+<a href='/config' class='nav-button'>⚙️ Router Config</a>\
+<a href='/portforward' class='nav-button'>🔀 Port Forwarding</a>\
+</div>\
+</div>\
+</body>\
+</html>\
+"
+
+/* Router Config Page - WiFi settings and MAC addresses */
+#define ROUTER_CONFIG_PAGE "<html>\
+<head>\
+<meta name='viewport' content='width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0'>\
+<meta charset='UTF-8'>\
+<title>Router Configuration</title>\
+</head>\
+<style>\
+* {\
+box-sizing: border-box;\
+margin: 0;\
+padding: 0;\
+}\
 \
-<h2>Port Forwarding</h2>\
+body {\
+font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;\
+background: linear-gradient(135deg, #1a1a2e 0%%, #16213e 100%%);\
+color: #e0e0e0;\
+padding: 1rem;\
+min-height: 100vh;\
+line-height: 1.6;\
+}\
+\
+h1 {\
+font-size: 1.5rem;\
+font-weight: 600;\
+color: #00d9ff;\
+margin-bottom: 1rem;\
+text-shadow: 0 0 20px rgba(0, 217, 255, 0.3);\
+}\
+\
+h2 {\
+font-size: 1.15rem;\
+font-weight: 500;\
+color: #00d9ff;\
+margin: 1.5rem 0 0.75rem 0;\
+padding-bottom: 0.5rem;\
+border-bottom: 1px solid rgba(0, 217, 255, 0.2);\
+}\
+\
+#container {\
+max-width: 500px;\
+margin: 0 auto;\
+padding: 1.5rem;\
+background: rgba(30, 30, 46, 0.9);\
+border-radius: 16px;\
+box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);\
+backdrop-filter: blur(10px);\
+}\
+\
+.nav-link {\
+color: #00d9ff;\
+text-decoration: none;\
+font-size: 0.9rem;\
+display: inline-block;\
+margin-bottom: 1rem;\
+transition: all 0.2s;\
+}\
+\
+.nav-link:hover {\
+color: #33e0ff;\
+transform: translateX(-3px);\
+}\
+\
+form {\
+margin-bottom: 1.5rem;\
+}\
+\
+table {\
+width: 100%%;\
+border-collapse: collapse;\
+}\
+\
+td {\
+padding: 0.5rem 0;\
+vertical-align: top;\
+}\
+\
+td:first-child {\
+color: #888;\
+font-size: 0.9rem;\
+padding-right: 0.75rem;\
+width: 35%%;\
+text-align: right;\
+}\
+\
+input[type='text'], input[type='password'] {\
+width: 100%%;\
+background: rgba(22, 33, 62, 0.6);\
+border: 1px solid rgba(0, 217, 255, 0.2);\
+border-radius: 8px;\
+color: #e0e0e0;\
+padding: 0.75rem;\
+font-size: 0.95rem;\
+transition: all 0.3s;\
+}\
+\
+input:focus {\
+outline: none;\
+border-color: #00d9ff;\
+box-shadow: 0 0 0 3px rgba(0, 217, 255, 0.1);\
+background: rgba(22, 33, 62, 0.8);\
+}\
+\
+input::placeholder {\
+color: #666;\
+}\
+\
+.ok-button, .red-button {\
+border: none;\
+border-radius: 8px;\
+padding: 0.75rem 1.5rem;\
+font-size: 0.95rem;\
+font-weight: 600;\
+cursor: pointer;\
+transition: all 0.3s;\
+width: 100%%;\
+margin-top: 0.5rem;\
+}\
+\
+.ok-button {\
+background: linear-gradient(135deg, #667eea 0%%, #764ba2 100%%);\
+color: #fff;\
+box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);\
+}\
+\
+.ok-button:hover {\
+transform: translateY(-2px);\
+box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);\
+}\
+\
+.red-button {\
+background: linear-gradient(135deg, #f093fb 0%%, #f5576c 100%%);\
+color: #fff;\
+box-shadow: 0 4px 15px rgba(245, 87, 108, 0.4);\
+}\
+\
+.red-button:hover {\
+transform: translateY(-2px);\
+box-shadow: 0 6px 20px rgba(245, 87, 108, 0.6);\
+}\
+\
+small {\
+display: block;\
+color: #888;\
+font-size: 0.85rem;\
+margin-top: 0.5rem;\
+line-height: 1.4;\
+}\
+\
+@media (max-width: 600px) {\
+body {\
+padding: 0.5rem;\
+}\
+\
+#container {\
+padding: 1rem;\
+border-radius: 12px;\
+}\
+\
+h1 {\
+font-size: 1.25rem;\
+}\
+\
+h2 {\
+font-size: 1rem;\
+}\
+\
+td:first-child {\
+font-size: 0.8rem;\
+width: 40%%;\
+}\
+\
+input[type='text'], input[type='password'] {\
+font-size: 0.9rem;\
+padding: 0.65rem;\
+}\
+\
+.ok-button, .red-button {\
+font-size: 0.9rem;\
+padding: 0.65rem 1.25rem;\
+}\
+}\
+</style>\
+<body>\
+<div id='container'>\
+<a href='/' class='nav-link'>← Back to Home</a>\
+<h1>Router Configuration</h1>\
+<script>\
+if (window.location.search.substr(1) != '') {\
+document.getElementById('container').style.display = 'none';\
+document.body.innerHTML ='<div id=\"container\"><h1>Router Configuration</h1><p style=\"text-align:center; margin: 2rem 0; color: #00d9ff;\">Settings saved! Rebooting...</p></div>';\
+setTimeout(\"location.href = '/'\", 10000);\
+}\
+</script>\
+<h2>Access Point Settings</h2>\
+<form action='' method='GET'>\
+<table>\
+<tr>\
+<td>SSID</td>\
+<td><input type='text' name='ap_ssid' value='%s' placeholder='Network name'/></td>\
+</tr>\
+<tr>\
+<td>Password</td>\
+<td><input type='text' name='ap_password' value='%s' placeholder='Min 8 chars or empty'/></td>\
+</tr>\
+<tr>\
+<td>MAC Address</td>\
+<td><input type='text' name='ap_mac' value='%s' placeholder='AA:BB:CC:DD:EE:FF'/></td>\
+</tr>\
+<tr>\
+<td></td>\
+<td><input type='submit' value='Apply' class='ok-button'/></td>\
+</tr>\
+</table>\
+<small>Leave password empty for open network</small>\
+</form>\
+\
+<h2>Station Settings (Uplink)</h2>\
+<form action='' method='GET'>\
+<table>\
+<tr>\
+<td>SSID</td>\
+<td><input type='text' name='ssid' value='%s' placeholder='Uplink network'/></td>\
+</tr>\
+<tr>\
+<td>Password</td>\
+<td><input type='text' name='password' value='%s' placeholder='Network password'/></td>\
+</tr>\
+<tr>\
+<td colspan='2' style='padding-top: 1rem; color: #888; font-size: 0.85rem;'>WPA2 Enterprise (optional)</td>\
+</tr>\
+<tr>\
+<td>Username</td>\
+<td><input type='text' name='ent_username' value='%s' placeholder='Enterprise username'/></td>\
+</tr>\
+<tr>\
+<td>Identity</td>\
+<td><input type='text' name='ent_identity' value='%s' placeholder='Enterprise identity'/></td>\
+</tr>\
+<tr>\
+<td>MAC Address</td>\
+<td><input type='text' name='sta_mac' value='%s' placeholder='AA:BB:CC:DD:EE:FF'/></td>\
+</tr>\
+<tr>\
+<td></td>\
+<td><input type='submit' value='Connect' class='ok-button'/></td>\
+</tr>\
+</table>\
+</form>\
+\
+<h2>Static IP Settings</h2>\
+<form action='' method='GET'>\
+<table>\
+<tr>\
+<td>Static IP</td>\
+<td><input type='text' name='staticip' value='%s' placeholder='192.168.1.100'/></td>\
+</tr>\
+<tr>\
+<td>Subnet Mask</td>\
+<td><input type='text' name='subnetmask' value='%s' placeholder='255.255.255.0'/></td>\
+</tr>\
+<tr>\
+<td>Gateway</td>\
+<td><input type='text' name='gateway' value='%s' placeholder='192.168.1.1'/></td>\
+</tr>\
+<tr>\
+<td></td>\
+<td><input type='submit' value='Set Static IP' class='ok-button'/></td>\
+</tr>\
+</table>\
+<small>Leave empty for DHCP</small>\
+</form>\
+\
+<h2>Device Management</h2>\
+<form action='' method='GET'>\
+<table>\
+<tr>\
+<td>Device</td>\
+<td><input type='submit' name='reset' value='Reboot Now' class='red-button'/></td>\
+</tr>\
+</table>\
+</form>\
+</div>\
+</body>\
+</html>\
+"
+
+/* Port Forwarding Page */
+#define PORTFORWARD_PAGE "<html>\
+<head>\
+<meta name='viewport' content='width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0'>\
+<meta charset='UTF-8'>\
+<title>Port Forwarding</title>\
+</head>\
+<style>\
+* {\
+box-sizing: border-box;\
+margin: 0;\
+padding: 0;\
+}\
+\
+body {\
+font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;\
+background: linear-gradient(135deg, #1a1a2e 0%%, #16213e 100%%);\
+color: #e0e0e0;\
+padding: 1rem;\
+min-height: 100vh;\
+line-height: 1.6;\
+}\
+\
+h1 {\
+font-size: 1.5rem;\
+font-weight: 600;\
+color: #00d9ff;\
+margin-bottom: 1rem;\
+text-shadow: 0 0 20px rgba(0, 217, 255, 0.3);\
+}\
+\
+h2 {\
+font-size: 1.15rem;\
+font-weight: 500;\
+color: #00d9ff;\
+margin: 1.5rem 0 0.75rem 0;\
+padding-bottom: 0.5rem;\
+border-bottom: 1px solid rgba(0, 217, 255, 0.2);\
+}\
+\
+#container {\
+max-width: 800px;\
+margin: 0 auto;\
+padding: 1.5rem;\
+background: rgba(30, 30, 46, 0.9);\
+border-radius: 16px;\
+box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);\
+backdrop-filter: blur(10px);\
+}\
+\
+.nav-link {\
+color: #00d9ff;\
+text-decoration: none;\
+font-size: 0.9rem;\
+display: inline-block;\
+margin-bottom: 1rem;\
+transition: all 0.2s;\
+}\
+\
+.nav-link:hover {\
+color: #33e0ff;\
+transform: translateX(-3px);\
+}\
+\
+.portmap-table {\
+width: 100%%;\
+border-collapse: collapse;\
+margin: 1rem 0;\
+background: rgba(22, 33, 62, 0.6);\
+border-radius: 12px;\
+overflow: hidden;\
+border: 1px solid rgba(0, 217, 255, 0.1);\
+}\
+\
+.portmap-table thead {\
+background: rgba(0, 217, 255, 0.1);\
+}\
+\
+.portmap-table th {\
+padding: 0.75rem 0.5rem;\
+text-align: left;\
+font-weight: 600;\
+color: #00d9ff;\
+font-size: 0.9rem;\
+}\
+\
+.portmap-table td {\
+padding: 0.75rem 0.5rem;\
+border-bottom: 1px solid rgba(255, 255, 255, 0.05);\
+font-size: 0.9rem;\
+}\
+\
+.portmap-table tbody tr:last-child td {\
+border-bottom: none;\
+}\
+\
+.portmap-table tbody tr:hover {\
+background: rgba(0, 217, 255, 0.05);\
+}\
+\
+table {\
+width: 100%%;\
+border-collapse: collapse;\
+}\
+\
+td {\
+padding: 0.5rem 0;\
+vertical-align: top;\
+}\
+\
+td:first-child {\
+color: #888;\
+font-size: 0.9rem;\
+padding-right: 0.75rem;\
+width: 30%%;\
+text-align: right;\
+}\
+\
+input[type='text'], input[type='number'], select {\
+width: 100%%;\
+background: rgba(22, 33, 62, 0.6);\
+border: 1px solid rgba(0, 217, 255, 0.2);\
+border-radius: 8px;\
+color: #e0e0e0;\
+padding: 0.75rem;\
+font-size: 0.95rem;\
+transition: all 0.3s;\
+}\
+\
+input:focus, select:focus {\
+outline: none;\
+border-color: #00d9ff;\
+box-shadow: 0 0 0 3px rgba(0, 217, 255, 0.1);\
+background: rgba(22, 33, 62, 0.8);\
+}\
+\
+input::placeholder {\
+color: #666;\
+}\
+\
+select {\
+cursor: pointer;\
+}\
+\
+.ok-button {\
+background: linear-gradient(135deg, #667eea 0%%, #764ba2 100%%);\
+color: #fff;\
+border: none;\
+border-radius: 8px;\
+padding: 0.75rem 1.5rem;\
+font-size: 0.95rem;\
+font-weight: 600;\
+cursor: pointer;\
+transition: all 0.3s;\
+box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);\
+width: 100%%;\
+margin-top: 0.5rem;\
+}\
+\
+.ok-button:hover {\
+transform: translateY(-2px);\
+box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);\
+}\
+\
+.red-button {\
+background: linear-gradient(135deg, #f093fb 0%%, #f5576c 100%%);\
+color: #fff;\
+border: none;\
+border-radius: 6px;\
+padding: 0.4rem 0.8rem;\
+font-size: 0.8rem;\
+font-weight: 600;\
+cursor: pointer;\
+transition: all 0.3s;\
+box-shadow: 0 2px 8px rgba(245, 87, 108, 0.4);\
+text-decoration: none;\
+display: inline-block;\
+}\
+\
+.red-button:hover {\
+transform: translateY(-1px);\
+box-shadow: 0 4px 12px rgba(245, 87, 108, 0.6);\
+}\
+\
+@media (max-width: 768px) {\
+body {\
+padding: 0.5rem;\
+}\
+\
+#container {\
+padding: 1rem;\
+border-radius: 12px;\
+}\
+\
+h1 {\
+font-size: 1.25rem;\
+}\
+\
+h2 {\
+font-size: 1rem;\
+}\
+\
+.portmap-table {\
+font-size: 0.8rem;\
+display: block;\
+overflow-x: auto;\
+}\
+\
+.portmap-table th,\
+.portmap-table td {\
+padding: 0.5rem 0.25rem;\
+font-size: 0.8rem;\
+}\
+\
+td:first-child {\
+font-size: 0.8rem;\
+width: 35%%;\
+}\
+\
+input[type='text'], input[type='number'], select {\
+font-size: 0.9rem;\
+padding: 0.65rem;\
+}\
+}\
+</style>\
+<body>\
+<div id='container'>\
+<a href='/' class='nav-link'>← Back to Home</a>\
+<h1>Port Forwarding</h1>\
+<script>\
+if (window.location.search.indexOf('success=1') > -1) {\
+alert('Port mapping updated!');\
+window.history.replaceState({}, document.title, window.location.pathname);\
+}\
+</script>\
+\
+<h2>Active Port Mappings</h2>\
 <table class='portmap-table'>\
 <thead>\
 <tr>\
 <th>Protocol</th>\
-<th>External Port</th>\
+<th>Ext. Port</th>\
 <th>Internal IP</th>\
-<th>Internal Port</th>\
+<th>Int. Port</th>\
 <th>Action</th>\
 </tr>\
 </thead>\
@@ -422,13 +728,13 @@ window.history.replaceState({}, document.title, window.location.pathname);\
 </tbody>\
 </table>\
 \
-<h2>Add Port Mapping</h2>\
-<form action='/advanced' method='GET'>\
+<h2>Add New Mapping</h2>\
+<form action='/portforward' method='GET'>\
 <table>\
 <tr>\
 <td>Protocol</td>\
 <td>\
-<select name='proto' style='width:100px;'>\
+<select name='proto'>\
 <option value='TCP'>TCP</option>\
 <option value='UDP'>UDP</option>\
 </select>\
@@ -436,15 +742,15 @@ window.history.replaceState({}, document.title, window.location.pathname);\
 </tr>\
 <tr>\
 <td>External Port</td>\
-<td><input type='number' name='ext_port' min='1' max='65535' placeholder='e.g. 8080' style='width:100px;'/></td>\
+<td><input type='number' name='ext_port' min='1' max='65535' placeholder='8080'/></td>\
 </tr>\
 <tr>\
 <td>Internal IP</td>\
-<td><input type='text' name='int_ip' placeholder='e.g. 192.168.4.2' style='width:150px;'/></td>\
+<td><input type='text' name='int_ip' placeholder='192.168.4.2'/></td>\
 </tr>\
 <tr>\
 <td>Internal Port</td>\
-<td><input type='number' name='int_port' min='1' max='65535' placeholder='e.g. 80' style='width:100px;'/></td>\
+<td><input type='number' name='int_port' min='1' max='65535' placeholder='80'/></td>\
 </tr>\
 <tr>\
 <td></td>\
@@ -452,7 +758,124 @@ window.history.replaceState({}, document.title, window.location.pathname);\
 </tr>\
 </table>\
 </form>\
+</div>\
+</body>\
+</html>\
+"
+
+/* Lock Page */
+#define LOCK_PAGE "<html>\
+<head>\
+<meta name='viewport' content='width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0'>\
+<meta charset='UTF-8'>\
+<title>Config Locked</title>\
+</head>\
+<style>\
+* {\
+box-sizing: border-box;\
+margin: 0;\
+padding: 0;\
+}\
 \
+body {\
+font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;\
+background: linear-gradient(135deg, #1a1a2e 0%%, #16213e 100%%);\
+color: #e0e0e0;\
+padding: 1rem;\
+min-height: 100vh;\
+line-height: 1.6;\
+display: flex;\
+align-items: center;\
+justify-content: center;\
+}\
+\
+#container {\
+max-width: 400px;\
+width: 100%%;\
+padding: 2rem;\
+background: rgba(30, 30, 46, 0.9);\
+border-radius: 16px;\
+box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);\
+backdrop-filter: blur(10px);\
+text-align: center;\
+}\
+\
+h1 {\
+font-size: 1.5rem;\
+font-weight: 600;\
+color: #00d9ff;\
+margin-bottom: 0.5rem;\
+text-shadow: 0 0 20px rgba(0, 217, 255, 0.3);\
+}\
+\
+h2 {\
+font-size: 1.15rem;\
+font-weight: 500;\
+color: #f5576c;\
+margin: 1rem 0;\
+}\
+\
+input[type='password'] {\
+width: 100%%;\
+background: rgba(22, 33, 62, 0.6);\
+border: 1px solid rgba(0, 217, 255, 0.2);\
+border-radius: 8px;\
+color: #e0e0e0;\
+padding: 0.75rem;\
+font-size: 0.95rem;\
+margin: 1rem 0;\
+transition: all 0.3s;\
+}\
+\
+input:focus {\
+outline: none;\
+border-color: #00d9ff;\
+box-shadow: 0 0 0 3px rgba(0, 217, 255, 0.1);\
+background: rgba(22, 33, 62, 0.8);\
+}\
+\
+.red-button {\
+background: linear-gradient(135deg, #f093fb 0%%, #f5576c 100%%);\
+color: #fff;\
+border: none;\
+border-radius: 8px;\
+padding: 0.75rem 1.5rem;\
+font-size: 0.95rem;\
+font-weight: 600;\
+cursor: pointer;\
+transition: all 0.3s;\
+box-shadow: 0 4px 15px rgba(245, 87, 108, 0.4);\
+width: 100%%;\
+}\
+\
+.red-button:hover {\
+transform: translateY(-2px);\
+box-shadow: 0 6px 20px rgba(245, 87, 108, 0.6);\
+}\
+\
+small {\
+display: block;\
+color: #888;\
+font-size: 0.85rem;\
+margin-top: 1rem;\
+}\
+</style>\
+<body>\
+<div id='container'>\
+<h1>🔒 ESP32 NAT Router</h1>\
+<h2>Config Locked</h2>\
+<script>\
+if (window.location.search.substr(1) != '') {\
+document.getElementById('container').style.display = 'none';\
+document.body.innerHTML ='<div id=\"container\"><h1>Config Unlocked</h1><p style=\"color: #00d9ff;\">Redirecting...</p></div>';\
+setTimeout(\"location.href = '/'\", 1000);\
+}\
+</script>\
+<form autocomplete='off' action='' method='GET'>\
+<input type='password' name='unlock_password' placeholder='Enter password to unlock'/>\
+<input type='submit' value='Unlock' class='red-button'/>\
+</form>\
+<small>Default: STA password</small>\
 </div>\
 </body>\
 </html>\
