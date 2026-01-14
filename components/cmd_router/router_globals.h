@@ -15,6 +15,16 @@ extern "C" {
 #define PROTO_TCP 6
 #define PROTO_UDP 17
 
+struct portmap_table_entry {
+    uint32_t daddr;
+    uint16_t mport;
+    uint16_t dport;
+    uint8_t proto;
+    uint8_t valid;
+};
+
+extern struct portmap_table_entry portmap_tab[];
+
 extern char* ssid;
 extern char* ent_username;
 extern char* ent_identity;

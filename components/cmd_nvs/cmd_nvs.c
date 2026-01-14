@@ -313,6 +313,10 @@ static esp_err_t get_value_from_nvs(const char *key, const char *str_type)
         size_t len;
         if ( (err = nvs_get_str(nvs, key, NULL, &len)) == ESP_OK) {
             char *str = (char *)malloc(len);
+            if (str == NULL) {
+                nvs_close(nvs);
+                return ESP_ERR_NO_MEM;
+            }
             if ( (err = nvs_get_str(nvs, key, str, &len)) == ESP_OK) {
                 printf("%s\n", str);
             }
@@ -322,6 +326,10 @@ static esp_err_t get_value_from_nvs(const char *key, const char *str_type)
         size_t len;
         if ( (err = nvs_get_blob(nvs, key, NULL, &len)) == ESP_OK) {
             char *blob = (char *)malloc(len);
+            if (blob == NULL) {
+                nvs_close(nvs);
+                return ESP_ERR_NO_MEM;
+            }
             if ( (err = nvs_get_blob(nvs, key, blob, &len)) == ESP_OK) {
                 print_blob(blob, len);
             }

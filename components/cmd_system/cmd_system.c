@@ -18,6 +18,7 @@
 #include "esp_chip_info.h"
 #include "driver/rtc_io.h"
 #include "driver/uart.h"
+#include "driver/gpio.h"
 #include "argtable3/argtable3.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -202,8 +203,8 @@ static int deep_sleep(int argc, char **argv)
     }
     if (deep_sleep_args.wakeup_gpio_num->count) {
         int io_num = deep_sleep_args.wakeup_gpio_num->ival[0];
-        if (!GPIO_IS_VALID_DIGITAL_IO_PAD(io_num)) {
-            ESP_LOGE(TAG, "GPIO %d is not an RTC IO", io_num);
+        if (!GPIO_IS_VALID_GPIO(io_num)) {
+            ESP_LOGE(TAG, "GPIO %d is not a valid GPIO", io_num);
             return 1;
         }
         int level = 0;
