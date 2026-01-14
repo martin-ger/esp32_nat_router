@@ -20,6 +20,8 @@
 
 #include <esp_http_server.h>
 
+#include "lwip/lwip_napt.h"
+
 #include "pages.h"
 #include "router_globals.h"
 
@@ -51,6 +53,11 @@ static esp_err_t index_get_handler(httpd_req_t *req)
     buf_len = httpd_req_get_hdr_value_len(req, "Host") + 1;
     if (buf_len > 1) {
         buf = malloc(buf_len);
+        if (buf == NULL) {
+            ESP_LOGE(TAG, "Failed to allocate memory for header");
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+            return ESP_ERR_NO_MEM;
+        }
         /* Copy null terminated value string into buffer */
         if (httpd_req_get_hdr_value_str(req, "Host", buf, buf_len) == ESP_OK) {
             ESP_LOGI(TAG, "Found header => Host: %s", buf);
@@ -63,6 +70,11 @@ static esp_err_t index_get_handler(httpd_req_t *req)
     buf_len = httpd_req_get_url_query_len(req) + 1;
     if (buf_len > 1) {
         buf = malloc(buf_len);
+        if (buf == NULL) {
+            ESP_LOGE(TAG, "Failed to allocate memory for query string");
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+            return ESP_ERR_NO_MEM;
+        }
         if (httpd_req_get_url_query_str(req, buf, buf_len) == ESP_OK) {
             ESP_LOGI(TAG, "Found URL query => %s", buf);
             if (strcmp(buf, "reset=Reboot") == 0) {
@@ -182,6 +194,10 @@ char* html_escape(const char* src) {
     }
 
     char* res = malloc(sizeof(char) * esc_len);
+    if (res == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate memory for HTML escaping");
+        return NULL;
+    }
 
     int j = 0;
     for (int i = 0; i < len; i++) {
@@ -201,10 +217,149 @@ char* html_escape(const char* src) {
     return res;
 }
 
+/* Advanced page GET handler */
+static esp_err_t advanced_get_handler(httpd_req_t *req)
+{
+    char* buf;
+    size_t buf_len;
+    esp_err_t err = ESP_OK;
+
+    /* Read URL query string length and allocate memory for length + 1 */
+    buf_len = httpd_req_get_url_query_len(req) + 1;
+    if (buf_len > 1) {
+        buf = malloc(buf_len);
+        if (buf == NULL) {
+            ESP_LOGE(TAG, "Failed to allocate memory for query string");
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+            return ESP_ERR_NO_MEM;
+        }
+
+        if (httpd_req_get_url_query_str(req, buf, buf_len) == ESP_OK) {
+            ESP_LOGI(TAG, "Found URL query => %s", buf);
+
+            char param1[64];
+            char param2[64];
+            char param3[64];
+            char param4[64];
+
+            /* Check for add port mapping */
+            if (httpd_query_key_value(buf, "action", param1, sizeof(param1)) == ESP_OK) {
+                if (strcmp(param1, "Add+Mapping") == 0 || strcmp(param1, "Add Mapping") == 0) {
+                    if (httpd_query_key_value(buf, "proto", param1, sizeof(param1)) == ESP_OK &&
+                        httpd_query_key_value(buf, "ext_port", param2, sizeof(param2)) == ESP_OK &&
+                        httpd_query_key_value(buf, "int_ip", param3, sizeof(param3)) == ESP_OK &&
+                        httpd_query_key_value(buf, "int_port", param4, sizeof(param4)) == ESP_OK) {
+
+                        uint8_t proto = (strcmp(param1, "TCP") == 0) ? PROTO_TCP : PROTO_UDP;
+                        uint16_t ext_port = atoi(param2);
+                        uint32_t int_ip = esp_ip4addr_aton(param3);
+                        uint16_t int_port = atoi(param4);
+
+                        err = add_portmap(proto, ext_port, int_ip, int_port);
+                        ESP_LOGI(TAG, "Added port mapping: %s %d -> %s:%d", param1, ext_port, param3, int_port);
+                    }
+                }
+            }
+
+            /* Check for delete port mapping */
+            if (httpd_query_key_value(buf, "del_proto", param1, sizeof(param1)) == ESP_OK &&
+                httpd_query_key_value(buf, "del_port", param2, sizeof(param2)) == ESP_OK) {
+                uint8_t proto = (strcmp(param1, "TCP") == 0) ? PROTO_TCP : PROTO_UDP;
+                uint16_t port = atoi(param2);
+                err = del_portmap(proto, port);
+                ESP_LOGI(TAG, "Deleted port mapping: %s %d", param1, port);
+            }
+        }
+        free(buf);
+    }
+
+    /* Build port mapping table HTML */
+    char portmap_html[2048] = "";
+    int offset = 0;
+    bool has_mappings = false;
+
+    for (int i = 0; i < IP_PORTMAP_MAX; i++) {
+        if (portmap_tab[i].valid) {
+            has_mappings = true;
+            esp_ip4_addr_t addr;
+            addr.addr = portmap_tab[i].daddr;
+
+            offset += snprintf(portmap_html + offset, sizeof(portmap_html) - offset,
+                "<tr>"
+                "<td>%s</td>"
+                "<td>%d</td>"
+                "<td>" IPSTR "</td>"
+                "<td>%d</td>"
+                "<td><a href='/advanced?del_proto=%s&del_port=%d' class='red-button small-button'>Delete</a></td>"
+                "</tr>",
+                portmap_tab[i].proto == PROTO_TCP ? "TCP" : "UDP",
+                portmap_tab[i].mport,
+                IP2STR(&addr),
+                portmap_tab[i].dport,
+                portmap_tab[i].proto == PROTO_TCP ? "TCP" : "UDP",
+                portmap_tab[i].mport
+            );
+        }
+    }
+
+    if (!has_mappings) {
+        snprintf(portmap_html, sizeof(portmap_html),
+            "<tr><td colspan='5' style='text-align:center; color:#888;'>No port mappings configured</td></tr>");
+    }
+
+    /* Build status information */
+    char conn_status[32];
+    char sta_ip_str[32];
+    char ap_ip_str[32];
+
+    if (ap_connect) {
+        strcpy(conn_status, "Connected");
+        esp_ip4_addr_t addr;
+        addr.addr = my_ip;
+        sprintf(sta_ip_str, IPSTR, IP2STR(&addr));
+    } else {
+        strcpy(conn_status, "Disconnected");
+        strcpy(sta_ip_str, "N/A");
+    }
+
+    esp_ip4_addr_t ap_addr;
+    ap_addr.addr = my_ap_ip;
+    sprintf(ap_ip_str, IPSTR, IP2STR(&ap_addr));
+
+    uint32_t free_heap = esp_get_free_heap_size() / 1024;
+
+    /* Build the page */
+    const char* advanced_page_template = ADVANCED_PAGE;
+    int page_len = strlen(advanced_page_template) + strlen(portmap_html) + 512;
+    char* advanced_page = malloc(page_len);
+
+    if (advanced_page == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate memory for advanced page");
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+        return ESP_ERR_NO_MEM;
+    }
+
+    snprintf(advanced_page, page_len, advanced_page_template,
+        conn_status, sta_ip_str, ap_ip_str, connect_count, free_heap,
+        portmap_html);
+
+    httpd_resp_send(req, advanced_page, strlen(advanced_page));
+    free(advanced_page);
+
+    return ESP_OK;
+}
+
+static httpd_uri_t advancedp = {
+    .uri       = "/advanced",
+    .method    = HTTP_GET,
+    .handler   = advanced_get_handler,
+};
+
 httpd_handle_t start_webserver(void)
 {
     httpd_handle_t server = NULL;
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+    config.stack_size = 8192;  // Increase from default 4096 to prevent stack overflow
 
     const char* config_page_template = CONFIG_PAGE;
 
@@ -214,6 +369,19 @@ httpd_handle_t start_webserver(void)
     char* safe_passwd = html_escape(passwd);
     char* safe_ent_username = html_escape(ent_username);
     char* safe_ent_identity = html_escape(ent_identity);
+
+    // Check if any html_escape failed
+    if (safe_ap_ssid == NULL || safe_ap_passwd == NULL || safe_ssid == NULL ||
+        safe_passwd == NULL || safe_ent_username == NULL || safe_ent_identity == NULL) {
+        ESP_LOGE(TAG, "Failed to escape HTML strings");
+        free(safe_ap_ssid);
+        free(safe_ap_passwd);
+        free(safe_ssid);
+        free(safe_passwd);
+        free(safe_ent_username);
+        free(safe_ent_identity);
+        return NULL;
+    }
 
     int page_len =
         strlen(config_page_template) +
@@ -225,6 +393,16 @@ httpd_handle_t start_webserver(void)
         strlen(safe_ent_identity) +
         256;
     char* config_page = malloc(sizeof(char) * page_len);
+    if (config_page == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate memory for config page");
+        free(safe_ap_ssid);
+        free(safe_ap_passwd);
+        free(safe_ssid);
+        free(safe_passwd);
+        free(safe_ent_username);
+        free(safe_ent_identity);
+        return NULL;
+    }
 
     snprintf(
         config_page, page_len, config_page_template,
@@ -248,6 +426,7 @@ httpd_handle_t start_webserver(void)
         // Set URI handlers
         ESP_LOGI(TAG, "Registering URI handlers");
         httpd_register_uri_handler(server, &indexp);
+        httpd_register_uri_handler(server, &advancedp);
         return server;
     }
 
@@ -257,6 +436,12 @@ httpd_handle_t start_webserver(void)
 
 static void stop_webserver(httpd_handle_t server)
 {
+    // Free the allocated config page before stopping the server
+    if (indexp.user_ctx != NULL) {
+        free(indexp.user_ctx);
+        indexp.user_ctx = NULL;
+    }
+
     // Stop the httpd server
     httpd_stop(server);
 }
