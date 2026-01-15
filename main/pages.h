@@ -181,7 +181,7 @@ font-size: 0.8rem;\
 </div>\
 <div class='button-container'>\
 <a href='/config' class='nav-button'>⚙️ Router Config</a>\
-<a href='/portforward' class='nav-button'>🔀 Port Forwarding</a>\
+<a href='/mappings' class='nav-button'>🔀 Mappings</a>\
 </div>\
 </div>\
 </body>\
@@ -476,12 +476,12 @@ setTimeout(\"location.href = '/'\", 10000);\
 </html>\
 "
 
-/* Port Forwarding Page */
-#define PORTFORWARD_PAGE "<html>\
+/* Mappings Page (DHCP Reservations + Port Forwarding) */
+#define MAPPINGS_PAGE "<html>\
 <head>\
 <meta name='viewport' content='width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0'>\
 <meta charset='UTF-8'>\
-<title>Port Forwarding</title>\
+<title>Mappings</title>\
 </head>\
 <style>\
 * {\
@@ -540,7 +540,7 @@ color: #33e0ff;\
 transform: translateX(-3px);\
 }\
 \
-.portmap-table {\
+.data-table {\
 width: 100%%;\
 border-collapse: collapse;\
 margin: 1rem 0;\
@@ -550,11 +550,11 @@ overflow: hidden;\
 border: 1px solid rgba(0, 217, 255, 0.1);\
 }\
 \
-.portmap-table thead {\
+.data-table thead {\
 background: rgba(0, 217, 255, 0.1);\
 }\
 \
-.portmap-table th {\
+.data-table th {\
 padding: 0.75rem 0.5rem;\
 text-align: left;\
 font-weight: 600;\
@@ -562,17 +562,17 @@ color: #00d9ff;\
 font-size: 0.9rem;\
 }\
 \
-.portmap-table td {\
+.data-table td {\
 padding: 0.75rem 0.5rem;\
 border-bottom: 1px solid rgba(255, 255, 255, 0.05);\
 font-size: 0.9rem;\
 }\
 \
-.portmap-table tbody tr:last-child td {\
+.data-table tbody tr:last-child td {\
 border-bottom: none;\
 }\
 \
-.portmap-table tbody tr:hover {\
+.data-table tbody tr:hover {\
 background: rgba(0, 217, 255, 0.05);\
 }\
 \
@@ -660,6 +660,10 @@ transform: translateY(-1px);\
 box-shadow: 0 4px 12px rgba(245, 87, 108, 0.6);\
 }\
 \
+.section {\
+margin-bottom: 2rem;\
+}\
+\
 @media (max-width: 768px) {\
 body {\
 padding: 0.5rem;\
@@ -678,14 +682,14 @@ h2 {\
 font-size: 1rem;\
 }\
 \
-.portmap-table {\
+.data-table {\
 font-size: 0.8rem;\
 display: block;\
 overflow-x: auto;\
 }\
 \
-.portmap-table th,\
-.portmap-table td {\
+.data-table th,\
+.data-table td {\
 padding: 0.5rem 0.25rem;\
 font-size: 0.8rem;\
 }\
@@ -704,16 +708,50 @@ padding: 0.65rem;\
 <body>\
 <div id='container'>\
 <a href='/' class='nav-link'>← Back to Home</a>\
-<h1>Port Forwarding</h1>\
-<script>\
-if (window.location.search.indexOf('success=1') > -1) {\
-alert('Port mapping updated!');\
-window.history.replaceState({}, document.title, window.location.pathname);\
-}\
-</script>\
+<h1>Mappings</h1>\
 \
-<h2>Active Port Mappings</h2>\
-<table class='portmap-table'>\
+<div class='section'>\
+<h2>DHCP Reservations</h2>\
+<table class='data-table'>\
+<thead>\
+<tr>\
+<th>MAC Address</th>\
+<th>IP Address</th>\
+<th>Name</th>\
+<th>Action</th>\
+</tr>\
+</thead>\
+<tbody>\
+%s\
+</tbody>\
+</table>\
+\
+<h2>Add DHCP Reservation</h2>\
+<form action='/mappings' method='GET'>\
+<table>\
+<tr>\
+<td>MAC Address</td>\
+<td><input type='text' name='dhcp_mac' placeholder='AA:BB:CC:DD:EE:FF'/></td>\
+</tr>\
+<tr>\
+<td>IP Address</td>\
+<td><input type='text' name='dhcp_ip' placeholder='192.168.4.100'/></td>\
+</tr>\
+<tr>\
+<td>Name (optional)</td>\
+<td><input type='text' name='dhcp_name' placeholder='My Device'/></td>\
+</tr>\
+<tr>\
+<td></td>\
+<td><input type='submit' name='dhcp_action' value='Add Reservation' class='ok-button'/></td>\
+</tr>\
+</table>\
+</form>\
+</div>\
+\
+<div class='section'>\
+<h2>Port Forwarding</h2>\
+<table class='data-table'>\
 <thead>\
 <tr>\
 <th>Protocol</th>\
@@ -728,8 +766,8 @@ window.history.replaceState({}, document.title, window.location.pathname);\
 </tbody>\
 </table>\
 \
-<h2>Add New Mapping</h2>\
-<form action='/portforward' method='GET'>\
+<h2>Add Port Forwards</h2>\
+<form action='/mappings' method='GET'>\
 <table>\
 <tr>\
 <td>Protocol</td>\
@@ -754,10 +792,11 @@ window.history.replaceState({}, document.title, window.location.pathname);\
 </tr>\
 <tr>\
 <td></td>\
-<td><input type='submit' name='action' value='Add Mapping' class='ok-button'/></td>\
+<td><input type='submit' name='port_action' value='Add Forward' class='ok-button'/></td>\
 </tr>\
 </table>\
 </form>\
+</div>\
 </div>\
 </body>\
 </html>\

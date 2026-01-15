@@ -44,6 +44,7 @@ static void register_set_ap(void);
 static void register_set_ap_ip(void);
 static void register_show(void);
 static void register_portmap(void);
+static void register_dhcp_reserve(void);
 
 void preprocess_string(char* str)
 {
@@ -157,6 +158,7 @@ void register_router(void)
     register_set_ap();
     register_set_ap_ip();
     register_portmap();
+    register_dhcp_reserve();
     register_show();
 }
 
@@ -613,7 +615,11 @@ static int show(int argc, char **argv)
     }
     printf("%d Stations connected\n", connect_count);
 
+    printf("\nPort Mappings:\n");
     print_portmap_tab();
+
+    printf("\nDHCP Reservations:\n");
+    print_dhcp_reservations();
 
     return 0;
 }
@@ -625,6 +631,105 @@ static void register_show(void)
         .help = "Get status and config of the router",
         .hint = NULL,
         .func = &show,
+    };
+    ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
+}
+
+/** Arguments used by 'dhcp_reserve' function */
+static struct {
+    struct arg_str *add_del;
+    struct arg_str *mac_addr;
+    struct arg_str *ip_addr;
+    struct arg_str *name;
+    struct arg_end *end;
+} dhcp_reserve_args;
+
+/* 'dhcp_reserve' command */
+int dhcp_reserve(int argc, char **argv)
+{
+    int nerrors = arg_parse(argc, argv, (void **) &dhcp_reserve_args);
+    if (nerrors != 0) {
+        arg_print_errors(stderr, dhcp_reserve_args.end, argv[0]);
+        return 1;
+    }
+
+    bool add;
+    if (strcmp((char *)dhcp_reserve_args.add_del->sval[0], "add") == 0) {
+        add = true;
+    } else if (strcmp((char *)dhcp_reserve_args.add_del->sval[0], "del") == 0) {
+        add = false;
+    } else {
+        printf("Must be 'add' or 'del'\n");
+        return 1;
+    }
+
+    // Parse MAC address (AA:BB:CC:DD:EE:FF or AA-BB-CC-DD-EE-FF)
+    unsigned int mac[6];
+    const char *mac_str = dhcp_reserve_args.mac_addr->sval[0];
+    if (sscanf(mac_str, "%02x:%02x:%02x:%02x:%02x:%02x",
+               &mac[0], &mac[1], &mac[2], &mac[3], &mac[4], &mac[5]) != 6 &&
+        sscanf(mac_str, "%02x-%02x-%02x-%02x-%02x-%02x",
+               &mac[0], &mac[1], &mac[2], &mac[3], &mac[4], &mac[5]) != 6) {
+        printf("Invalid MAC address format. Use AA:BB:CC:DD:EE:FF\n");
+        return 1;
+    }
+
+    uint8_t mac_bytes[6];
+    for (int i = 0; i < 6; i++) {
+        mac_bytes[i] = (uint8_t)mac[i];
+    }
+
+    if (add) {
+        // Parse IP address
+        uint32_t ip = esp_ip4addr_aton((char *)dhcp_reserve_args.ip_addr->sval[0]);
+        if (ip == 0) {
+            printf("Invalid IP address\n");
+            return 1;
+        }
+
+        // Get optional name
+        const char *name = NULL;
+        if (dhcp_reserve_args.name->count > 0) {
+            name = dhcp_reserve_args.name->sval[0];
+        }
+
+        esp_err_t err = add_dhcp_reservation(mac_bytes, ip, name);
+        if (err == ESP_OK) {
+            printf("DHCP reservation added\n");
+        } else if (err == ESP_ERR_NO_MEM) {
+            printf("No more slots available for DHCP reservations\n");
+            return 1;
+        } else {
+            printf("Failed to add DHCP reservation\n");
+            return 1;
+        }
+    } else {
+        esp_err_t err = del_dhcp_reservation(mac_bytes);
+        if (err == ESP_OK) {
+            printf("DHCP reservation deleted\n");
+        } else {
+            printf("Failed to delete DHCP reservation\n");
+            return 1;
+        }
+    }
+
+    return ESP_OK;
+}
+
+static void register_dhcp_reserve(void)
+{
+    dhcp_reserve_args.add_del = arg_str1(NULL, NULL, "[add|del]", "add or delete reservation");
+    dhcp_reserve_args.mac_addr = arg_str1(NULL, NULL, "<mac>", "MAC address (AA:BB:CC:DD:EE:FF)");
+    dhcp_reserve_args.ip_addr = arg_str0(NULL, NULL, "<ip>", "IP address (required for add)");
+    dhcp_reserve_args.name = arg_str0("-n", "--name", "<name>", "optional device name");
+    dhcp_reserve_args.end = arg_end(4);
+
+    const esp_console_cmd_t cmd = {
+        .command = "dhcp_reserve",
+        .help = "Add or delete a DHCP reservation",
+        .hint = NULL,
+        .func = &dhcp_reserve,
+        .argtable = &dhcp_reserve_args
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }

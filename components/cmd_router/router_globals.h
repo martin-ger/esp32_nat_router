@@ -15,6 +15,16 @@ extern "C" {
 #define PROTO_TCP 6
 #define PROTO_UDP 17
 
+#define MAX_DHCP_RESERVATIONS 16
+#define DHCP_RESERVATION_NAME_LEN 32
+
+struct dhcp_reservation_entry {
+    uint8_t mac[6];
+    uint32_t ip;
+    char name[DHCP_RESERVATION_NAME_LEN];
+    uint8_t valid;
+};
+
 struct portmap_table_entry {
     uint32_t daddr;
     uint16_t mport;
@@ -24,6 +34,7 @@ struct portmap_table_entry {
 };
 
 extern struct portmap_table_entry portmap_tab[];
+extern struct dhcp_reservation_entry dhcp_reservations[];
 
 extern char* ssid;
 extern char* ent_username;
@@ -55,6 +66,12 @@ esp_err_t get_config_param_str(char* name, char** param);
 void print_portmap_tab();
 esp_err_t add_portmap(uint8_t proto, uint16_t mport, uint32_t daddr, uint16_t dport);
 esp_err_t del_portmap(uint8_t proto, uint16_t mport);
+
+esp_err_t get_dhcp_reservations();
+void print_dhcp_reservations();
+esp_err_t add_dhcp_reservation(const uint8_t *mac, uint32_t ip, const char *name);
+esp_err_t del_dhcp_reservation(const uint8_t *mac);
+uint32_t lookup_dhcp_reservation(const uint8_t *mac);
 
 #ifdef __cplusplus
 }

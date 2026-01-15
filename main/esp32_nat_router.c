@@ -71,6 +71,7 @@ uint32_t my_ip;
 uint32_t my_ap_ip;
 
 struct portmap_table_entry portmap_tab[IP_PORTMAP_MAX];
+struct dhcp_reservation_entry dhcp_reservations[MAX_DHCP_RESERVATIONS];
 
 esp_netif_t* wifiAP;
 esp_netif_t* wifiSTA;
@@ -228,6 +229,139 @@ esp_err_t del_portmap(u8_t proto, u16_t mport) {
         }
     }
     return ESP_OK;
+}
+
+esp_err_t get_dhcp_reservations() {
+    esp_err_t err;
+    nvs_handle_t nvs;
+    size_t len;
+
+    err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err != ESP_OK) {
+        return err;
+    }
+    err = nvs_get_blob(nvs, "dhcp_res", NULL, &len);
+    if (err == ESP_OK) {
+        if (len != sizeof(dhcp_reservations)) {
+            err = ESP_ERR_NVS_INVALID_LENGTH;
+        } else {
+            err = nvs_get_blob(nvs, "dhcp_res", dhcp_reservations, &len);
+            if (err != ESP_OK) {
+                memset(dhcp_reservations, 0, sizeof(dhcp_reservations));
+            }
+        }
+    }
+    nvs_close(nvs);
+
+    return err;
+}
+
+void print_dhcp_reservations() {
+    for (int i = 0; i < MAX_DHCP_RESERVATIONS; i++) {
+        if (dhcp_reservations[i].valid) {
+            ip4_addr_t addr;
+            addr.addr = dhcp_reservations[i].ip;
+            printf("%02X:%02X:%02X:%02X:%02X:%02X -> " IPSTR,
+                dhcp_reservations[i].mac[0], dhcp_reservations[i].mac[1],
+                dhcp_reservations[i].mac[2], dhcp_reservations[i].mac[3],
+                dhcp_reservations[i].mac[4], dhcp_reservations[i].mac[5],
+                IP2STR(&addr));
+            if (dhcp_reservations[i].name[0] != '\0') {
+                printf(" (%s)", dhcp_reservations[i].name);
+            }
+            printf("\n");
+        }
+    }
+}
+
+esp_err_t add_dhcp_reservation(const uint8_t *mac, uint32_t ip, const char *name) {
+    esp_err_t err;
+    nvs_handle_t nvs;
+
+    // Check if MAC already exists and update it
+    for (int i = 0; i < MAX_DHCP_RESERVATIONS; i++) {
+        if (dhcp_reservations[i].valid &&
+            memcmp(dhcp_reservations[i].mac, mac, 6) == 0) {
+            // Update existing entry
+            dhcp_reservations[i].ip = ip;
+            if (name != NULL) {
+                strncpy(dhcp_reservations[i].name, name, DHCP_RESERVATION_NAME_LEN - 1);
+                dhcp_reservations[i].name[DHCP_RESERVATION_NAME_LEN - 1] = '\0';
+            } else {
+                dhcp_reservations[i].name[0] = '\0';
+            }
+            goto save;
+        }
+    }
+
+    // Find first empty slot
+    for (int i = 0; i < MAX_DHCP_RESERVATIONS; i++) {
+        if (!dhcp_reservations[i].valid) {
+            memcpy(dhcp_reservations[i].mac, mac, 6);
+            dhcp_reservations[i].ip = ip;
+            if (name != NULL) {
+                strncpy(dhcp_reservations[i].name, name, DHCP_RESERVATION_NAME_LEN - 1);
+                dhcp_reservations[i].name[DHCP_RESERVATION_NAME_LEN - 1] = '\0';
+            } else {
+                dhcp_reservations[i].name[0] = '\0';
+            }
+            dhcp_reservations[i].valid = 1;
+            goto save;
+        }
+    }
+    return ESP_ERR_NO_MEM;
+
+save:
+    err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err != ESP_OK) {
+        return err;
+    }
+    err = nvs_set_blob(nvs, "dhcp_res", dhcp_reservations, sizeof(dhcp_reservations));
+    if (err == ESP_OK) {
+        err = nvs_commit(nvs);
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "DHCP reservations stored.");
+        }
+    }
+    nvs_close(nvs);
+    return ESP_OK;
+}
+
+esp_err_t del_dhcp_reservation(const uint8_t *mac) {
+    esp_err_t err;
+    nvs_handle_t nvs;
+
+    for (int i = 0; i < MAX_DHCP_RESERVATIONS; i++) {
+        if (dhcp_reservations[i].valid &&
+            memcmp(dhcp_reservations[i].mac, mac, 6) == 0) {
+            dhcp_reservations[i].valid = 0;
+
+            err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
+            if (err != ESP_OK) {
+                return err;
+            }
+            err = nvs_set_blob(nvs, "dhcp_res", dhcp_reservations, sizeof(dhcp_reservations));
+            if (err == ESP_OK) {
+                err = nvs_commit(nvs);
+                if (err == ESP_OK) {
+                    ESP_LOGI(TAG, "DHCP reservations stored.");
+                }
+            }
+            nvs_close(nvs);
+            return ESP_OK;
+        }
+    }
+    return ESP_OK;
+}
+
+uint32_t lookup_dhcp_reservation(const uint8_t *mac) {
+    for (int i = 0; i < MAX_DHCP_RESERVATIONS; i++) {
+        if (dhcp_reservations[i].valid &&
+            memcmp(dhcp_reservations[i].mac, mac, 6) == 0) {
+            return dhcp_reservations[i].ip;
+        }
+    }
+    return 0;
 }
 
 static void initialize_console(void)
@@ -595,6 +729,7 @@ void app_main(void)
     }
 
     get_portmap_tab();
+    get_dhcp_reservations();
 
     // Setup WIFI
     wifi_init(mac, ssid, ent_username, ent_identity, passwd, static_ip, subnet_mask, gateway_addr, ap_mac, ap_ssid, ap_passwd, ap_ip);

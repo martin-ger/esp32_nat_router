@@ -377,8 +377,8 @@ static httpd_uri_t configp = {
     .handler   = config_get_handler,
 };
 
-/* Port Forwarding page GET handler */
-static esp_err_t portforward_get_handler(httpd_req_t *req)
+/* Mappings page GET handler (DHCP Reservations + Port Forwarding) */
+static esp_err_t mappings_get_handler(httpd_req_t *req)
 {
     char* buf;
     size_t buf_len;
@@ -401,8 +401,61 @@ static esp_err_t portforward_get_handler(httpd_req_t *req)
             char param3[64];
             char param4[64];
 
+            /* Check for add DHCP reservation */
+            if (httpd_query_key_value(buf, "dhcp_action", param1, sizeof(param1)) == ESP_OK) {
+                if (strcmp(param1, "Add+Reservation") == 0 || strcmp(param1, "Add Reservation") == 0) {
+                    if (httpd_query_key_value(buf, "dhcp_mac", param1, sizeof(param1)) == ESP_OK &&
+                        httpd_query_key_value(buf, "dhcp_ip", param2, sizeof(param2)) == ESP_OK) {
+
+                        preprocess_string(param1);
+                        preprocess_string(param2);
+
+                        // Parse MAC address
+                        unsigned int mac[6];
+                        if (sscanf(param1, "%02x:%02x:%02x:%02x:%02x:%02x",
+                                   &mac[0], &mac[1], &mac[2], &mac[3], &mac[4], &mac[5]) == 6 ||
+                            sscanf(param1, "%02x-%02x-%02x-%02x-%02x-%02x",
+                                   &mac[0], &mac[1], &mac[2], &mac[3], &mac[4], &mac[5]) == 6) {
+
+                            uint8_t mac_bytes[6];
+                            for (int i = 0; i < 6; i++) {
+                                mac_bytes[i] = (uint8_t)mac[i];
+                            }
+
+                            uint32_t ip = esp_ip4addr_aton(param2);
+                            if (ip != 0) {
+                                const char *name = NULL;
+                                if (httpd_query_key_value(buf, "dhcp_name", param3, sizeof(param3)) == ESP_OK && strlen(param3) > 0) {
+                                    preprocess_string(param3);
+                                    name = param3;
+                                }
+                                add_dhcp_reservation(mac_bytes, ip, name);
+                                ESP_LOGI(TAG, "Added DHCP reservation: %s -> %s", param1, param2);
+                            }
+                        }
+                    }
+                }
+            }
+
+            /* Check for delete DHCP reservation */
+            if (httpd_query_key_value(buf, "del_dhcp_mac", param1, sizeof(param1)) == ESP_OK) {
+                preprocess_string(param1);
+                unsigned int mac[6];
+                if (sscanf(param1, "%02X:%02X:%02X:%02X:%02X:%02X",
+                           &mac[0], &mac[1], &mac[2], &mac[3], &mac[4], &mac[5]) == 6 ||
+                    sscanf(param1, "%02x:%02x:%02x:%02x:%02x:%02x",
+                           &mac[0], &mac[1], &mac[2], &mac[3], &mac[4], &mac[5]) == 6) {
+                    uint8_t mac_bytes[6];
+                    for (int i = 0; i < 6; i++) {
+                        mac_bytes[i] = (uint8_t)mac[i];
+                    }
+                    del_dhcp_reservation(mac_bytes);
+                    ESP_LOGI(TAG, "Deleted DHCP reservation: %s", param1);
+                }
+            }
+
             /* Check for add port mapping */
-            if (httpd_query_key_value(buf, "action", param1, sizeof(param1)) == ESP_OK) {
+            if (httpd_query_key_value(buf, "port_action", param1, sizeof(param1)) == ESP_OK) {
                 if (strcmp(param1, "Add+Mapping") == 0 || strcmp(param1, "Add Mapping") == 0) {
                     if (httpd_query_key_value(buf, "proto", param1, sizeof(param1)) == ESP_OK &&
                         httpd_query_key_value(buf, "ext_port", param2, sizeof(param2)) == ESP_OK &&
@@ -432,6 +485,41 @@ static esp_err_t portforward_get_handler(httpd_req_t *req)
         free(buf);
     }
 
+    /* Build DHCP reservations table HTML */
+    char dhcp_html[2048] = "";
+    int dhcp_offset = 0;
+    bool has_reservations = false;
+
+    for (int i = 0; i < MAX_DHCP_RESERVATIONS; i++) {
+        if (dhcp_reservations[i].valid) {
+            has_reservations = true;
+            esp_ip4_addr_t addr;
+            addr.addr = dhcp_reservations[i].ip;
+
+            dhcp_offset += snprintf(dhcp_html + dhcp_offset, sizeof(dhcp_html) - dhcp_offset,
+                "<tr>"
+                "<td>%02X:%02X:%02X:%02X:%02X:%02X</td>"
+                "<td>" IPSTR "</td>"
+                "<td>%s</td>"
+                "<td><a href='/mappings?del_dhcp_mac=%02X:%02X:%02X:%02X:%02X:%02X' class='red-button'>Delete</a></td>"
+                "</tr>",
+                dhcp_reservations[i].mac[0], dhcp_reservations[i].mac[1],
+                dhcp_reservations[i].mac[2], dhcp_reservations[i].mac[3],
+                dhcp_reservations[i].mac[4], dhcp_reservations[i].mac[5],
+                IP2STR(&addr),
+                dhcp_reservations[i].name[0] ? dhcp_reservations[i].name : "-",
+                dhcp_reservations[i].mac[0], dhcp_reservations[i].mac[1],
+                dhcp_reservations[i].mac[2], dhcp_reservations[i].mac[3],
+                dhcp_reservations[i].mac[4], dhcp_reservations[i].mac[5]
+            );
+        }
+    }
+
+    if (!has_reservations) {
+        snprintf(dhcp_html, sizeof(dhcp_html),
+            "<tr><td colspan='4' style='text-align:center; color:#888;'>No DHCP reservations configured</td></tr>");
+    }
+
     /* Build port mapping table HTML */
     char portmap_html[2048] = "";
     int offset = 0;
@@ -449,7 +537,7 @@ static esp_err_t portforward_get_handler(httpd_req_t *req)
                 "<td>%d</td>"
                 "<td>" IPSTR "</td>"
                 "<td>%d</td>"
-                "<td><a href='/portforward?del_proto=%s&del_port=%d' class='red-button small-button'>Delete</a></td>"
+                "<td><a href='/mappings?del_proto=%s&del_port=%d' class='red-button'>Delete</a></td>"
                 "</tr>",
                 portmap_tab[i].proto == PROTO_TCP ? "TCP" : "UDP",
                 portmap_tab[i].mport,
@@ -467,28 +555,28 @@ static esp_err_t portforward_get_handler(httpd_req_t *req)
     }
 
     /* Build the page */
-    const char* portforward_page_template = PORTFORWARD_PAGE;
-    int page_len = strlen(portforward_page_template) + strlen(portmap_html) + 512;
-    char* portforward_page = malloc(page_len);
+    const char* mappings_page_template = MAPPINGS_PAGE;
+    int page_len = strlen(mappings_page_template) + strlen(dhcp_html) + strlen(portmap_html) + 512;
+    char* mappings_page = malloc(page_len);
 
-    if (portforward_page == NULL) {
-        ESP_LOGE(TAG, "Failed to allocate memory for portforward page");
+    if (mappings_page == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate memory for mappings page");
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
         return ESP_ERR_NO_MEM;
     }
 
-    snprintf(portforward_page, page_len, portforward_page_template, portmap_html);
+    snprintf(mappings_page, page_len, mappings_page_template, dhcp_html, portmap_html);
 
-    httpd_resp_send(req, portforward_page, strlen(portforward_page));
-    free(portforward_page);
+    httpd_resp_send(req, mappings_page, strlen(mappings_page));
+    free(mappings_page);
 
     return ESP_OK;
 }
 
-static httpd_uri_t portforwardp = {
-    .uri       = "/portforward",
+static httpd_uri_t mappingsp = {
+    .uri       = "/mappings",
     .method    = HTTP_GET,
-    .handler   = portforward_get_handler,
+    .handler   = mappings_get_handler,
 };
 
 httpd_handle_t start_webserver(void)
@@ -506,7 +594,7 @@ httpd_handle_t start_webserver(void)
         ESP_LOGI(TAG, "Registering URI handlers");
         httpd_register_uri_handler(server, &indexp);
         httpd_register_uri_handler(server, &configp);
-        httpd_register_uri_handler(server, &portforwardp);
+        httpd_register_uri_handler(server, &mappingsp);
         return server;
     }
 
