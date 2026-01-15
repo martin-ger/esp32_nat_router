@@ -24,23 +24,6 @@ pio run -t upload      # Flash
 pio device monitor     # Serial monitor
 ```
 
-### Flash Pre-built Binaries
-```bash
-# ESP32:
-esptool.py --chip esp32 --before default_reset --after hard_reset write_flash \
-  -z --flash_mode dio --flash_freq 40m --flash_size detect \
-  0x1000 build/esp32/bootloader.bin \
-  0x8000 build/esp32/partitions.bin \
-  0x10000 build/esp32/firmware.bin
-
-# ESP32-C3:
-esptool.py --chip esp32c3 --before default_reset --after hard_reset write_flash \
-  -z --flash_size detect \
-  0x0 build/esp32c3/bootloader.bin \
-  0x8000 build/esp32c3/partitions.bin \
-  0x10000 build/esp32c3/firmware.bin
-```
-
 ## Architecture
 
 ### Source Structure
@@ -53,7 +36,7 @@ main/
 
 components/
 ├── dhcpserver/          # Custom DHCP server with reservation support (overrides ESP-IDF built-in)
-├── cmd_router/          # CLI commands: set_sta, set_ap, portmap, dhcp_reserve, show
+├── cmd_router/          # CLI commands: set_sta, set_ap, portmap, dhcp_reserve, disable/enable, set_web_password, show
 ├── cmd_system/          # System commands: free, heap, restart, tasks
 └── cmd_nvs/             # NVS storage commands: nvs_set, nvs_get, nvs_erase
 ```
@@ -118,7 +101,7 @@ struct dhcp_reservation_entry {
 ### Configuration Storage
 All settings persist in NVS (Non-Volatile Storage) under namespace `esp32_nat`:
 - WiFi credentials, static IP settings, port mappings, DHCP reservations
-- Web interface lock state
+- Web interface password (`web_password` key) and disable state (`lock` key)
 - Survives firmware updates (use `esptool.py erase_flash` for factory reset)
 
 ### Critical SDK Configuration
@@ -140,6 +123,9 @@ portmap add TCP <ext_port> <int_ip> <int_port>  # Add port mapping
 portmap del TCP <ext_port>        # Delete port mapping
 dhcp_reserve add <mac> <ip> [-n <name>]         # Add DHCP reservation
 dhcp_reserve del <mac>            # Delete DHCP reservation
+set_web_password <password>       # Set web interface password (empty to disable)
+disable                           # Disable web interface completely
+enable                            # Re-enable web interface
 show                              # Display current config
 ```
 
@@ -148,9 +134,22 @@ show                              # Display current config
 Access at `http://192.168.4.1` when connected to the AP.
 
 **Pages:**
-- `/` - System status (connection, IPs, clients, heap)
-- `/config` - Router configuration (AP/STA settings, static IP, MAC addresses)
-- `/mappings` - DHCP reservations and port forwarding management
+- `/` - System status (connection, IPs, clients, heap), login form, password management
+- `/config` - Router configuration (AP/STA settings, static IP, MAC addresses) - protected
+- `/mappings` - DHCP reservations and port forwarding management - protected
+
+**Password Protection:**
+- Optional password protects `/config` and `/mappings` pages
+- Login form shown on index page when password is set
+- Cookie-based sessions with 30-minute timeout
+- Set via web interface or `set_web_password` command
+- Empty password disables protection
+
+**Session Management** (`http_server.c`):
+- `create_session()` - Generate token and set cookie
+- `is_authenticated()` - Validate session cookie and expiry
+- `clear_session()` - Logout / invalidate session
+- Session state stored in static variables (lost on reboot)
 
 ## LED Status (GPIO 2)
 - Solid on: Connected to upstream AP
