@@ -462,6 +462,27 @@ int set_ap_ip(int argc, char **argv)
 
     preprocess_string((char*)set_ap_ip_arg.ap_ip_str->sval[0]);
 
+    // Get current AP IP to check if network is changing
+    char* old_ap_ip = NULL;
+    get_config_param_str("ap_ip", &old_ap_ip);
+
+    // Parse new IP
+    uint32_t new_ip = esp_ip4addr_aton((char*)set_ap_ip_arg.ap_ip_str->sval[0]);
+
+    // Check if we're changing to a different Class C network
+    bool clear_config = false;
+    if (old_ap_ip != NULL) {
+        uint32_t old_ip = esp_ip4addr_aton(old_ap_ip);
+
+        // Compare first 3 octets (Class C network: /24)
+        if ((old_ip & 0xFFFFFF00) != (new_ip & 0xFFFFFF00)) {
+            clear_config = true;
+            ESP_LOGI(TAG, "AP IP network changed from %s to %s - clearing reservations and port mappings",
+                     old_ap_ip, set_ap_ip_arg.ap_ip_str->sval[0]);
+        }
+        free(old_ap_ip);
+    }
+
     err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
     if (err != ESP_OK) {
         return err;
@@ -469,9 +490,19 @@ int set_ap_ip(int argc, char **argv)
 
     err = nvs_set_str(nvs, "ap_ip", set_ap_ip_arg.ap_ip_str->sval[0]);
     if (err == ESP_OK) {
-        ESP_LOGI(TAG, "AP IP address %s stored.", set_ap_ip_arg.ap_ip_str->sval[0]);
+        err = nvs_commit(nvs);
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "AP IP address %s stored.", set_ap_ip_arg.ap_ip_str->sval[0]);
+        }
     }
     nvs_close(nvs);
+
+    // Clear DHCP reservations and port mappings if network changed
+    if (clear_config && err == ESP_OK) {
+        clear_all_dhcp_reservations();
+        clear_all_portmaps();
+    }
+
     return err;
 }
 
@@ -614,6 +645,9 @@ static int show(int argc, char **argv)
         printf ("IP: " IPSTR "\n", IP2STR(&addr));
     }
     printf("%d Stations connected\n", connect_count);
+
+    printf("\nDHCP Pool:\n");
+    print_dhcp_pool();
 
     printf("\nPort Mappings:\n");
     print_portmap_tab();

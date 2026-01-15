@@ -1,10 +1,21 @@
 # ESP32 NAT Router with WPA2 Enterprise support
 
-This is a firmware to use the ESP32 as WiFi NAT router. It can be used as
+This is a firmware to use the ESP32 as WiFi NAT router. It can be used as:
 - Simple range extender for an existing WiFi network
 - Setting up an additional WiFi network with different SSID/password for guests or IOT devices
-- Convert a corporate (WPA2-Enterprise) network to a regular network, for simple devices.
+- Convert a corporate (WPA2-Enterprise) network to a regular network, for simple devices
 
+## Key Features
+
+- **NAT Routing**: Full WiFi NAT router with IP forwarding (15+ Mbps throughput)
+- **DHCP Reservations**: Assign fixed IPs to specific MAC addresses
+- **Port Forwarding**: Map external ports to internal devices
+- **Web Interface**: Modern web UI at 192.168.4.1 for easy configuration
+- **Static IP Support**: Configure static IP for the STA (upstream) interface
+- **WPA2-Enterprise Support**: Connect to corporate networks and convert them to WPA2-PSK
+- **LED Status Indicator**: Visual feedback for connection status and connected clients
+- **Serial Console**: Full CLI for advanced configuration
+- **Persistent Storage**: All settings stored in NVS, survive firmware updates
 
 It can achieve a bandwidth of more than 15mbps.
 
@@ -25,15 +36,40 @@ All tests used `IPv4` and the `TCP` protocol.
 After first boot the ESP32 NAT Router will offer a WiFi network with an open AP and the ssid "ESP32_NAT_Router". Configuration can either be done via a simple web interface or via the serial console. 
 
 ## Web Config Interface
-The web interface allows for the configuration of all parameters. Connect you PC or smartphone to the WiFi SSID "ESP32_NAT_Router" and point your browser to "http://192.168.4.1". This page should appear:
+The web interface allows for the configuration of all parameters. Connect your PC or smartphone to the WiFi SSID "ESP32_NAT_Router" and point your browser to "http://192.168.4.1" (or the configured AP IP address).
 
-<img src="https://raw.githubusercontent.com/marci07iq/esp32_nat_router/master/ESP32_NAT_UI3.png">
+The web interface consists of three pages:
 
-First enter the appropriate values for the uplink WiFi network, the "STA Settings". Leave password blank for open networks. Click "Connect". The ESP32 reboots and will connect to your WiFi router.
+### System Status Page (/)
+The main dashboard displays:
+- Current connection status and uptime
+- STA (upstream) and AP IP addresses and MAC addresses
+- Used IP pool for DHCP
+- Number of connected clients
+- Free heap memory
 
-Now you can reconnect and reload the page and change the "Soft AP Settings". Click "Set" and again the ESP32 reboots. Now it is ready for forwarding traffic over the newly configured Soft AP. Be aware that these changes also affect the config interface, i.e. to do further configuration, connect to the ESP32 through one of the newly configured WiFi networks.
+<img src="UI_Index.png">
 
-If you want to enter a '+' in the web interface you have to use HTTP-style hex encoding like "Mine%2bYours". This will result in a string "Mine+Yours". With this hex encoding you can enter any byte value you like, except for 0 (for C-internal reasons).
+### Configuration Page (/config)
+Configure all router settings:
+- **Access Point Settings**: Configure the ESP32's access point name, password, IP address (default: 192.168.4.1), and MAC address
+- **Station Settings (Uplink)**: Enter the SSID and password for the upstream WiFi network (leave password blank for open networks), with optional WPA2-Enterprise credentials and MAC address customization
+- **Static IP Settings**: Optionally configure a static IP for the STA (upstream) interface
+- **Device Management**: Reboot the device
+- Click "Apply", "Connect", or "Set Static IP" to apply changes (the ESP32 will reboot)
+
+<img src="UI_Settings.png">
+
+Be aware that changes to AP settings (including the AP IP address) also affect the config interface itself - after changing the AP IP address, reconnect to the ESP32 at the new IP address to continue configuration. Also all currently defined DHCP reservations and port forwards will be deleted.
+
+### Mappings Page (/mappings)
+Manage network mappings:
+- **DHCP Reservations**: Assign fixed IP addresses to specific MAC addresses (useful for servers/devices that need consistent IPs). Make sure you assign port numbers in the range of the DHCP pool.
+- **Port Forwarding**: Create port mappings to access devices behind the NAT router (e.g., `TCP 8080 -> 192.168.4.2:80`)
+
+<img src="UI_Mappings.png">
+
+**Note**: If you want to enter a '+' or other special characters in the web interface, use HTTP-style hex encoding like "Mine%2bYours" (results in "Mine+Yours"). With this hex encoding you can enter any byte value except 0 (for C-internal reasons).
 
 It you want to disable the web interface (e.g. for security reasons), go to the CLI and enter:
 ```
@@ -49,10 +85,23 @@ If you made a mistake and have lost all contact with the ESP you can still use t
 
 ## Access devices behind the router
 
-If you want to access a device behind the esp32 NAT router? `PC -> local router -> esp32NAT -> server`
+If you want to access a device behind the esp32 NAT router: `PC -> local router -> esp32NAT -> server`
 
-Lets say "server" is exposing a webserver on port 80 and you want to access that from your PC.  
-For that you need to configure a portmap (e.g. by connecting via the arduino IDE uart monitor through USB)
+### DHCP Reservations
+To ensure devices behind the router always get the same IP address, you can configure DHCP reservations:
+
+```
+dhcp_reserve add AA:BB:CC:DD:EE:FF 192.168.4.10 -n MyServer
+                                                    ↑ optional friendly name
+                                   ↑ reserved IP address
+                 ↑ device MAC address
+```
+
+This is useful for servers or IoT devices that other devices need to connect to reliably.
+
+### Port Forwarding
+Let's say "server" is exposing a webserver on port 80 and you want to access that from your PC outside the NAT network.
+For that you need to configure a port mapping (via the web interface at `/mappings` or the serial console):
 
 ```
 portmap add TCP 8080 192.168.4.2 80
@@ -60,8 +109,8 @@ portmap add TCP 8080 192.168.4.2 80
                             ↑ server's ip in esp32NAT network
                   ↑ exposed port in the local router's network
 ```
-     
-Assuming the esp32NAT's ip address in your `local router` is `192.168.0.57` you can acces the server by typing `192.168.0.57:8080` into your browser now.
+
+Assuming the esp32NAT's IP address in your `local router` is `192.168.0.57`, you can access the server by typing `192.168.0.57:8080` into your browser.
 
 ## Interpreting the on board LED
 
@@ -189,7 +238,14 @@ portmap  [add|del] [TCP|UDP] <ext_portno> <int_ip> <int_portno>
       <int_ip>  internal IP
   <int_portno>  internal port number
 
-show 
+dhcp_reserve  [add|del] <mac> <ip> [-n <name>]
+  Add or delete a DHCP reservation (fixed IP for a MAC address)
+     [add|del]  add or delete reservation
+         <mac>  MAC address (format: AA:BB:CC:DD:EE:FF)
+          <ip>  IP address to reserve
+  -n, --name=<name>  Optional device name
+
+show
   Get status and config of the router
 ```
 

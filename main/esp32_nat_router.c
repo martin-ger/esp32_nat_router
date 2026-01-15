@@ -231,6 +231,35 @@ esp_err_t del_portmap(u8_t proto, u16_t mport) {
     return ESP_OK;
 }
 
+esp_err_t clear_all_portmaps() {
+    esp_err_t err;
+    nvs_handle_t nvs;
+
+    // Clear all portmap entries from NAPT
+    for (int i = 0; i < IP_PORTMAP_MAX; i++) {
+        if (portmap_tab[i].valid) {
+            ip_portmap_remove(portmap_tab[i].proto, portmap_tab[i].mport);
+            portmap_tab[i].valid = 0;
+        }
+    }
+
+    // Save cleared table to NVS
+    err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err != ESP_OK) {
+        return err;
+    }
+    err = nvs_set_blob(nvs, "portmap_tab", portmap_tab, sizeof(portmap_tab));
+    if (err == ESP_OK) {
+        err = nvs_commit(nvs);
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "All port mappings cleared.");
+        }
+    }
+    nvs_close(nvs);
+
+    return err;
+}
+
 esp_err_t get_dhcp_reservations() {
     esp_err_t err;
     nvs_handle_t nvs;
@@ -272,6 +301,47 @@ void print_dhcp_reservations() {
             printf("\n");
         }
     }
+}
+
+void get_dhcp_pool_range(uint32_t server_ip, uint32_t *start_ip, uint32_t *end_ip) {
+    // DHCP pool calculation logic (mirrors dhcps_poll_set in dhcpserver.c)
+    // Default netmask is 255.255.255.0
+    uint32_t netmask = 0xFFFFFF00; // 255.255.255.0 in host byte order
+    uint32_t server_ip_host = ntohl(server_ip);
+    uint32_t range_start_ip = server_ip_host & netmask;
+    uint32_t range_end_ip = range_start_ip | ~netmask;
+
+    // Determine which side of the server IP has more addresses
+    if (server_ip_host - range_start_ip > range_end_ip - server_ip_host) {
+        // More addresses before server IP
+        range_start_ip = range_start_ip + 1;
+        range_end_ip = server_ip_host - 1;
+    } else {
+        // More addresses after server IP
+        range_start_ip = server_ip_host + 1;
+        range_end_ip = range_end_ip - 1;
+    }
+
+    // Limit to DHCPS_MAX_LEASE (100 addresses) - already defined in dhcpserver.h
+    if (range_end_ip - range_start_ip + 1 > DHCPS_MAX_LEASE) {
+        range_end_ip = range_start_ip + DHCPS_MAX_LEASE - 1;
+    }
+
+    *start_ip = htonl(range_start_ip);
+    *end_ip = htonl(range_end_ip);
+}
+
+void print_dhcp_pool() {
+    uint32_t start_ip, end_ip;
+    get_dhcp_pool_range(my_ap_ip, &start_ip, &end_ip);
+
+    ip4_addr_t start_addr, end_addr;
+    start_addr.addr = start_ip;
+    end_addr.addr = end_ip;
+
+    printf("DHCP Pool: " IPSTR " - " IPSTR " (%lu addresses)\n",
+        IP2STR(&start_addr), IP2STR(&end_addr),
+        (unsigned long)(ntohl(end_ip) - ntohl(start_ip) + 1));
 }
 
 esp_err_t add_dhcp_reservation(const uint8_t *mac, uint32_t ip, const char *name) {
@@ -352,6 +422,32 @@ esp_err_t del_dhcp_reservation(const uint8_t *mac) {
         }
     }
     return ESP_OK;
+}
+
+esp_err_t clear_all_dhcp_reservations() {
+    esp_err_t err;
+    nvs_handle_t nvs;
+
+    // Clear all reservation entries
+    for (int i = 0; i < MAX_DHCP_RESERVATIONS; i++) {
+        dhcp_reservations[i].valid = 0;
+    }
+
+    // Save cleared table to NVS
+    err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err != ESP_OK) {
+        return err;
+    }
+    err = nvs_set_blob(nvs, "dhcp_res", dhcp_reservations, sizeof(dhcp_reservations));
+    if (err == ESP_OK) {
+        err = nvs_commit(nvs);
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "All DHCP reservations cleared.");
+        }
+    }
+    nvs_close(nvs);
+
+    return err;
 }
 
 uint32_t lookup_dhcp_reservation(const uint8_t *mac) {

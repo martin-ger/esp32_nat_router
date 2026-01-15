@@ -1077,36 +1077,20 @@ static s16_t parse_msg(dhcps_t *dhcps, struct dhcps_msg *m, u16_t len)
         // Check for DHCP reservation for this MAC address
         uint32_t reserved_ip = lookup_dhcp_reservation(m->chaddr);
         if (reserved_ip != 0) {
-            ip4_addr_t res_addr;
+            ip4_addr_t res_addr, old_addr;
             res_addr.addr = reserved_ip;
+            old_addr.addr = dhcps->client_address.addr;
 
-            // Use the reserved IP if it's within our pool range
-            if (reserved_ip >= dhcps->dhcps_poll.start_ip.addr &&
-                reserved_ip <= dhcps->dhcps_poll.end_ip.addr) {
-                ip4_addr_t old_addr;
-                old_addr.addr = dhcps->client_address.addr;
-                dhcps->client_address.addr = reserved_ip;
-                ESP_LOGI(TAG, "DHCP reservation: MAC %02X:%02X:%02X:%02X:%02X:%02X -> %d.%d.%d.%d (pool would assign %d.%d.%d.%d)",
-                    m->chaddr[0], m->chaddr[1], m->chaddr[2],
-                    m->chaddr[3], m->chaddr[4], m->chaddr[5],
-                    ip4_addr1_16(&res_addr), ip4_addr2_16(&res_addr),
-                    ip4_addr3_16(&res_addr), ip4_addr4_16(&res_addr),
-                    ip4_addr1_16(&old_addr), ip4_addr2_16(&old_addr),
-                    ip4_addr3_16(&old_addr), ip4_addr4_16(&old_addr));
-            } else {
-                ip4_addr_t start_addr, end_addr;
-                start_addr.addr = dhcps->dhcps_poll.start_ip.addr;
-                end_addr.addr = dhcps->dhcps_poll.end_ip.addr;
-                ESP_LOGI(TAG, "DHCP reservation %d.%d.%d.%d for MAC %02X:%02X:%02X:%02X:%02X:%02X outside pool %d.%d.%d.%d-%d.%d.%d.%d (ignored)",
-                    ip4_addr1_16(&res_addr), ip4_addr2_16(&res_addr),
-                    ip4_addr3_16(&res_addr), ip4_addr4_16(&res_addr),
-                    m->chaddr[0], m->chaddr[1], m->chaddr[2],
-                    m->chaddr[3], m->chaddr[4], m->chaddr[5],
-                    ip4_addr1_16(&start_addr), ip4_addr2_16(&start_addr),
-                    ip4_addr3_16(&start_addr), ip4_addr4_16(&start_addr),
-                    ip4_addr1_16(&end_addr), ip4_addr2_16(&end_addr),
-                    ip4_addr3_16(&end_addr), ip4_addr4_16(&end_addr));
-            }
+            // Always use the reserved IP, regardless of pool range
+            dhcps->client_address.addr = reserved_ip;
+
+            ESP_LOGI(TAG, "DHCP reservation: MAC %02X:%02X:%02X:%02X:%02X:%02X -> %d.%d.%d.%d (pool would assign %d.%d.%d.%d)",
+                m->chaddr[0], m->chaddr[1], m->chaddr[2],
+                m->chaddr[3], m->chaddr[4], m->chaddr[5],
+                ip4_addr1_16(&res_addr), ip4_addr2_16(&res_addr),
+                ip4_addr3_16(&res_addr), ip4_addr4_16(&res_addr),
+                ip4_addr1_16(&old_addr), ip4_addr2_16(&old_addr),
+                ip4_addr3_16(&old_addr), ip4_addr4_16(&old_addr));
         }
 
         if (dhcps->client_address.addr > dhcps->dhcps_poll.end_ip.addr) {

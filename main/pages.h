@@ -170,6 +170,10 @@ font-size: 0.8rem;\
 <td>%s</td>\
 </tr>\
 <tr>\
+<td>DHCP Pool:</td>\
+<td>%s</td>\
+</tr>\
+<tr>\
 <td>Clients:</td>\
 <td>%d</td>\
 </tr>\
@@ -393,6 +397,10 @@ setTimeout(\"location.href = '/'\", 10000);\
 <tr>\
 <td>Password</td>\
 <td><input type='text' name='ap_password' value='%s' placeholder='Min 8 chars or empty'/></td>\
+</tr>\
+<tr>\
+<td>AP IP Address</td>\
+<td><input type='text' name='ap_ip_addr' value='%s' placeholder='192.168.4.1'/></td>\
 </tr>\
 <tr>\
 <td>MAC Address</td>\

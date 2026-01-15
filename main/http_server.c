@@ -92,6 +92,7 @@ static esp_err_t index_get_handler(httpd_req_t *req)
     char conn_status[32];
     char sta_ip_str[32];
     char ap_ip_str[32];
+    char dhcp_pool_str[64];
 
     if (ap_connect) {
         strcpy(conn_status, "Connected");
@@ -107,6 +108,14 @@ static esp_err_t index_get_handler(httpd_req_t *req)
     ap_addr.addr = my_ap_ip;
     sprintf(ap_ip_str, IPSTR, IP2STR(&ap_addr));
 
+    // Get DHCP pool range
+    uint32_t start_ip, end_ip;
+    get_dhcp_pool_range(my_ap_ip, &start_ip, &end_ip);
+    esp_ip4_addr_t start_addr, end_addr;
+    start_addr.addr = start_ip;
+    end_addr.addr = end_ip;
+    sprintf(dhcp_pool_str, IPSTR " - " IPSTR, IP2STR(&start_addr), IP2STR(&end_addr));
+
     uint32_t free_heap = esp_get_free_heap_size() / 1024;
 
     /* Build the page */
@@ -121,7 +130,7 @@ static esp_err_t index_get_handler(httpd_req_t *req)
     }
 
     snprintf(index_page, page_len, index_page_template,
-        conn_status, sta_ip_str, ap_ip_str, connect_count, free_heap);
+        conn_status, sta_ip_str, ap_ip_str, dhcp_pool_str, connect_count, free_heap);
 
     httpd_resp_send(req, index_page, strlen(index_page));
     free(index_page);
@@ -161,7 +170,7 @@ static esp_err_t config_get_handler(httpd_req_t *req)
             char param4[64];
             char param5[64];
 
-            /* Handle AP settings with optional MAC */
+            /* Handle AP settings with optional MAC and IP */
             if (httpd_query_key_value(buf, "ap_ssid", param1, sizeof(param1)) == ESP_OK) {
                 ESP_LOGI(TAG, "Found URL query parameter => ap_ssid=%s", param1);
                 preprocess_string(param1);
@@ -177,13 +186,23 @@ static esp_err_t config_get_handler(httpd_req_t *req)
                     argv[2] = param2;
                     set_ap(argc, argv);
 
-                    // Check for optional AP MAC address
-                    if (httpd_query_key_value(buf, "ap_mac", param3, sizeof(param3)) == ESP_OK && strlen(param3) > 0) {
-                        ESP_LOGI(TAG, "Found URL query parameter => ap_mac=%s", param3);
+                    // Check for optional AP IP address
+                    if (httpd_query_key_value(buf, "ap_ip_addr", param3, sizeof(param3)) == ESP_OK && strlen(param3) > 0) {
+                        ESP_LOGI(TAG, "Found URL query parameter => ap_ip_addr=%s", param3);
                         preprocess_string(param3);
+                        char* ip_argv[2];
+                        ip_argv[0] = "set_ap_ip";
+                        ip_argv[1] = param3;
+                        set_ap_ip(2, ip_argv);
+                    }
+
+                    // Check for optional AP MAC address
+                    if (httpd_query_key_value(buf, "ap_mac", param4, sizeof(param4)) == ESP_OK && strlen(param4) > 0) {
+                        ESP_LOGI(TAG, "Found URL query parameter => ap_mac=%s", param4);
+                        preprocess_string(param4);
                         // Parse MAC address string (format: AA:BB:CC:DD:EE:FF)
                         unsigned int mac[6];
-                        if (sscanf(param3, "%02x:%02x:%02x:%02x:%02x:%02x",
+                        if (sscanf(param4, "%02x:%02x:%02x:%02x:%02x:%02x",
                                    &mac[0], &mac[1], &mac[2], &mac[3], &mac[4], &mac[5]) == 6) {
                             char mac_str[6][4];
                             for (int i = 0; i < 6; i++) {
@@ -297,6 +316,16 @@ static esp_err_t config_get_handler(httpd_req_t *req)
     char* safe_ent_username = html_escape(ent_username);
     char* safe_ent_identity = html_escape(ent_identity);
 
+    // Get current AP IP address
+    char* ap_ip_str = NULL;
+    get_config_param_str("ap_ip", &ap_ip_str);
+    if (ap_ip_str == NULL) {
+        ap_ip_str = malloc(16);
+        if (ap_ip_str != NULL) {
+            strcpy(ap_ip_str, "192.168.4.1");
+        }
+    }
+
     // Get MAC addresses as strings
     char ap_mac_str[18] = "";
     char sta_mac_str[18] = "";
@@ -313,7 +342,8 @@ static esp_err_t config_get_handler(httpd_req_t *req)
 
     // Check if any html_escape failed
     if (safe_ap_ssid == NULL || safe_ap_passwd == NULL || safe_ssid == NULL ||
-        safe_passwd == NULL || safe_ent_username == NULL || safe_ent_identity == NULL) {
+        safe_passwd == NULL || safe_ent_username == NULL || safe_ent_identity == NULL ||
+        ap_ip_str == NULL) {
         ESP_LOGE(TAG, "Failed to escape HTML strings");
         free(safe_ap_ssid);
         free(safe_ap_passwd);
@@ -321,6 +351,7 @@ static esp_err_t config_get_handler(httpd_req_t *req)
         free(safe_passwd);
         free(safe_ent_username);
         free(safe_ent_identity);
+        free(ap_ip_str);
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
         return ESP_ERR_NO_MEM;
     }
@@ -329,11 +360,12 @@ static esp_err_t config_get_handler(httpd_req_t *req)
         strlen(config_page_template) +
         strlen(safe_ap_ssid) +
         strlen(safe_ap_passwd) +
+        strlen(ap_ip_str) +
+        strlen(ap_mac_str) +
         strlen(safe_ssid) +
         strlen(safe_passwd) +
         strlen(safe_ent_username) +
         strlen(safe_ent_identity) +
-        strlen(ap_mac_str) +
         strlen(sta_mac_str) +
         strlen(static_ip) +
         strlen(subnet_mask) +
@@ -348,13 +380,14 @@ static esp_err_t config_get_handler(httpd_req_t *req)
         free(safe_passwd);
         free(safe_ent_username);
         free(safe_ent_identity);
+        free(ap_ip_str);
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
         return ESP_ERR_NO_MEM;
     }
 
     snprintf(
         config_page, page_len, config_page_template,
-        safe_ap_ssid, safe_ap_passwd, ap_mac_str,
+        safe_ap_ssid, safe_ap_passwd, ap_ip_str, ap_mac_str,
         safe_ssid, safe_passwd, safe_ent_username, safe_ent_identity, sta_mac_str,
         static_ip, subnet_mask, gateway_addr);
 
@@ -364,6 +397,7 @@ static esp_err_t config_get_handler(httpd_req_t *req)
     free(safe_passwd);
     free(safe_ent_username);
     free(safe_ent_identity);
+    free(ap_ip_str);
 
     httpd_resp_send(req, config_page, strlen(config_page));
     free(config_page);
@@ -456,7 +490,7 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
 
             /* Check for add port mapping */
             if (httpd_query_key_value(buf, "port_action", param1, sizeof(param1)) == ESP_OK) {
-                if (strcmp(param1, "Add+Mapping") == 0 || strcmp(param1, "Add Mapping") == 0) {
+                if (strcmp(param1, "Add+Forward") == 0 || strcmp(param1, "Add Forward") == 0) {
                     if (httpd_query_key_value(buf, "proto", param1, sizeof(param1)) == ESP_OK &&
                         httpd_query_key_value(buf, "ext_port", param2, sizeof(param2)) == ESP_OK &&
                         httpd_query_key_value(buf, "int_ip", param3, sizeof(param3)) == ESP_OK &&

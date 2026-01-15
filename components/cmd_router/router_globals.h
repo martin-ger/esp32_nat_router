@@ -58,6 +58,7 @@ int set_sta_static(int argc, char **argv);
 int set_sta_mac(int argc, char **argv);
 int set_ap(int argc, char **argv);
 int set_ap_mac(int argc, char **argv);
+int set_ap_ip(int argc, char **argv);
 
 esp_err_t get_config_param_blob(char* name, uint8_t** blob, size_t blob_len);
 esp_err_t get_config_param_int(char* name, int* param);
@@ -66,12 +67,17 @@ esp_err_t get_config_param_str(char* name, char** param);
 void print_portmap_tab();
 esp_err_t add_portmap(uint8_t proto, uint16_t mport, uint32_t daddr, uint16_t dport);
 esp_err_t del_portmap(uint8_t proto, uint16_t mport);
+esp_err_t clear_all_portmaps();
 
 esp_err_t get_dhcp_reservations();
 void print_dhcp_reservations();
 esp_err_t add_dhcp_reservation(const uint8_t *mac, uint32_t ip, const char *name);
 esp_err_t del_dhcp_reservation(const uint8_t *mac);
+esp_err_t clear_all_dhcp_reservations();
 uint32_t lookup_dhcp_reservation(const uint8_t *mac);
+
+void get_dhcp_pool_range(uint32_t server_ip, uint32_t *start_ip, uint32_t *end_ip);
+void print_dhcp_pool();
 
 #ifdef __cplusplus
 }
