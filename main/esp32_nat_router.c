@@ -836,16 +836,16 @@ void app_main(void)
     ip_napt_enable(my_ap_ip, 1);
     ESP_LOGI(TAG, "NAT is enabled");
 
-    char* lock = NULL;
-    get_config_param_str("lock", &lock);
-    if (lock == NULL) {
-        lock = param_set_default("0");
+    char* web_disabled = NULL;
+    get_config_param_str("lock", &web_disabled);
+    if (web_disabled == NULL) {
+        web_disabled = param_set_default("0");
     }
-    if (strcmp(lock, "0") ==0) {
-        ESP_LOGI(TAG,"Starting config web server");
+    if (strcmp(web_disabled, "0") ==0) {
+        ESP_LOGI(TAG,"Starting web server");
         start_webserver();
     }
-    free(lock);
+    free(web_disabled);
 
     initialize_console();
 

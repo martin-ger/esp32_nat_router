@@ -45,6 +45,8 @@ static void register_set_ap_ip(void);
 static void register_show(void);
 static void register_portmap(void);
 static void register_dhcp_reserve(void);
+static void register_disable_enable(void);
+static void register_set_web_password(void);
 
 void preprocess_string(char* str)
 {
@@ -160,6 +162,8 @@ void register_router(void)
     register_portmap();
     register_dhcp_reserve();
     register_show();
+    register_disable_enable();
+    register_set_web_password();
 }
 
 /** Arguments used by 'set_sta' function */
@@ -517,6 +521,120 @@ static void register_set_ap_ip(void)
         .hint = NULL,
         .func = &set_ap_ip,
         .argtable = &set_ap_ip_arg
+    };
+    ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
+}
+
+/* 'disable' command */
+static int disable_webserver(int argc, char **argv)
+{
+    esp_err_t err;
+    nvs_handle_t nvs;
+
+    err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = nvs_set_str(nvs, "lock", "1");
+    if (err == ESP_OK) {
+        err = nvs_commit(nvs);
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "Web interface disabled. Use 'enable' command to re-enable.");
+            printf("Web interface will be disabled after reboot.\n");
+            printf("Use 'enable' command to re-enable it.\n");
+        }
+    }
+    nvs_close(nvs);
+    return err;
+}
+
+/* 'enable' command */
+static int enable_webserver(int argc, char **argv)
+{
+    esp_err_t err;
+    nvs_handle_t nvs;
+
+    err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = nvs_set_str(nvs, "lock", "0");
+    if (err == ESP_OK) {
+        err = nvs_commit(nvs);
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "Web interface enabled.");
+            printf("Web interface will be enabled after reboot.\n");
+        }
+    }
+    nvs_close(nvs);
+    return err;
+}
+
+static void register_disable_enable(void)
+{
+    const esp_console_cmd_t disable_cmd = {
+        .command = "disable",
+        .help = "Disable the web interface",
+        .hint = NULL,
+        .func = &disable_webserver,
+    };
+    ESP_ERROR_CHECK( esp_console_cmd_register(&disable_cmd) );
+
+    const esp_console_cmd_t enable_cmd = {
+        .command = "enable",
+        .help = "Enable the web interface",
+        .hint = NULL,
+        .func = &enable_webserver,
+    };
+    ESP_ERROR_CHECK( esp_console_cmd_register(&enable_cmd) );
+}
+
+/* 'set_web_password' command */
+static int set_web_password_cmd(int argc, char **argv)
+{
+    if (argc < 2) {
+        printf("Usage: set_web_password <password>\n");
+        printf("Use empty string \"\" to disable password protection\n");
+        return 1;
+    }
+
+    esp_err_t err;
+    nvs_handle_t nvs;
+
+    err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err != ESP_OK) {
+        printf("Failed to open NVS\n");
+        return err;
+    }
+
+    err = nvs_set_str(nvs, "web_password", argv[1]);
+    if (err == ESP_OK) {
+        err = nvs_commit(nvs);
+        if (err == ESP_OK) {
+            if (argv[1][0] == '\0') {
+                ESP_LOGI(TAG, "Web password protection disabled.");
+                printf("Password protection disabled.\n");
+            } else {
+                ESP_LOGI(TAG, "Web password updated.");
+                printf("Password updated successfully.\n");
+            }
+        }
+    } else {
+        printf("Failed to set password\n");
+    }
+    nvs_close(nvs);
+    return err;
+}
+
+static void register_set_web_password(void)
+{
+    const esp_console_cmd_t cmd = {
+        .command = "set_web_password",
+        .help = "Set web interface password (empty string to disable)",
+        .hint = NULL,
+        .func = &set_web_password_cmd,
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }

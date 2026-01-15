@@ -153,6 +153,7 @@ font-size: 0.8rem;\
 </style>\
 <body>\
 <div id='container'>\
+%s\
 <h1>ESP32 NAT Router</h1>\
 <h2>System Status</h2>\
 <div class='status-table'>\
@@ -187,6 +188,7 @@ font-size: 0.8rem;\
 <a href='/config' class='nav-button'>⚙️ Router Config</a>\
 <a href='/mappings' class='nav-button'>🔀 Mappings</a>\
 </div>\
+%s\
 </div>\
 </body>\
 </html>\
@@ -378,7 +380,10 @@ padding: 0.65rem 1.25rem;\
 </style>\
 <body>\
 <div id='container'>\
-<a href='/' class='nav-link'>← Back to Home</a>\
+<div style='display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;'>\
+<a href='/' class='nav-link' style='margin: 0;'>← Back to Home</a>\
+<a href='/?logout=1' style='padding: 0.4rem 1rem; background: rgba(255,82,82,0.15); color: #ff5252; border: 1px solid #ff5252; border-radius: 6px; text-decoration: none; font-size: 0.85rem; font-weight: 500;'>Logout</a>\
+</div>\
 <h1>Router Configuration</h1>\
 <script>\
 if (window.location.search.substr(1) != '') {\
@@ -479,6 +484,19 @@ setTimeout(\"location.href = '/'\", 10000);\
 </tr>\
 </table>\
 </form>\
+\
+<div style='margin-top: 2rem; padding: 1rem; background: #fff3cd; border: 2px solid #ff9800; border-radius: 8px;'>\
+<h2 style='color: #ff6b00; margin-bottom: 0.5rem;'>⚠ Danger Zone</h2>\
+<p style='margin-bottom: 1rem; color: #666; font-size: 0.9rem;'>This will disable the web interface completely. You can only re-enable it via the serial console using the 'enable' command.</p>\
+<form action='' method='GET'>\
+<table>\
+<tr>\
+<td style='color: #d32f2f; font-weight: bold;'>Disable Interface</td>\
+<td><input type='submit' name='disable_interface' value='Disable' class='red-button' onclick='return confirm(\"Are you sure? The web interface will be disabled and can only be enabled via serial console with the enable command.\");'/></td>\
+</tr>\
+</table>\
+</form>\
+</div>\
 </div>\
 </body>\
 </html>\
@@ -715,7 +733,10 @@ padding: 0.65rem;\
 </style>\
 <body>\
 <div id='container'>\
-<a href='/' class='nav-link'>← Back to Home</a>\
+<div style='display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;'>\
+<a href='/' class='nav-link' style='margin: 0;'>← Back to Home</a>\
+<a href='/?logout=1' style='padding: 0.4rem 1rem; background: rgba(255,82,82,0.15); color: #ff5252; border: 1px solid #ff5252; border-radius: 6px; text-decoration: none; font-size: 0.85rem; font-weight: 500;'>Logout</a>\
+</div>\
 <h1>Mappings</h1>\
 \
 <div class='section'>\
@@ -805,124 +826,6 @@ padding: 0.65rem;\
 </table>\
 </form>\
 </div>\
-</div>\
-</body>\
-</html>\
-"
-
-/* Lock Page */
-#define LOCK_PAGE "<html>\
-<head>\
-<meta name='viewport' content='width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0'>\
-<meta charset='UTF-8'>\
-<title>Config Locked</title>\
-</head>\
-<style>\
-* {\
-box-sizing: border-box;\
-margin: 0;\
-padding: 0;\
-}\
-\
-body {\
-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;\
-background: linear-gradient(135deg, #1a1a2e 0%%, #16213e 100%%);\
-color: #e0e0e0;\
-padding: 1rem;\
-min-height: 100vh;\
-line-height: 1.6;\
-display: flex;\
-align-items: center;\
-justify-content: center;\
-}\
-\
-#container {\
-max-width: 400px;\
-width: 100%%;\
-padding: 2rem;\
-background: rgba(30, 30, 46, 0.9);\
-border-radius: 16px;\
-box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);\
-backdrop-filter: blur(10px);\
-text-align: center;\
-}\
-\
-h1 {\
-font-size: 1.5rem;\
-font-weight: 600;\
-color: #00d9ff;\
-margin-bottom: 0.5rem;\
-text-shadow: 0 0 20px rgba(0, 217, 255, 0.3);\
-}\
-\
-h2 {\
-font-size: 1.15rem;\
-font-weight: 500;\
-color: #f5576c;\
-margin: 1rem 0;\
-}\
-\
-input[type='password'] {\
-width: 100%%;\
-background: rgba(22, 33, 62, 0.6);\
-border: 1px solid rgba(0, 217, 255, 0.2);\
-border-radius: 8px;\
-color: #e0e0e0;\
-padding: 0.75rem;\
-font-size: 0.95rem;\
-margin: 1rem 0;\
-transition: all 0.3s;\
-}\
-\
-input:focus {\
-outline: none;\
-border-color: #00d9ff;\
-box-shadow: 0 0 0 3px rgba(0, 217, 255, 0.1);\
-background: rgba(22, 33, 62, 0.8);\
-}\
-\
-.red-button {\
-background: linear-gradient(135deg, #f093fb 0%%, #f5576c 100%%);\
-color: #fff;\
-border: none;\
-border-radius: 8px;\
-padding: 0.75rem 1.5rem;\
-font-size: 0.95rem;\
-font-weight: 600;\
-cursor: pointer;\
-transition: all 0.3s;\
-box-shadow: 0 4px 15px rgba(245, 87, 108, 0.4);\
-width: 100%%;\
-}\
-\
-.red-button:hover {\
-transform: translateY(-2px);\
-box-shadow: 0 6px 20px rgba(245, 87, 108, 0.6);\
-}\
-\
-small {\
-display: block;\
-color: #888;\
-font-size: 0.85rem;\
-margin-top: 1rem;\
-}\
-</style>\
-<body>\
-<div id='container'>\
-<h1>🔒 ESP32 NAT Router</h1>\
-<h2>Config Locked</h2>\
-<script>\
-if (window.location.search.substr(1) != '') {\
-document.getElementById('container').style.display = 'none';\
-document.body.innerHTML ='<div id=\"container\"><h1>Config Unlocked</h1><p style=\"color: #00d9ff;\">Redirecting...</p></div>';\
-setTimeout(\"location.href = '/'\", 1000);\
-}\
-</script>\
-<form autocomplete='off' action='' method='GET'>\
-<input type='password' name='unlock_password' placeholder='Enter password to unlock'/>\
-<input type='submit' value='Unlock' class='red-button'/>\
-</form>\
-<small>Default: STA password</small>\
 </div>\
 </body>\
 </html>\

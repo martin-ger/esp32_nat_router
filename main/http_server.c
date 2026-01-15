@@ -13,7 +13,7 @@
 #include <esp_system.h>
 #include <esp_timer.h>
 #include <sys/param.h>
-//#include "nvs_flash.h"
+#include "nvs_flash.h"
 #include "esp_netif.h"
 //#include "esp_eth.h"
 //#include "protocol_examples_common.h"
@@ -29,6 +29,14 @@ static const char *TAG = "HTTPServer";
 
 esp_timer_handle_t restart_timer;
 
+/* Session management for password protection */
+#define MAX_SESSION_TOKEN_LEN 32
+#define SESSION_TIMEOUT_US (30 * 60 * 1000000LL) // 30 minutes
+
+static char current_session_token[MAX_SESSION_TOKEN_LEN + 1] = {0};
+static bool session_active = false;
+static int64_t session_expiry_time = 0;
+
 static void restart_timer_callback(void* arg)
 {
     ESP_LOGI(TAG, "Restarting now...");
@@ -41,6 +49,147 @@ esp_timer_create_args_t restart_timer_args = {
         .arg = (void*) 0,
         .name = "restart_timer"
 };
+
+/* Session management helper functions */
+
+/* Generate random session token */
+static void generate_session_token(char* token_out, size_t len)
+{
+    const char hex_chars[] = "0123456789abcdef";
+    for (size_t i = 0; i < len - 1; i++) {
+        token_out[i] = hex_chars[esp_random() % 16];
+    }
+    token_out[len - 1] = '\0';
+}
+
+/* Clear session state */
+static void clear_session(void)
+{
+    session_active = false;
+    current_session_token[0] = '\0';
+    session_expiry_time = 0;
+}
+
+/* Load password from NVS (returns true if password is set and non-empty) */
+static bool get_web_password(char* password_out, size_t max_len)
+{
+    nvs_handle_t nvs;
+    esp_err_t err = nvs_open(PARAM_NAMESPACE, NVS_READONLY, &nvs);
+    if (err != ESP_OK) {
+        return false;
+    }
+
+    size_t required_size = max_len;
+    err = nvs_get_str(nvs, "web_password", password_out, &required_size);
+    nvs_close(nvs);
+
+    if (err != ESP_OK || required_size == 0 || password_out[0] == '\0') {
+        return false;  // No password set or empty password
+    }
+
+    return true;
+}
+
+/* Extract cookie value from request headers */
+static bool get_cookie_value(httpd_req_t *req, const char* cookie_name,
+                              char* value_out, size_t max_len)
+{
+    size_t cookie_header_len = httpd_req_get_hdr_value_len(req, "Cookie");
+    if (cookie_header_len == 0) {
+        return false;
+    }
+
+    char* cookie_header = malloc(cookie_header_len + 1);
+    if (cookie_header == NULL) {
+        return false;
+    }
+
+    if (httpd_req_get_hdr_value_str(req, "Cookie", cookie_header, cookie_header_len + 1) != ESP_OK) {
+        free(cookie_header);
+        return false;
+    }
+
+    // Search for the cookie name
+    char search_pattern[64];
+    snprintf(search_pattern, sizeof(search_pattern), "%s=", cookie_name);
+    char* cookie_start = strstr(cookie_header, search_pattern);
+
+    if (cookie_start == NULL) {
+        free(cookie_header);
+        return false;
+    }
+
+    // Move past the "name=" part
+    cookie_start += strlen(search_pattern);
+
+    // Find the end of the cookie value (semicolon or end of string)
+    char* cookie_end = strchr(cookie_start, ';');
+    size_t cookie_len = cookie_end ? (size_t)(cookie_end - cookie_start) : strlen(cookie_start);
+
+    if (cookie_len >= max_len) {
+        cookie_len = max_len - 1;
+    }
+
+    strncpy(value_out, cookie_start, cookie_len);
+    value_out[cookie_len] = '\0';
+
+    free(cookie_header);
+    return true;
+}
+
+/* Check if request has valid session cookie */
+static bool is_authenticated(httpd_req_t *req)
+{
+    // If no session is active, not authenticated
+    if (!session_active) {
+        return false;
+    }
+
+    // Check if session has expired
+    int64_t current_time = esp_timer_get_time();
+    if (current_time > session_expiry_time) {
+        clear_session();
+        return false;
+    }
+
+    // Extract session cookie
+    char session_token[MAX_SESSION_TOKEN_LEN + 1];
+    if (!get_cookie_value(req, "session", session_token, sizeof(session_token))) {
+        return false;
+    }
+
+    // Validate token matches
+    if (strcmp(session_token, current_session_token) != 0) {
+        return false;
+    }
+
+    // Extend session expiry on successful auth
+    session_expiry_time = current_time + SESSION_TIMEOUT_US;
+
+    return true;
+}
+
+/* Cookie header buffer - must be static because httpd_resp_set_hdr stores pointer, not copy */
+static char session_cookie_header[128];
+
+/* Create new session and set cookie */
+static esp_err_t create_session(httpd_req_t *req)
+{
+    // Generate new session token
+    generate_session_token(current_session_token, sizeof(current_session_token));
+
+    // Set session active and expiry
+    session_active = true;
+    session_expiry_time = esp_timer_get_time() + SESSION_TIMEOUT_US;
+
+    // Set cookie in response (using static buffer because httpd stores pointer)
+    snprintf(session_cookie_header, sizeof(session_cookie_header),
+             "session=%s; Path=/; SameSite=Strict", current_session_token);
+    httpd_resp_set_hdr(req, "Set-Cookie", session_cookie_header);
+
+    ESP_LOGI(TAG, "Session created, expires in 30 minutes");
+    return ESP_OK;
+}
 
 esp_err_t http_404_error_handler(httpd_req_t *req, httpd_err_code_t err)
 {
@@ -88,6 +237,87 @@ char* html_escape(const char* src) {
 /* Index page GET handler - System Status with navigation */
 static esp_err_t index_get_handler(httpd_req_t *req)
 {
+    char* buf = NULL;
+    size_t buf_len = 0;
+    char param[128];
+    char param2[128];
+    char login_message[256] = "";
+    bool authenticated = false;
+    char password[64];
+    bool password_protection_enabled = get_web_password(password, sizeof(password));
+
+    /* Get query string if any */
+    buf_len = httpd_req_get_url_query_len(req) + 1;
+    if (buf_len > 1) {
+        buf = malloc(buf_len);
+        if (buf != NULL && httpd_req_get_url_query_str(req, buf, buf_len) == ESP_OK) {
+
+            /* Handle logout */
+            if (httpd_query_key_value(buf, "logout", param, sizeof(param)) == ESP_OK) {
+                clear_session();
+                strcpy(login_message, "Logged out successfully.");
+            }
+
+            /* Handle login */
+            else if (httpd_query_key_value(buf, "login_password", param, sizeof(param)) == ESP_OK) {
+                preprocess_string(param);
+                if (password_protection_enabled && strcmp(param, password) == 0) {
+                    create_session(req);
+                    free(buf);
+                    /* Redirect to reload page with session cookie */
+                    httpd_resp_set_status(req, "303 See Other");
+                    httpd_resp_set_hdr(req, "Location", "/");
+                    httpd_resp_send(req, NULL, 0);
+                    return ESP_OK;
+                } else {
+                    strcpy(login_message, "ERROR: Incorrect password.");
+                }
+            }
+
+            /* Handle password change */
+            else if (httpd_query_key_value(buf, "new_password", param, sizeof(param)) == ESP_OK &&
+                     httpd_query_key_value(buf, "confirm_password", param2, sizeof(param2)) == ESP_OK) {
+                preprocess_string(param);
+                preprocess_string(param2);
+
+                // Check if user is authenticated or no password is currently set
+                if (is_authenticated(req) || !password_protection_enabled) {
+                    if (strcmp(param, param2) == 0) {
+                        nvs_handle_t nvs;
+                        esp_err_t err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
+                        if (err == ESP_OK) {
+                            nvs_set_str(nvs, "web_password", param);
+                            nvs_commit(nvs);
+                            nvs_close(nvs);
+                            clear_session();  // Force re-login with new password
+                            free(buf);
+                            /* Redirect to reload page */
+                            httpd_resp_set_status(req, "303 See Other");
+                            httpd_resp_set_hdr(req, "Location", "/");
+                            httpd_resp_send(req, NULL, 0);
+                            return ESP_OK;
+                        } else {
+                            strcpy(login_message, "ERROR: Failed to save password.");
+                        }
+                    } else {
+                        strcpy(login_message, "ERROR: Passwords do not match.");
+                    }
+                } else {
+                    strcpy(login_message, "ERROR: Not authorized to change password.");
+                }
+            }
+
+            /* Check for auth_required flag */
+            else if (httpd_query_key_value(buf, "auth_required", param, sizeof(param)) == ESP_OK) {
+                strcpy(login_message, "Please log in to access that page.");
+            }
+        }
+        if (buf) free(buf);
+    }
+
+    /* Check current authentication status */
+    authenticated = is_authenticated(req);
+
     /* Build status information */
     char conn_status[32];
     char sta_ip_str[32];
@@ -118,9 +348,71 @@ static esp_err_t index_get_handler(httpd_req_t *req)
 
     uint32_t free_heap = esp_get_free_heap_size() / 1024;
 
+    /* Build header section with logout button */
+    char header_ui[320] = "";
+    if (authenticated) {
+        snprintf(header_ui, sizeof(header_ui),
+                 "<div style='text-align: right; margin-bottom: 0.5rem;'>"
+                 "<a href='/?logout=1' style='padding: 0.4rem 1rem; background: rgba(255,82,82,0.15); color: #ff5252; border: 1px solid #ff5252; border-radius: 6px; text-decoration: none; font-size: 0.85rem; font-weight: 500;'>Logout</a>"
+                 "</div>");
+    }
+
+    /* Build authentication UI section */
+    char auth_ui[2048] = "";
+
+    /* Show message if any */
+    if (login_message[0] != '\0') {
+        const char* msg_style;
+        if (strstr(login_message, "ERROR") != NULL) {
+            msg_style = "background: #ffebee; color: #c62828; border: 2px solid #ef5350";
+        } else {
+            msg_style = "background: #e8f5e9; color: #2e7d32; border: 2px solid #66bb6a";
+        }
+        snprintf(auth_ui + strlen(auth_ui), sizeof(auth_ui) - strlen(auth_ui),
+                 "<div style='margin-top: 1.5rem; padding: 1rem; %s; border-radius: 8px; font-size: 0.95rem;'>%s</div>",
+                 msg_style, login_message);
+    }
+
+    /* Show warning if no password protection */
+    if (!password_protection_enabled) {
+        snprintf(auth_ui + strlen(auth_ui), sizeof(auth_ui) - strlen(auth_ui),
+                 "<div style='margin-top: 1.5rem; padding: 1rem; background: #fff3cd; border: 2px solid #ffa726; border-radius: 8px;'>"
+                 "<strong style='color: #f57c00;'>⚠ No Password Protection</strong>"
+                 "<p style='margin-top: 0.5rem; color: #666; font-size: 0.9rem;'>Anyone on this network can access router settings. Set a password below.</p>"
+                 "</div>");
+    }
+
+    /* Show login form if password is set and not authenticated */
+    if (password_protection_enabled && !authenticated) {
+        snprintf(auth_ui + strlen(auth_ui), sizeof(auth_ui) - strlen(auth_ui),
+                 "<div style='margin-top: 1.5rem; padding: 1.5rem; background: rgba(22, 33, 62, 0.6); border: 1px solid rgba(0, 217, 255, 0.2); border-radius: 12px;'>"
+                 "<h2 style='margin-top: 0; margin-bottom: 1rem; color: #00d9ff; font-size: 1.1rem;'>🔒 Login Required</h2>"
+                 "<form action='' method='GET'>"
+                 "<input type='password' name='login_password' placeholder='Enter password' style='width: 100%%; padding: 0.75rem; margin-bottom: 0.75rem; background: rgba(255,255,255,0.1); border: 1px solid rgba(0,217,255,0.3); border-radius: 8px; color: #e0e0e0; font-size: 1rem;'/>"
+                 "<input type='submit' value='Login' style='width: 100%%; padding: 0.75rem; background: linear-gradient(135deg, #667eea 0%%, #764ba2 100%%); color: #fff; border: none; border-radius: 8px; font-size: 1rem; font-weight: 600; cursor: pointer;'/>"
+                 "</form>"
+                 "</div>");
+    }
+
+    /* Show password management form if authenticated or no password set */
+    if (authenticated || !password_protection_enabled) {
+        const char* form_title = password_protection_enabled ? "Change Password" : "Set Password";
+        snprintf(auth_ui + strlen(auth_ui), sizeof(auth_ui) - strlen(auth_ui),
+                 "<div style='margin-top: 1.5rem; padding: 1.5rem; background: rgba(22, 33, 62, 0.6); border: 1px solid rgba(0, 217, 255, 0.2); border-radius: 12px;'>"
+                 "<h2 style='margin-top: 0; margin-bottom: 1rem; color: #00d9ff; font-size: 1.1rem;'>🔑 %s</h2>"
+                 "<form action='' method='GET'>"
+                 "<input type='password' name='new_password' placeholder='New password (empty to disable)' style='width: 100%%; padding: 0.75rem; margin-bottom: 0.75rem; background: rgba(255,255,255,0.1); border: 1px solid rgba(0,217,255,0.3); border-radius: 8px; color: #e0e0e0; font-size: 1rem;'/>"
+                 "<input type='password' name='confirm_password' placeholder='Confirm password' style='width: 100%%; padding: 0.75rem; margin-bottom: 0.75rem; background: rgba(255,255,255,0.1); border: 1px solid rgba(0,217,255,0.3); border-radius: 8px; color: #e0e0e0; font-size: 1rem;'/>"
+                 "<input type='submit' value='%s' style='width: 100%%; padding: 0.75rem; background: linear-gradient(135deg, #f093fb 0%%, #f5576c 100%%); color: #fff; border: none; border-radius: 8px; font-size: 1rem; font-weight: 600; cursor: pointer;'/>"
+                 "<p style='margin-top: 0.75rem; color: #888; font-size: 0.85rem;'>Leave empty to disable password protection.</p>"
+                 "</form>"
+                 "</div>",
+                 form_title, form_title);
+    }
+
     /* Build the page */
     const char* index_page_template = INDEX_PAGE;
-    int page_len = strlen(index_page_template) + 512;
+    int page_len = strlen(index_page_template) + strlen(header_ui) + strlen(auth_ui) + 512;
     char* index_page = malloc(page_len);
 
     if (index_page == NULL) {
@@ -130,7 +422,7 @@ static esp_err_t index_get_handler(httpd_req_t *req)
     }
 
     snprintf(index_page, page_len, index_page_template,
-        conn_status, sta_ip_str, ap_ip_str, dhcp_pool_str, connect_count, free_heap);
+        header_ui, conn_status, sta_ip_str, ap_ip_str, dhcp_pool_str, connect_count, free_heap, auth_ui);
 
     httpd_resp_send(req, index_page, strlen(index_page));
     free(index_page);
@@ -147,6 +439,18 @@ static httpd_uri_t indexp = {
 /* Router Config page GET handler */
 static esp_err_t config_get_handler(httpd_req_t *req)
 {
+    /* Check authentication if password protection is enabled */
+    char password[64];
+    bool password_protection_enabled = get_web_password(password, sizeof(password));
+
+    if (password_protection_enabled && !is_authenticated(req)) {
+        /* Redirect to index page with auth_required flag */
+        httpd_resp_set_status(req, "303 See Other");
+        httpd_resp_set_hdr(req, "Location", "/?auth_required=1");
+        httpd_resp_send(req, NULL, 0);
+        return ESP_OK;
+    }
+
     char*  buf;
     size_t buf_len;
 
@@ -164,6 +468,21 @@ static esp_err_t config_get_handler(httpd_req_t *req)
             if (strcmp(buf, "reset=Reboot") == 0) {
                 esp_timer_start_once(restart_timer, 500000);
             }
+
+            /* Handle disable interface button */
+            if (strstr(buf, "disable_interface=") != NULL) {
+                ESP_LOGI(TAG, "Disabling web interface");
+                nvs_handle_t nvs;
+                esp_err_t err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
+                if (err == ESP_OK) {
+                    nvs_set_str(nvs, "lock", "1");
+                    nvs_commit(nvs);
+                    nvs_close(nvs);
+                    ESP_LOGI(TAG, "Web interface disabled. Use 'enable' command via serial to re-enable.");
+                }
+                esp_timer_start_once(restart_timer, 500000);
+            }
+
             char param1[64];
             char param2[64];
             char param3[64];
@@ -414,6 +733,18 @@ static httpd_uri_t configp = {
 /* Mappings page GET handler (DHCP Reservations + Port Forwarding) */
 static esp_err_t mappings_get_handler(httpd_req_t *req)
 {
+    /* Check authentication if password protection is enabled */
+    char password[64];
+    bool password_protection_enabled = get_web_password(password, sizeof(password));
+
+    if (password_protection_enabled && !is_authenticated(req)) {
+        /* Redirect to index page with auth_required flag */
+        httpd_resp_set_status(req, "303 See Other");
+        httpd_resp_set_hdr(req, "Location", "/?auth_required=1");
+        httpd_resp_send(req, NULL, 0);
+        return ESP_OK;
+    }
+
     char* buf;
     size_t buf_len;
 

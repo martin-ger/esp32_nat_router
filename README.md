@@ -11,6 +11,7 @@ This is a firmware to use the ESP32 as WiFi NAT router. It can be used as:
 - **DHCP Reservations**: Assign fixed IPs to specific MAC addresses
 - **Port Forwarding**: Map external ports to internal devices
 - **Web Interface**: Modern web UI at 192.168.4.1 for easy configuration
+- **Password Protection**: Optional password protection for web interface configuration pages
 - **Static IP Support**: Configure static IP for the STA (upstream) interface
 - **WPA2-Enterprise Support**: Connect to corporate networks and convert them to WPA2-PSK
 - **LED Status Indicator**: Visual feedback for connection status and connected clients
@@ -20,17 +21,6 @@ This is a firmware to use the ESP32 as WiFi NAT router. It can be used as:
 It can achieve a bandwidth of more than 15mbps.
 
 The code is based on the [Console Component](https://docs.espressif.com/projects/esp-idf/en/latest/api-guides/console.html#console) and the [esp-idf-nat-example](https://github.com/jonask1337/esp-idf-nat-example). 
-
-## Performance
-
-All tests used `IPv4` and the `TCP` protocol.
-
-| Board | Tools | Optimization | CPU Frequency | Throughput | Power |
-| ----- | ----- | ------------ | ------------- | ---------- | ----- |
-| `ESP32D0WDQ6` | `iperf3` | `0g` | `240MHz` | `16.0 MBits/s` | `1.6 W` |
-| `ESP32D0WDQ6` | `iperf3` | `0s` | `240MHz` | `10.0 MBits/s` | `1.8 W` | 
-| `ESP32D0WDQ6` | `iperf3` | `0g` | `160MHz` | `15.2 MBits/s` | `1.4 W` |
-| `ESP32D0WDQ6` | `iperf3` | `0s` | `160MHz` | `14.1 MBits/s` | `1.5 W` |
 
 ## First Boot
 After first boot the ESP32 NAT Router will offer a WiFi network with an open AP and the ssid "ESP32_NAT_Router". Configuration can either be done via a simple web interface or via the serial console. 
@@ -48,7 +38,7 @@ The main dashboard displays:
 - Number of connected clients
 - Free heap memory
 
-<img src="UI_Index.png">
+<img src="https://raw.githubusercontent.com/martin-ger/esp32_nat_router/master/UI_Index.png">
 
 ### Configuration Page (/config)
 Configure all router settings:
@@ -58,7 +48,7 @@ Configure all router settings:
 - **Device Management**: Reboot the device
 - Click "Apply", "Connect", or "Set Static IP" to apply changes (the ESP32 will reboot)
 
-<img src="UI_Settings.png">
+<img src="https://raw.githubusercontent.com/martin-ger/esp32_nat_router/master/UI_Settings.png">
 
 Be aware that changes to AP settings (including the AP IP address) also affect the config interface itself - after changing the AP IP address, reconnect to the ESP32 at the new IP address to continue configuration. Also all currently defined DHCP reservations and port forwards will be deleted.
 
@@ -67,20 +57,61 @@ Manage network mappings:
 - **DHCP Reservations**: Assign fixed IP addresses to specific MAC addresses (useful for servers/devices that need consistent IPs). Make sure you assign port numbers in the range of the DHCP pool.
 - **Port Forwarding**: Create port mappings to access devices behind the NAT router (e.g., `TCP 8080 -> 192.168.4.2:80`)
 
-<img src="UI_Mappings.png">
+<img src="https://raw.githubusercontent.com/martin-ger/esp32_nat_router/master/UI_Mappings.png">
 
 **Note**: If you want to enter a '+' or other special characters in the web interface, use HTTP-style hex encoding like "Mine%2bYours" (results in "Mine+Yours"). With this hex encoding you can enter any byte value except 0 (for C-internal reasons).
 
-It you want to disable the web interface (e.g. for security reasons), go to the CLI and enter:
+### Web Interface Security
+
+The web interface is visible on both interfaces (AP and STA) and allows configuration access to all parameters. Two security mechanisms are available:
+
+#### Password Protection
+
+You can protect the `/config` and `/mappings` pages with a password. The main status page (`/`) remains accessible but will show a login form.
+
+**Setting a Password (Web Interface):**
+- On the main page (`/`), scroll to the "Set Password" section
+- Enter and confirm your new password
+- Click "Set Password"
+- The page will reload and show a login form
+
+**Setting a Password (Serial Console):**
 ```
-nvs_namespace esp32_nat
-nvs_set lock str -v 1
+set_web_password mypassword
 ```
-After restart, no webserver is started any more. You can only re-enable it with:
+
+To disable password protection, set an empty password:
 ```
-nvs_namespace esp32_nat
-nvs_set lock str -v 0
+set_web_password ""
 ```
+
+When password protection is enabled:
+- The main page shows system status and a login form
+- After successful login, you can access `/config` and `/mappings`
+- Sessions expire after 30 minutes of inactivity
+- A "Logout" button appears on all pages when logged in
+
+#### Disabling the Web Interface
+
+For maximum security in open environments, you can completely disable the web interface:
+
+**From the Web Interface:**
+- Navigate to the `/config` page
+- Scroll to the "Danger Zone" section at the bottom
+- Click "Disable" button
+- Confirm the warning dialog
+- The device will reboot with the web interface disabled
+
+**From the Serial Console:**
+```
+disable
+```
+
+After disabling, the web interface will be completely inaccessible. Re-enable it via the serial console with:
+```
+enable
+```
+
 If you made a mistake and have lost all contact with the ESP you can still use the serial console to reconfigure it. All parameter settings are stored in NVS (non volatile storage), which is *not* erased by simple re-flashing the binaries. If you want to wipe it out, use "esptool.py -p /dev/ttyUSB0 erase_flash".
 
 ## Access devices behind the router
@@ -245,6 +276,16 @@ dhcp_reserve  [add|del] <mac> <ip> [-n <name>]
           <ip>  IP address to reserve
   -n, --name=<name>  Optional device name
 
+disable
+  Disable the web interface
+
+enable
+  Enable the web interface
+
+set_web_password  <password>
+  Set web interface password (empty string to disable)
+      <password>  Password for web interface login
+
 show
   Get status and config of the router
 ```
@@ -335,19 +376,14 @@ As soon as the ESP32 STA has learned a DNS IP from its upstream DNS server on fi
 Before that by default the DNS-Server which is offerd to clients connecting to the ESP32 AP is set to 8.8.8.8.
 Replace the value of the *MY_DNS_IP_ADDR* with your desired DNS-Server IP address (in hex) if you want to use a different one.
 
-## Troubleshooting
+## Performance
 
-### Line Endings
+All tests used `IPv4` and the `TCP` protocol.
 
-The line endings in the Console Example are configured to match particular serial monitors. Therefore, if the following log output appears, consider using a different serial monitor (e.g. Putty for Windows or GtkTerm on Linux) or modify the example's UART configuration.
+| Board | Tools | Optimization | CPU Frequency | Throughput | Power |
+| ----- | ----- | ------------ | ------------- | ---------- | ----- |
+| `ESP32D0WDQ6` | `iperf3` | `0g` | `240MHz` | `16.0 MBits/s` | `1.6 W` |
+| `ESP32D0WDQ6` | `iperf3` | `0s` | `240MHz` | `10.0 MBits/s` | `1.8 W` | 
+| `ESP32D0WDQ6` | `iperf3` | `0g` | `160MHz` | `15.2 MBits/s` | `1.4 W` |
+| `ESP32D0WDQ6` | `iperf3` | `0s` | `160MHz` | `14.1 MBits/s` | `1.5 W` |
 
-```
-This is an example of ESP-IDF console component.
-Type 'help' to get the list of commands.
-Use UP/DOWN arrows to navigate through command history.
-Press TAB when typing command name to auto-complete.
-Your terminal application does not support escape sequences.
-Line editing and history features are disabled.
-On Windows, try using Putty instead.
-esp32>
-```
