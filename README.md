@@ -37,7 +37,7 @@ The main dashboard displays:
 - STA (upstream) and AP IP addresses and MAC addresses
 - Used IP pool for DHCP
 - Number of connected clients
-- Free heap memory
+- Bytes sent and received
 
 <img src="https://raw.githubusercontent.com/martin-ger/esp32_nat_router/master/UI_Index.png">
 
@@ -60,8 +60,6 @@ Manage network mappings:
 - **Port Forwarding**: Create port mappings to access devices behind the NAT router (e.g., `TCP 8080 -> 192.168.4.2:80`)
 
 <img src="https://raw.githubusercontent.com/martin-ger/esp32_nat_router/master/UI_Mappings.png">
-
-**Note**: If you want to enter a '+' or other special characters in the web interface, use HTTP-style hex encoding like "Mine%2bYours" (results in "Mine+Yours"). With this hex encoding you can enter any byte value except 0 (for C-internal reasons).
 
 ### Web Interface Security
 
@@ -285,11 +283,14 @@ enable
   Enable the web interface
 
 set_web_password  <password>
-  Set web interface password (empty string to disable)
+  Set web interface password (empty string ("") to disable)
       <password>  Password for web interface login
 
 show  [status|config|mappings]
   Show router status, config or mappings
+
+bytes  [[reset]]
+  Show or reset STA interface byte counts
 
 ```
 

@@ -128,6 +128,9 @@ uint64_t get_sta_bytes_sent(void);
 uint64_t get_sta_bytes_received(void);
 void reset_sta_byte_counts(void);
 
+// AP netif hook functions (for future use)
+void init_ap_netif_hooks(void);
+
 #ifdef __cplusplus
 }
 #endif

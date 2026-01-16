@@ -64,6 +64,11 @@ static netif_input_fn original_netif_input = NULL;
 static netif_linkoutput_fn original_netif_linkoutput = NULL;
 static struct netif *sta_netif = NULL;
 
+// Original AP netif function pointers (for future use)
+static netif_input_fn original_ap_netif_input = NULL;
+static netif_linkoutput_fn original_ap_netif_linkoutput = NULL;
+static struct netif *ap_netif = NULL;
+
 /* FreeRTOS event group to signal when we are connected*/
 static EventGroupHandle_t wifi_event_group;
 
@@ -594,6 +599,49 @@ void reset_sta_byte_counts(void) {
     sta_bytes_received = 0;
 }
 
+// AP netif hook functions (for future use)
+static err_t ap_netif_input_hook(struct pbuf *p, struct netif *netif) {
+    // Call original input function
+    if (original_ap_netif_input != NULL) {
+        return original_ap_netif_input(p, netif);
+    }
+    
+    return ERR_VAL;
+}
+
+static err_t ap_netif_linkoutput_hook(struct netif *netif, struct pbuf *p) {
+    // Call original linkoutput function
+    if (original_ap_netif_linkoutput != NULL) {
+        return original_ap_netif_linkoutput(netif, p);
+    }
+    
+    return ERR_IF;
+}
+
+void init_ap_netif_hooks(void) {
+    if (wifiAP != NULL && original_ap_netif_input == NULL) {
+        // Get the underlying lwIP netif structure for AP
+        esp_netif_t *ap_netif_handle = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
+        if (ap_netif_handle != NULL) {
+            // Access internal lwIP netif - this is internal API but necessary for hooking
+            extern struct netif *esp_netif_get_netif_impl(esp_netif_t *esp_netif);
+            ap_netif = esp_netif_get_netif_impl(ap_netif_handle);
+            
+            if (ap_netif != NULL) {
+                // Store and hook input function
+                original_ap_netif_input = ap_netif->input;
+                ap_netif->input = ap_netif_input_hook;
+                
+                // Store and hook linkoutput function
+                original_ap_netif_linkoutput = ap_netif->linkoutput;
+                ap_netif->linkoutput = ap_netif_linkoutput_hook;
+                
+                ESP_LOGI(TAG, "AP netif hooks initialized (input & output)");
+            }
+        }
+    }
+}
+
 static void initialize_console(void)
 {
     /* Disable buffering on stdin */
@@ -767,6 +815,9 @@ void wifi_init(const uint8_t* mac, const char* ssid, const char* ent_username, c
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     wifiAP = esp_netif_create_default_wifi_ap();
     wifiSTA = esp_netif_create_default_wifi_sta();
+
+    // Initialize AP netif hooks (for future use)
+    init_ap_netif_hooks();
 
     esp_netif_ip_info_t ipInfo_sta;
     if ((strlen(ssid) > 0) && (strlen(static_ip) > 0) && (strlen(subnet_mask) > 0) && (strlen(gateway_addr) > 0)) {
