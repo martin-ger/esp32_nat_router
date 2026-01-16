@@ -9,6 +9,7 @@
 #include <string.h>
 #include <ctype.h>
 #include <inttypes.h>
+#include <stdint.h>
 #include "esp_log.h"
 #include "esp_console.h"
 #include "esp_system.h"
@@ -48,6 +49,7 @@ static void register_portmap(void);
 static void register_dhcp_reserve(void);
 static void register_set_web_password(void);
 static void register_disable_enable(void);
+static void register_bytes(void);
 
 void preprocess_string(char* str)
 {
@@ -165,6 +167,7 @@ void register_router(void)
     register_show();
     register_disable_enable();
     register_set_web_password();
+    register_bytes();
 }
 
 /** Arguments used by 'set_sta' function */
@@ -749,7 +752,12 @@ static int show(int argc, char **argv)
             ip4_addr_t addr;
             addr.addr = my_ip;
             printf("Uplink IP: " IPSTR "\n", IP2STR(&addr));
+        } else {
+            printf("Uplink IP: none\n");
         }
+
+        // Byte counts
+        printf("Bytes sent/received: %" PRIu64 " / %" PRIu64 " bytes\n", get_sta_bytes_sent(), get_sta_bytes_received());
 
         // Free heap
         printf("Free heap: %lu bytes\n", (unsigned long)esp_get_free_heap_size());
@@ -982,5 +990,55 @@ static void register_dhcp_reserve(void)
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }
 
+/* 'bytes' command */
+static struct {
+    struct arg_str* action;
+    struct arg_end* end;
+} bytes_args;
+
+static int bytes(int argc, char **argv)
+{
+    int nerrors = arg_parse(argc, argv, (void **) &bytes_args);
+    if (nerrors != 0) {
+        arg_print_errors(stderr, bytes_args.end, argv[0]);
+        return 1;
+    }
+
+    if (bytes_args.action->count == 0) {
+        // Show current byte counts
+        printf("STA Interface Byte Counts:\n");
+        printf("  Sent:     %" PRIu64 " bytes\n", get_sta_bytes_sent());
+        printf("  Received: %" PRIu64 " bytes\n", get_sta_bytes_received());
+        return 0;
+    }
+
+    const char *action = bytes_args.action->sval[0];
+    if (strcmp(action, "reset") == 0) {
+        reset_sta_byte_counts();
+        printf("Byte counts reset to zero\n");
+    } else {
+        printf("Usage: bytes [reset]\n");
+        printf("  bytes     - Show current byte counts\n");
+        printf("  bytes reset - Reset byte counts to zero\n");
+        return 1;
+    }
+
+    return 0;
+}
+
+static void register_bytes(void)
+{
+    bytes_args.action = arg_str0(NULL, NULL, "[reset]", "reset byte counts or show current counts");
+    bytes_args.end = arg_end(1);
+
+    const esp_console_cmd_t cmd = {
+        .command = "bytes",
+        .help = "Show or reset STA interface byte counts",
+        .hint = NULL,
+        .func = &bytes,
+        .argtable = &bytes_args
+    };
+    ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
+}
 
 

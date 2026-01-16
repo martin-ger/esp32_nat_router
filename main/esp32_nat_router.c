@@ -44,6 +44,9 @@
 #include "lwip/lwip_napt.h"
 
 #include "router_globals.h"
+#include "lwip/netif.h"
+#include "lwip/ip_addr.h"
+#include "esp_netif.h"
 
 // On board LED
 #if defined(CONFIG_IDF_TARGET_ESP32S3)
@@ -51,6 +54,15 @@
 #else
 #define BLINK_GPIO 2
 #endif
+
+// Byte counting variables
+uint64_t sta_bytes_sent = 0;
+uint64_t sta_bytes_received = 0;
+
+// Original netif input and linkoutput function pointers
+static netif_input_fn original_netif_input = NULL;
+static netif_linkoutput_fn original_netif_linkoutput = NULL;
+static struct netif *sta_netif = NULL;
 
 /* FreeRTOS event group to signal when we are connected*/
 static EventGroupHandle_t wifi_event_group;
@@ -514,6 +526,74 @@ int get_connected_clients(connected_client_t *clients, int max_clients) {
     return count;
 }
 
+// Hook function to count received bytes via netif linkoutput
+static err_t netif_input_hook(struct pbuf *p, struct netif *netif) {
+    // Count received bytes
+    if (netif == sta_netif && p != NULL) {
+        sta_bytes_received += p->tot_len;
+    }
+    
+    // Call original input function
+    if (original_netif_input != NULL) {
+        return original_netif_input(p, netif);
+    }
+    
+    return ERR_VAL;
+}
+
+
+// Hook function to count sent bytes via netif linkoutput
+static err_t netif_linkoutput_hook(struct netif *netif, struct pbuf *p) {
+    // Count sent bytes
+    if (netif == sta_netif && p != NULL) {
+        sta_bytes_sent += p->tot_len;
+    }
+    
+    // Call original linkoutput function
+    if (original_netif_linkoutput != NULL) {
+        return original_netif_linkoutput(netif, p);
+    }
+    
+    return ERR_IF;
+}
+
+void init_byte_counter(void) {
+    if (wifiSTA != NULL && original_netif_input == NULL) {
+        // Get the underlying lwIP netif structure
+        esp_netif_t *sta_netif_handle = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+        if (sta_netif_handle != NULL) {
+            // Access internal lwIP netif - this is internal API but necessary for hooking
+            extern struct netif *esp_netif_get_netif_impl(esp_netif_t *esp_netif);
+            sta_netif = esp_netif_get_netif_impl(sta_netif_handle);
+            
+            if (sta_netif != NULL) {
+                // Store and hook input function
+                original_netif_input = sta_netif->input;
+                sta_netif->input = netif_input_hook;
+                
+                // Store and hook linkoutput function
+                original_netif_linkoutput = sta_netif->linkoutput;
+                sta_netif->linkoutput = netif_linkoutput_hook;
+                
+                ESP_LOGI(TAG, "Byte counter initialized for STA interface (input & output)");
+            }
+        }
+    }
+}
+
+uint64_t get_sta_bytes_sent(void) {
+    return sta_bytes_sent;
+}
+
+uint64_t get_sta_bytes_received(void) {
+    return sta_bytes_received;
+}
+
+void reset_sta_byte_counts(void) {
+    sta_bytes_sent = 0;
+    sta_bytes_received = 0;
+}
+
 static void initialize_console(void)
 {
     /* Disable buffering on stdin */
@@ -654,6 +734,10 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
             esp_netif_set_dns_info(wifiAP, ESP_NETIF_DNS_MAIN, &dns);
             ESP_LOGI(TAG, "set dns to:" IPSTR, IP2STR(&(dns.ip.u_addr.ip4)));
         }
+        
+        // Initialize byte counter after getting IP (interface is ready)
+        init_byte_counter();
+        
         xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);
     }
     else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_AP_STACONNECTED)

@@ -179,8 +179,12 @@ font-size: 0.8rem;\
 <td>%d</td>\
 </tr>\
 <tr>\
-<td>Free Heap:</td>\
-<td>%d KB</td>\
+<td>Bytes Sent:</td>\
+<td>%.1f MB</td>\
+</tr>\
+<tr>\
+<td>Bytes Received:</td>\
+<td>%.1f MB</td>\
 </tr>\
 </table>\
 </div>\

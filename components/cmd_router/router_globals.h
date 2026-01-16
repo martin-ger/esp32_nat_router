@@ -65,6 +65,10 @@ extern bool ap_connect;
 extern uint32_t my_ip;
 extern uint32_t my_ap_ip;
 
+// Byte counting variables for STA interface
+extern uint64_t sta_bytes_sent;
+extern uint64_t sta_bytes_received;
+
 void preprocess_string(char* str);
 int set_sta(int argc, char **argv);
 int set_sta_static(int argc, char **argv);
@@ -117,6 +121,12 @@ typedef struct {
  * @return Number of active leases found (0 if DHCP server not running)
  */
 int dhcps_get_active_leases(dhcp_lease_info_t *leases, int max_leases);
+
+// Byte counting functions
+void init_byte_counter(void);
+uint64_t get_sta_bytes_sent(void);
+uint64_t get_sta_bytes_received(void);
+void reset_sta_byte_counts(void);
 
 #ifdef __cplusplus
 }

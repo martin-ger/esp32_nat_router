@@ -346,7 +346,11 @@ static esp_err_t index_get_handler(httpd_req_t *req)
     end_addr.addr = end_ip;
     sprintf(dhcp_pool_str, IPSTR " - " IPSTR, IP2STR(&start_addr), IP2STR(&end_addr));
 
-    uint32_t free_heap = esp_get_free_heap_size() / 1024;
+    // Get byte counts and convert to MB
+    uint64_t bytes_sent = get_sta_bytes_sent();
+    uint64_t bytes_received = get_sta_bytes_received();
+    float sent_mb = bytes_sent / (1024.0 * 1024.0);
+    float received_mb = bytes_received / (1024.0 * 1024.0);
 
     /* Build header section with logout button */
     char header_ui[320] = "";
@@ -422,7 +426,7 @@ static esp_err_t index_get_handler(httpd_req_t *req)
     }
 
     snprintf(index_page, page_len, index_page_template,
-        header_ui, conn_status, sta_ip_str, ap_ip_str, dhcp_pool_str, connect_count, free_heap, auth_ui);
+        header_ui, conn_status, sta_ip_str, ap_ip_str, dhcp_pool_str, connect_count, sent_mb, received_mb, auth_ui);
 
     httpd_resp_send(req, index_page, strlen(index_page));
     free(index_page);
