@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
+#include <inttypes.h>
 #include "esp_log.h"
 #include "esp_console.h"
 #include "esp_system.h"
@@ -45,8 +46,8 @@ static void register_set_ap_ip(void);
 static void register_show(void);
 static void register_portmap(void);
 static void register_dhcp_reserve(void);
-static void register_disable_enable(void);
 static void register_set_web_password(void);
+static void register_disable_enable(void);
 
 void preprocess_string(char* str)
 {
@@ -712,77 +713,172 @@ static void register_portmap(void)
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }
 
-/* 'show' command */
+/* 'show' command arguments */
+static struct {
+    struct arg_str *type;
+    struct arg_end *end;
+} show_args;
+
+/* 'show' command implementation */
 static int show(int argc, char **argv)
 {
-    char* ssid = NULL;
-    char* ent_username = NULL;
-    char* ent_identity = NULL;
-    char* passwd = NULL;
-    char* static_ip = NULL;
-    char* subnet_mask = NULL;
-    char* gateway_addr = NULL;
-    char* ap_ssid = NULL;
-    char* ap_passwd = NULL;
-
-    get_config_param_str("ssid", &ssid);
-    get_config_param_str("ent_username", &ent_username);
-    get_config_param_str("ent_identity", &ent_identity);
-    get_config_param_str("passwd", &passwd);
-    get_config_param_str("static_ip", &static_ip);
-    get_config_param_str("subnet_mask", &subnet_mask);
-    get_config_param_str("gateway_addr", &gateway_addr);
-    get_config_param_str("ap_ssid", &ap_ssid);
-    get_config_param_str("ap_passwd", &ap_passwd);
-
-    printf("STA SSID: %s Password: %s Enterprise: %s %s\n",
-        ssid != NULL ? ssid : "<undef>",
-        passwd != NULL ? passwd : "<undef>",
-        ((ent_username != NULL) && (strlen(ent_username) > 0)) ? ent_username : "<not active>",
-        ((ent_username != NULL) && (strlen(ent_username) > 0) && (ent_identity != NULL) && (strlen(ent_identity) > 0)) ? ent_identity : ""
-    );
-    printf("AP SSID: %s Password: %s\n", ap_ssid != NULL ? ap_ssid : "<undef>",
-        ap_passwd != NULL ? ap_passwd : "<undef>");
-    ip4_addr_t addr;
-    addr.addr = my_ap_ip;
-    printf("AP IP address: " IPSTR "\n", IP2STR(&addr));
-
-    if (ssid != NULL) free(ssid);
-    if (ent_username != NULL) free(ent_username);
-    if (ent_identity != NULL) free(ent_identity);
-    if (passwd != NULL) free(passwd);
-    if (static_ip != NULL) free(static_ip);
-    if (subnet_mask != NULL) free(subnet_mask);
-    if (gateway_addr != NULL) free(gateway_addr);
-    if (ap_ssid != NULL) free(ap_ssid);
-    if (ap_passwd != NULL) free(ap_passwd);
-
-    printf("Uplink AP %sconnected\n", ap_connect?"":"not ");
-    if (ap_connect) {
-        addr.addr = my_ip;
-        printf ("IP: " IPSTR "\n", IP2STR(&addr));
+    int nerrors = arg_parse(argc, argv, (void **) &show_args);
+    if (nerrors != 0) {
+        arg_print_errors(stderr, show_args.end, argv[0]);
+        return 1;
     }
-    printf("%d Stations connected\n", connect_count);
 
-    printf("\nDHCP Pool:\n");
-    print_dhcp_pool();
+    if (show_args.type->count == 0) {
+        printf("Usage: show <status|config|mappings>\n");
+        printf("  status   - Show router status (connection, clients, memory)\n");
+        printf("  config   - Show router configuration (AP/STA settings)\n");
+        printf("  mappings - Show DHCP pool, reservations and port mappings\n");
+        return 1;
+    }
 
-    printf("\nPort Mappings:\n");
-    print_portmap_tab();
+    const char *type = show_args.type->sval[0];
 
-    printf("\nDHCP Reservations:\n");
-    print_dhcp_reservations();
+    if (strcmp(type, "status") == 0) {
+        // Show status
+        printf("Router Status:\n");
+        printf("==============\n");
+        
+        // Connection status
+        printf("Uplink AP: %sconnected\n", ap_connect ? "" : "not ");
+        if (ap_connect) {
+            ip4_addr_t addr;
+            addr.addr = my_ip;
+            printf("Uplink IP: " IPSTR "\n", IP2STR(&addr));
+        }
+
+        // Free heap
+        printf("Free heap: %lu bytes\n", (unsigned long)esp_get_free_heap_size());
+
+        // Connected clients
+        printf("Connected clients: %u\n", connect_count);
+        if (connect_count > 0) {
+            connected_client_t clients[8];
+            int count = get_connected_clients(clients, 8);
+            
+            if (count > 0) {
+                printf("\nClient Details:\n");
+                printf("MAC Address       IP Address       Device Name\n");
+                printf("----------------  ---------------  ------------------\n");
+                
+                for (int i = 0; i < count; i++) {
+                    char mac_str[18];
+                    sprintf(mac_str, "%02X:%02X:%02X:%02X:%02X:%02X",
+                            clients[i].mac[0], clients[i].mac[1], clients[i].mac[2],
+                            clients[i].mac[3], clients[i].mac[4], clients[i].mac[5]);
+                    
+                    char ip_str[16] = "N/A";
+                    if (clients[i].has_ip) {
+                        ip4_addr_t addr;
+                        addr.addr = clients[i].ip;
+                        sprintf(ip_str, IPSTR, IP2STR(&addr));
+                    }
+                    
+                    printf("%-17s  %-15s  %s\n", mac_str, ip_str, clients[i].name);
+                }
+            }
+        }
+        
+    } else if (strcmp(type, "config") == 0) {
+        // Show config
+        char* ssid = NULL;
+        char* ent_username = NULL;
+        char* ent_identity = NULL;
+        char* passwd = NULL;
+        char* static_ip = NULL;
+        char* subnet_mask = NULL;
+        char* gateway_addr = NULL;
+        char* ap_ssid = NULL;
+        char* ap_passwd = NULL;
+
+        get_config_param_str("ssid", &ssid);
+        get_config_param_str("ent_username", &ent_username);
+        get_config_param_str("ent_identity", &ent_identity);
+        get_config_param_str("passwd", &passwd);
+        get_config_param_str("static_ip", &static_ip);
+        get_config_param_str("subnet_mask", &subnet_mask);
+        get_config_param_str("gateway_addr", &gateway_addr);
+        get_config_param_str("ap_ssid", &ap_ssid);
+        get_config_param_str("ap_passwd", &ap_passwd);
+
+        printf("Router Configuration:\n");
+        printf("====================\n");
+        
+        printf("STA Settings:\n");
+        printf("  SSID: %s\n", ssid != NULL ? ssid : "<undef>");
+        printf("  Password: %s\n", passwd != NULL ? passwd : "<undef>");
+        if ((ent_username != NULL) && (strlen(ent_username) > 0)) {
+            printf("  Enterprise Username: %s\n", ent_username);
+            if ((ent_identity != NULL) && (strlen(ent_identity) > 0)) {
+                printf("  Enterprise Identity: %s\n", ent_identity);
+            }
+        } else {
+            printf("  Enterprise: <not active>\n");
+        }
+        
+        if (static_ip != NULL) {
+            printf("  Static IP: %s\n", static_ip);
+            printf("  Subnet Mask: %s\n", subnet_mask != NULL ? subnet_mask : "<undef>");
+            printf("  Gateway: %s\n", gateway_addr != NULL ? gateway_addr : "<undef>");
+        } else {
+            printf("  Static IP: <not configured>\n");
+        }
+        
+        printf("\nAP Settings:\n");
+        printf("  SSID: %s\n", ap_ssid != NULL ? ap_ssid : "<undef>");
+        printf("  Password: %s\n", ap_passwd != NULL ? ap_passwd : "<undef>");
+        ip4_addr_t addr;
+        addr.addr = my_ap_ip;
+        printf("  IP Address: " IPSTR "\n", IP2STR(&addr));
+
+        // Cleanup
+        if (ssid != NULL) free(ssid);
+        if (ent_username != NULL) free(ent_username);
+        if (ent_identity != NULL) free(ent_identity);
+        if (passwd != NULL) free(passwd);
+        if (static_ip != NULL) free(static_ip);
+        if (subnet_mask != NULL) free(subnet_mask);
+        if (gateway_addr != NULL) free(gateway_addr);
+        if (ap_ssid != NULL) free(ap_ssid);
+        if (ap_passwd != NULL) free(ap_passwd);
+        
+    } else if (strcmp(type, "mappings") == 0) {
+        // Show mappings
+        printf("Network Mappings:\n");
+        printf("=================\n");
+        
+        printf("\nDHCP Pool:\n");
+        print_dhcp_pool();
+
+        printf("\nDHCP Reservations:\n");
+        print_dhcp_reservations();
+
+        printf("\nPort Mappings:\n");
+        print_portmap_tab();
+        
+    } else {
+        printf("Invalid parameter. Use: show <status|config|mappings>\n");
+        return 1;
+    }
 
     return 0;
 }
 
 static void register_show(void)
 {
+    show_args.type = arg_str1(NULL, NULL, "[status|config|mappings]", "Type of information");
+    show_args.end = arg_end(1);
+
     const esp_console_cmd_t cmd = {
         .command = "show",
-        .help = "Get status and config of the router",
+        .help = "Show router status, config or mappings",
         .hint = NULL,
         .func = &show,
+        .argtable = &show_args
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }
@@ -885,4 +981,6 @@ static void register_dhcp_reserve(void)
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }
+
+
 

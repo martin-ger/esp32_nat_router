@@ -288,8 +288,9 @@ set_web_password  <password>
   Set web interface password (empty string to disable)
       <password>  Password for web interface login
 
-show
-  Get status and config of the router
+show  [status|config|mappings]
+  Show router status, config or mappings
+
 ```
 
 If you want to enter non-ASCII or special characters (incl. ' ') you can use HTTP-style hex encoding (e.g. "My%20AccessPoint" results in a string "My AccessPoint").
@@ -311,7 +312,11 @@ CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 
 [Board comparison list](https://docs.espressif.com/projects/esp-idf/en/v5.0.4/esp32/hw-reference/chip-series-comparison.html)
 
-## Flashing the prebuild Binaries
+## Flashing the Pre-built Binaries
+
+### Using Build Script Artifacts
+
+After running the multi-target build scripts (`build_all_targets.sh` or `build_all_targets_pio.sh`), binary artifacts are preserved in separate `firmware_*` directories that won't be cleaned by subsequent builds.
 
 Get and install [esptool](https://github.com/espressif/esptool):
 
@@ -323,28 +328,75 @@ cd esptool
 python3 setup.py install
 ```
 
-Go to esp32_nat_router project directory and build for any kind of esp32 target.
+### Flashing Instructions
 
-For esp32:
+Go to esp32_nat_router project directory and use the preserved binary artifacts from the `firmware_*` directories.
+
+For ESP32:
 
 ```bash
 esptool.py --chip esp32 \
 --before default_reset --after hard_reset write_flash \
 -z --flash_mode dio --flash_freq 40m --flash_size detect \
-0x1000 build/esp32/bootloader.bin \
-0x8000 build/esp32/partitions.bin \
-0x10000 build/esp32/firmware.bin
+0x1000 firmware_esp32/bootloader.bin \
+0x8000 firmware_esp32/partition-table.bin \
+0x10000 firmware_esp32/esp32_nat_router.bin
 ```
 
-For esp32c3:
+For ESP32-C2:
 
 ```bash
-esptool.py --chip esp32c3 \
+esptool.py --chip esp32c2 \
 --before default_reset --after hard_reset write_flash \
 -z --flash_size detect \
-0x0 build/esp32c3/bootloader.bin \
-0x8000 build/esp32c3/partitions.bin \
-0x10000 build/esp32c3/firmware.bin
+0x0 firmware_esp32c2/bootloader.bin \
+0x8000 firmware_esp32c2/partition-table.bin \
+0x10000 firmware_esp32c2/esp32_nat_router.bin
+```
+
+For ESP32-S3:
+
+```bash
+esptool.py --chip esp32s3 \
+--before default_reset --after hard_reset write_flash \
+-z --flash_size detect \
+0x0 firmware_esp32s3/bootloader.bin \
+0x8000 firmware_esp32s3/partition-table.bin \
+0x10000 firmware_esp32s3/esp32_nat_router.bin
+```
+
+### Available Artifacts
+
+Each `firmware_*` directory contains:
+
+- **`esp32_nat_router.bin`** - Main application firmware
+- **`bootloader.bin`** - ESP32 bootloader
+- **`partition-table.bin`** - Partition table
+- **`build_info.txt`** - Build metadata (timestamp, git hash, target)
+
+### Directory Structure
+
+```
+esp32_nat_router/
+├── firmware_esp32/           # ESP32 artifacts (preserved)
+│   ├── esp32_nat_router.bin
+│   ├── bootloader.bin
+│   ├── partition-table.bin
+│   └── build_info.txt
+├── firmware_esp32c2/         # ESP32-C2 artifacts (preserved)
+│   ├── esp32_nat_router.bin
+│   ├── bootloader.bin
+│   ├── partition-table.bin
+│   └── build_info.txt
+├── firmware_esp32s3/         # ESP32-S3 artifacts (preserved)
+│   ├── esp32_nat_router.bin
+│   ├── bootloader.bin
+│   ├── partition-table.bin
+│   └── build_info.txt
+└── build/                     # Temporary build directories (cleaned)
+    ├── esp32/
+    ├── esp32c2/
+    └── esp32s3/
 ```
 
 As an alternative you might use [Espressif's Flash Download Tools](https://www.espressif.com/en/products/hardware/esp32/resources) with the parameters given in the figure below (thanks to mahesh2000), update the filenames accordingly:
@@ -372,6 +424,26 @@ The following are the steps required to compile this project:
 1. Download Visual Studio Code, and the Platform IO extension.
 2. In Platformio, install the ESP-IDF framework.
 3. Build the project and flash it to the ESP32.
+
+## Multi-Target Build Scripts
+
+For automated building across multiple ESP32 targets, use the provided build scripts:
+
+```bash
+./build_all_targets.sh
+```
+
+### Features
+- ✅ **Sequential Building**: ESP32 → ESP32-C2 → ESP32-S3
+- ✅ **Artifact Preservation**: Binary files saved to `firmware_*` directories
+- ✅ **Clean Builds**: Each target starts with a clean build
+- ✅ **Error Handling**: Stops on failure, provides detailed status
+- ✅ **Build Info**: Each artifact includes build metadata
+
+For detailed information, see [BUILD_SCRIPTS_README.md](BUILD_SCRIPTS_README.md).
+
+### Using Build Artifacts
+After running the build scripts, use the preserved binary files from the `firmware_*` directories for flashing. See the [Flashing Pre-built Binaries](#flashing-pre-built-binaries) section for detailed instructions.
 
 ### DNS
 As soon as the ESP32 STA has learned a DNS IP from its upstream DNS server on first connect, it passes that to newly connected clients.

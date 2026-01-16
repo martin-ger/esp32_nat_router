@@ -126,7 +126,9 @@ dhcp_reserve del <mac>            # Delete DHCP reservation
 set_web_password <password>       # Set web interface password (empty to disable)
 disable                           # Disable web interface completely
 enable                            # Re-enable web interface
-show                              # Display current config
+show status                       # Show router status (connection, clients, memory)
+show config                       # Show router configuration (AP/STA settings)
+show mappings                     # Show DHCP pool, reservations and port mappings
 ```
 
 ## Web Interface
