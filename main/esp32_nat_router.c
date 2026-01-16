@@ -460,6 +460,60 @@ uint32_t lookup_dhcp_reservation(const uint8_t *mac) {
     return 0;
 }
 
+int get_connected_clients(connected_client_t *clients, int max_clients) {
+    if (clients == NULL || max_clients <= 0) {
+        return 0;
+    }
+
+    // Get list of connected WiFi stations
+    wifi_sta_list_t sta_list;
+    esp_err_t err = esp_wifi_ap_get_sta_list(&sta_list);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to get station list: %s", esp_err_to_name(err));
+        return 0;
+    }
+
+    // Get DHCP lease information (static to avoid stack overflow)
+    #define MAX_DHCP_LEASES 8  // ESP32 AP supports max 8 connections
+    static dhcp_lease_info_t leases[MAX_DHCP_LEASES];
+    int lease_count = dhcps_get_active_leases(leases, MAX_DHCP_LEASES);
+
+    int count = 0;
+    for (int i = 0; i < sta_list.num && count < max_clients; i++) {
+        wifi_sta_info_t *sta = &sta_list.sta[i];
+
+        // Copy MAC address
+        memcpy(clients[count].mac, sta->mac, 6);
+        clients[count].ip = 0;
+        clients[count].has_ip = false;
+        clients[count].name[0] = '\0';
+
+        // Look up IP address in DHCP leases
+        for (int j = 0; j < lease_count; j++) {
+            if (memcmp(leases[j].mac, sta->mac, 6) == 0) {
+                clients[count].ip = leases[j].ip;
+                clients[count].has_ip = true;
+                break;
+            }
+        }
+
+        // Look up device name in DHCP reservations
+        for (int j = 0; j < MAX_DHCP_RESERVATIONS; j++) {
+            if (dhcp_reservations[j].valid &&
+                memcmp(dhcp_reservations[j].mac, sta->mac, 6) == 0) {
+                strncpy(clients[count].name, dhcp_reservations[j].name,
+                        DHCP_RESERVATION_NAME_LEN - 1);
+                clients[count].name[DHCP_RESERVATION_NAME_LEN - 1] = '\0';
+                break;
+            }
+        }
+
+        count++;
+    }
+
+    return count;
+}
+
 static void initialize_console(void)
 {
     /* Disable buffering on stdin */

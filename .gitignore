@@ -1,8 +1,8 @@
 build/**
 !build/esp32
 !build/esp32/*
-!build/esp32c3
-!build/esp32c3/*
+!build/esp32c2
+!build/esp32c2/*
 !build/esp32s3
 !build/esp32s3/*
 .pio*

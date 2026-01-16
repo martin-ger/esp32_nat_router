@@ -10,14 +10,15 @@ This is a firmware to use the ESP32 as WiFi NAT router. It can be used as:
 - **NAT Routing**: Full WiFi NAT router with IP forwarding (15+ Mbps throughput)
 - **DHCP Reservations**: Assign fixed IPs to specific MAC addresses
 - **Port Forwarding**: Map external ports to internal devices
+- **Connected Clients Display**: View all connected devices with MAC, IP, and device names
 - **Web Interface**: Modern web UI at 192.168.4.1 for easy configuration
+- **Connected Clients Display**: View all connected devices with MAC, IP, and device names
 - **Password Protection**: Optional password protection for web interface configuration pages
 - **Static IP Support**: Configure static IP for the STA (upstream) interface
 - **WPA2-Enterprise Support**: Connect to corporate networks and convert them to WPA2-PSK
-- **LED Status Indicator**: Visual feedback for connection status and connected clients
 - **Serial Console**: Full CLI for advanced configuration
 - **Persistent Storage**: All settings stored in NVS, survive firmware updates
-
+- **LED Status Indicator**: Visual feedback for connection status and connected clients
 It can achieve a bandwidth of more than 15mbps.
 
 The code is based on the [Console Component](https://docs.espressif.com/projects/esp-idf/en/latest/api-guides/console.html#console) and the [esp-idf-nat-example](https://github.com/jonask1337/esp-idf-nat-example). 
@@ -54,6 +55,7 @@ Be aware that changes to AP settings (including the AP IP address) also affect t
 
 ### Mappings Page (/mappings)
 Manage network mappings:
+- **Connected Clients**: Shows all currently connected clients with MAC, IP, and optially name.
 - **DHCP Reservations**: Assign fixed IP addresses to specific MAC addresses (useful for servers/devices that need consistent IPs). Make sure you assign port numbers in the range of the DHCP pool.
 - **Port Forwarding**: Create port mappings to access devices behind the NAT router (e.g., `TCP 8080 -> 192.168.4.2:80`)
 

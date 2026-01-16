@@ -740,6 +740,22 @@ padding: 0.65rem;\
 <h1>Mappings</h1>\
 \
 <div class='section'>\
+<h2>Connected Clients</h2>\
+<table class='data-table'>\
+<thead>\
+<tr>\
+<th>MAC Address</th>\
+<th>IP Address</th>\
+<th>Device Name</th>\
+</tr>\
+</thead>\
+<tbody>\
+%s\
+</tbody>\
+</table>\
+</div>\
+\
+<div class='section'>\
 <h2>DHCP Reservations</h2>\
 <table class='data-table'>\
 <thead>\

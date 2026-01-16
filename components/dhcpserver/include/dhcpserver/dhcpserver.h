@@ -8,6 +8,7 @@
 
 #include "sdkconfig.h"
 #include <stdbool.h>
+#include <stdint.h>
 #include "lwip/ip_addr.h"
 #include "lwip/err.h"
 

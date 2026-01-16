@@ -850,6 +850,40 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
         free(buf);
     }
 
+    /* Build connected clients table HTML */
+    char clients_html[2048] = "";
+    int clients_offset = 0;
+    #define MAX_DISPLAYED_CLIENTS 8  // ESP32 AP supports max 8 stations
+    connected_client_t clients[MAX_DISPLAYED_CLIENTS];
+    int client_count = get_connected_clients(clients, MAX_DISPLAYED_CLIENTS);
+
+    if (client_count > 0) {
+        for (int i = 0; i < client_count; i++) {
+            char ip_str[16] = "-";
+            if (clients[i].has_ip) {
+                esp_ip4_addr_t addr;
+                addr.addr = clients[i].ip;
+                snprintf(ip_str, sizeof(ip_str), IPSTR, IP2STR(&addr));
+            }
+
+            clients_offset += snprintf(clients_html + clients_offset, sizeof(clients_html) - clients_offset,
+                "<tr>"
+                "<td>%02X:%02X:%02X:%02X:%02X:%02X</td>"
+                "<td>%s</td>"
+                "<td>%s</td>"
+                "</tr>",
+                clients[i].mac[0], clients[i].mac[1],
+                clients[i].mac[2], clients[i].mac[3],
+                clients[i].mac[4], clients[i].mac[5],
+                ip_str,
+                clients[i].name[0] ? clients[i].name : "-"
+            );
+        }
+    } else {
+        snprintf(clients_html, sizeof(clients_html),
+            "<tr><td colspan='3' style='text-align:center; color:#888;'>No clients connected</td></tr>");
+    }
+
     /* Build DHCP reservations table HTML */
     char dhcp_html[2048] = "";
     int dhcp_offset = 0;
@@ -921,7 +955,7 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
 
     /* Build the page */
     const char* mappings_page_template = MAPPINGS_PAGE;
-    int page_len = strlen(mappings_page_template) + strlen(dhcp_html) + strlen(portmap_html) + 512;
+    int page_len = strlen(mappings_page_template) + strlen(clients_html) + strlen(dhcp_html) + strlen(portmap_html) + 512;
     char* mappings_page = malloc(page_len);
 
     if (mappings_page == NULL) {
@@ -930,7 +964,7 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
         return ESP_ERR_NO_MEM;
     }
 
-    snprintf(mappings_page, page_len, mappings_page_template, dhcp_html, portmap_html);
+    snprintf(mappings_page, page_len, mappings_page_template, clients_html, dhcp_html, portmap_html);
 
     httpd_resp_send(req, mappings_page, strlen(mappings_page));
     free(mappings_page);
@@ -948,7 +982,7 @@ httpd_handle_t start_webserver(void)
 {
     httpd_handle_t server = NULL;
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.stack_size = 8192;  // Increase from default 4096 to prevent stack overflow
+    config.stack_size = 16384;  // Large stack needed for mappings page with 3x 2KB HTML buffers
 
     esp_timer_create(&restart_timer_args, &restart_timer);
 

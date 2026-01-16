@@ -126,6 +126,9 @@ typedef struct {
 
 static const u32_t magic_cookie  = 0x63538263;
 
+// Global DHCP server instance for external access (e.g., lease enumeration)
+static dhcps_t *g_dhcps_instance = NULL;
+
 struct dhcps_t {
     struct netif *dhcps_netif;
     ip4_addr_t broadcast_dhcps;
@@ -1416,6 +1419,7 @@ err_t __wrap_dhcps_start(dhcps_t *dhcps, struct netif *netif, ip4_addr_t ip)
     DHCPS_LOG("dhcps:dhcps_start->udp_recv function Set a receive callback handle_dhcp for UDP_PCB pcb_dhcps\n");
 #endif
     dhcps->state = DHCPS_HANDLE_STARTED;
+    g_dhcps_instance = dhcps;  // Store for external access
     sys_timeout(DHCP_COARSE_TIMER_MSECS, dhcps_tmr, dhcps);
     return ERR_OK;
 }
@@ -1457,6 +1461,7 @@ err_t __wrap_dhcps_stop(dhcps_t *dhcps, struct netif *netif)
     }
     sys_untimeout(dhcps_tmr, dhcps);
     dhcps->state = DHCPS_HANDLE_STOPPED;
+    g_dhcps_instance = NULL;  // Clear global reference
     return ERR_OK;
 }
 
@@ -1644,6 +1649,39 @@ err_t __wrap_dhcps_dns_getserver_by_type(dhcps_t *dhcps, ip4_addr_t *dnsserver, 
 err_t __wrap_dhcps_dns_getserver(dhcps_t *dhcps, ip4_addr_t *dnsserver)
 {
     return __wrap_dhcps_dns_getserver_by_type(dhcps, dnsserver, DNS_TYPE_MAIN);
+}
+
+/******************************************************************************
+ * FunctionName : dhcps_get_active_leases
+ * Description  : Enumerate all active DHCP leases
+ * Parameters   : leases -- Array to store lease info
+ *                max_leases -- Maximum number of leases to return
+ * Returns      : Number of active leases found
+ * Note         : Uses global g_dhcps_instance, safe to call from any context
+ ******************************************************************************/
+int dhcps_get_active_leases(dhcp_lease_info_t *leases, int max_leases)
+{
+    struct dhcps_pool *pdhcps_pool = NULL;
+    list_node *pback_node = NULL;
+    int count = 0;
+
+    if (leases == NULL || max_leases <= 0 || g_dhcps_instance == NULL) {
+        return 0;
+    }
+
+    for (pback_node = g_dhcps_instance->plist;
+         pback_node != NULL && count < max_leases;
+         pback_node = pback_node->pnext) {
+        pdhcps_pool = pback_node->pnode;
+        if (pdhcps_pool != NULL) {
+            memcpy(leases[count].mac, pdhcps_pool->mac, 6);
+            leases[count].ip = pdhcps_pool->ip.addr;
+            leases[count].lease_timer = pdhcps_pool->lease_timer;
+            count++;
+        }
+    }
+
+    return count;
 }
 
 #endif // ESP_DHCPS

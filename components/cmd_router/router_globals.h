@@ -6,6 +6,9 @@
 */
 #pragma once
 
+#include <stdbool.h>
+#include <stdint.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -24,6 +27,16 @@ struct dhcp_reservation_entry {
     char name[DHCP_RESERVATION_NAME_LEN];
     uint8_t valid;
 };
+
+/**
+ * @brief Information about a connected client
+ */
+typedef struct {
+    uint8_t mac[6];                          /**< Client MAC address */
+    uint32_t ip;                             /**< Client IP (0 if unknown) */
+    char name[DHCP_RESERVATION_NAME_LEN];    /**< Device name from reservation (empty if none) */
+    bool has_ip;                             /**< True if IP was found in DHCP leases */
+} connected_client_t;
 
 struct portmap_table_entry {
     uint32_t daddr;
@@ -78,6 +91,32 @@ uint32_t lookup_dhcp_reservation(const uint8_t *mac);
 
 void get_dhcp_pool_range(uint32_t server_ip, uint32_t *start_ip, uint32_t *end_ip);
 void print_dhcp_pool();
+
+/**
+ * @brief Get list of currently connected WiFi clients
+ * @param clients Array to store client information
+ * @param max_clients Maximum number of clients to return
+ * @return Number of connected clients found
+ */
+int get_connected_clients(connected_client_t *clients, int max_clients);
+
+/**
+ * @brief Structure for DHCP lease information (from custom dhcpserver)
+ * @note Defined here to avoid header conflicts with ESP-IDF's built-in dhcpserver.h
+ */
+typedef struct {
+    uint8_t mac[6];       /**< Client MAC address */
+    uint32_t ip;          /**< Client IP address (network byte order) */
+    uint32_t lease_timer; /**< Remaining lease time in seconds */
+} dhcp_lease_info_t;
+
+/**
+ * @brief Enumerate all active DHCP leases
+ * @param leases Array to store lease information
+ * @param max_leases Maximum number of leases to return
+ * @return Number of active leases found (0 if DHCP server not running)
+ */
+int dhcps_get_active_leases(dhcp_lease_info_t *leases, int max_leases);
 
 #ifdef __cplusplus
 }
