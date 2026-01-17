@@ -23,6 +23,7 @@
 #include "lwip/lwip_napt.h"
 
 #include "pages.h"
+#include "favicon_png.h"
 #include "router_globals.h"
 
 static const char *TAG = "HTTPServer";
@@ -233,6 +234,19 @@ char* html_escape(const char* src) {
 
     return res;
 }
+
+static esp_err_t favicon_get_handler(httpd_req_t *req) {
+    httpd_resp_set_type(req, "image/png");
+    httpd_resp_send(req, (const char*)favicon_png, favicon_png_len);
+    return ESP_OK;
+}
+
+static const httpd_uri_t favicon_uri = {
+    .uri       = "/favicon.png",
+    .method    = HTTP_GET,
+    .handler   = favicon_get_handler,
+    .user_ctx  = NULL
+};
 
 /* Index page GET handler - System Status with navigation */
 static esp_err_t index_get_handler(httpd_req_t *req)
@@ -629,6 +643,14 @@ static esp_err_t config_get_handler(httpd_req_t *req)
         free(buf);
     }
 
+    /* Check session status for logout button */
+    bool session_active_for_logout = session_active && password_protection_enabled;
+    char logout_section[256] = "";
+    if (session_active_for_logout) {
+        snprintf(logout_section, sizeof(logout_section),
+                 "<a href='/?logout=1' style='padding: 0.4rem 1rem; background: rgba(255,82,82,0.15); color: #ff5252; border: 1px solid #ff5252; border-radius: 6px; text-decoration: none; font-size: 0.85rem; font-weight: 500;'>Logout</a>");
+    }
+
     /* Build config page with escaped values */
     const char* config_page_template = ROUTER_CONFIG_PAGE;
 
@@ -710,6 +732,7 @@ static esp_err_t config_get_handler(httpd_req_t *req)
 
     snprintf(
         config_page, page_len, config_page_template,
+        logout_section,
         safe_ap_ssid, safe_ap_passwd, ap_ip_str, ap_mac_str,
         safe_ssid, safe_passwd, safe_ent_username, safe_ent_identity, sta_mac_str,
         static_ip, subnet_mask, gateway_addr);
@@ -957,6 +980,14 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
             "<tr><td colspan='5' style='text-align:center; color:#888;'>No port mappings configured</td></tr>");
     }
 
+    /* Check session status for logout button */
+    bool session_active_for_logout = session_active && password_protection_enabled;
+    char logout_section[256] = "";
+    if (session_active_for_logout) {
+        snprintf(logout_section, sizeof(logout_section),
+                 "<a href='/?logout=1' style='padding: 0.4rem 1rem; background: rgba(255,82,82,0.15); color: #ff5252; border: 1px solid #ff5252; border-radius: 6px; text-decoration: none; font-size: 0.85rem; font-weight: 500;'>Logout</a>");
+    }
+
     /* Build the page */
     const char* mappings_page_template = MAPPINGS_PAGE;
     int page_len = strlen(mappings_page_template) + strlen(clients_html) + strlen(dhcp_html) + strlen(portmap_html) + 512;
@@ -968,7 +999,7 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
         return ESP_ERR_NO_MEM;
     }
 
-    snprintf(mappings_page, page_len, mappings_page_template, clients_html, dhcp_html, portmap_html);
+    snprintf(mappings_page, page_len, mappings_page_template, logout_section, clients_html, dhcp_html, portmap_html);
 
     httpd_resp_send(req, mappings_page, strlen(mappings_page));
     free(mappings_page);
@@ -998,6 +1029,7 @@ httpd_handle_t start_webserver(void)
         httpd_register_uri_handler(server, &indexp);
         httpd_register_uri_handler(server, &configp);
         httpd_register_uri_handler(server, &mappingsp);
+        httpd_register_uri_handler(server, &favicon_uri);
         return server;
     }
 

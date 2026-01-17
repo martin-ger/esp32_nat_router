@@ -1,9 +1,12 @@
+//#include "esp_idf_version.h"
+
 /* Index Page - System Status with navigation buttons */
 #define INDEX_PAGE "<html>\
 <head>\
 <meta name='viewport' content='width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0'>\
 <meta charset='UTF-8'>\
 <title>ESP32 NAT Router</title>\
+<link rel='icon' href='favicon.png'>\
 </head>\
 <style>\
 * {\
@@ -153,8 +156,13 @@ font-size: 0.8rem;\
 </style>\
 <body>\
 <div id='container'>\
+<div style='display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;'>\
+<div style='display: flex; align-items: center;'>\
+<a href='/' style='display: inline-block; margin-right: 1rem;'><img src='/favicon.png' alt='Home' style='width: 64px; height: 64px; border: none;'></a>\
+<h1 style='margin: 0;'>ESP32 NAT Router</h1>\
+</div>\
 %s\
-<h1>ESP32 NAT Router</h1>\
+</div>\
 <h2>System Status</h2>\
 <div class='status-table'>\
 <table>\
@@ -189,21 +197,30 @@ font-size: 0.8rem;\
 </table>\
 </div>\
 <div class='button-container'>\
-<a href='/config' class='nav-button'>⚙️ Router Config</a>\
+<a href='/config' class='nav-button'>⚙️ Configuration</a>\
 <a href='/mappings' class='nav-button'>🔀 Mappings</a>\
+<link rel='icon' type='image/png' href='/favicon.png'>\
 </div>\
 %s\
+<div style='margin-top: 2rem; padding-top: 1rem; border-top: 1px solid rgba(255, 255, 255, 0.1); text-align: center;'>\
+<span style='color: #666; font-size: 0.75rem; font-family: monospace;'>Build: "\
+__DATE__\
+" | ESP-IDF: "\
+IDF_VER\
+" | <a href='https://github.com/martin-ger/esp32_nat_router' style='color: #00d9ff; text-decoration: none;'>Source</a></span>\
+</div>\
 </div>\
 </body>\
 </html>\
 "
 
-/* Router Config Page - WiFi settings and MAC addresses */
+/* Configuration Page - WiFi settings and MAC addresses */
 #define ROUTER_CONFIG_PAGE "<html>\
 <head>\
 <meta name='viewport' content='width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0'>\
 <meta charset='UTF-8'>\
-<title>Router Configuration</title>\
+<title>Configuration</title>\
+<link rel='icon' href='favicon.png'>\
 </head>\
 <style>\
 * {\
@@ -385,14 +402,16 @@ padding: 0.65rem 1.25rem;\
 <body>\
 <div id='container'>\
 <div style='display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;'>\
-<a href='/' class='nav-link' style='margin: 0;'>← Back to Home</a>\
-<a href='/?logout=1' style='padding: 0.4rem 1rem; background: rgba(255,82,82,0.15); color: #ff5252; border: 1px solid #ff5252; border-radius: 6px; text-decoration: none; font-size: 0.85rem; font-weight: 500;'>Logout</a>\
+<div style='display: flex; align-items: center;'>\
+<a href='/' style='display: inline-block; margin-right: 1rem;'><img src='/favicon.png' alt='Home' style='width: 64px; height: 64px; border: none;'></a>\
+<h1 style='margin: 0;'>Configuration</h1>\
 </div>\
-<h1>Router Configuration</h1>\
+%s\
+</div>\
 <script>\
 if (window.location.search.substr(1) != '') {\
 document.getElementById('container').style.display = 'none';\
-document.body.innerHTML ='<div id=\"container\"><h1>Router Configuration</h1><p style=\"text-align:center; margin: 2rem 0; color: #00d9ff;\">Settings saved! Rebooting...</p></div>';\
+document.body.innerHTML ='<div id=\"container\"><h1>Configuration</h1><p style=\"text-align:center; margin: 2rem 0; color: #00d9ff;\">Settings saved! Rebooting...</p></div>';\
 setTimeout(\"location.href = '/'\", 10000);\
 }\
 </script>\
@@ -501,6 +520,9 @@ setTimeout(\"location.href = '/'\", 10000);\
 </table>\
 </form>\
 </div>\
+<div style='margin-top: 2rem; text-align: center;'>\
+<a href='/' style='padding: 0.75rem 2rem; background: linear-gradient(135deg, #667eea 0%%, #764ba2 100%%); color: #fff; border: none; border-radius: 8px; text-decoration: none; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: all 0.3s; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4); display: inline-block;'>🏠 Home</a>\
+</div>\
 </div>\
 </body>\
 </html>\
@@ -512,6 +534,7 @@ setTimeout(\"location.href = '/'\", 10000);\
 <meta name='viewport' content='width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0'>\
 <meta charset='UTF-8'>\
 <title>Mappings</title>\
+<link rel='icon' href='favicon.png'>\
 </head>\
 <style>\
 * {\
@@ -738,10 +761,12 @@ padding: 0.65rem;\
 <body>\
 <div id='container'>\
 <div style='display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;'>\
-<a href='/' class='nav-link' style='margin: 0;'>← Back to Home</a>\
-<a href='/?logout=1' style='padding: 0.4rem 1rem; background: rgba(255,82,82,0.15); color: #ff5252; border: 1px solid #ff5252; border-radius: 6px; text-decoration: none; font-size: 0.85rem; font-weight: 500;'>Logout</a>\
+<div style='display: flex; align-items: center;'>\
+<a href='/' style='display: inline-block; margin-right: 1rem;'><img src='/favicon.png' alt='Home' style='width: 64px; height: 64px; border: none;'></a>\
+<h1 style='margin: 0;'>Mappings</h1>\
 </div>\
-<h1>Mappings</h1>\
+%s\
+</div>\
 \
 <div class='section'>\
 <h2>Connected Clients</h2>\
@@ -845,6 +870,9 @@ padding: 0.65rem;\
 </tr>\
 </table>\
 </form>\
+</div>\
+<div style='margin-top: 2rem; text-align: center;'>\
+<a href='/' style='padding: 0.75rem 2rem; background: linear-gradient(135deg, #667eea 0%%, #764ba2 100%%); color: #fff; border: none; border-radius: 8px; text-decoration: none; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: all 0.3s; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4); display: inline-block;'>🏠 Home</a>\
 </div>\
 </div>\
 </body>\
