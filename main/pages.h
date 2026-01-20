@@ -194,6 +194,10 @@ font-size: 0.8rem;\
 <td>Bytes Received:</td>\
 <td>%.1f MB</td>\
 </tr>\
+<tr>\
+<td>PCAP Capture:</td>\
+<td>%s</td>\
+</tr>\
 </table>\
 </div>\
 <div class='button-container'>\
@@ -207,7 +211,7 @@ font-size: 0.8rem;\
 __DATE__\
 " | ESP-IDF: "\
 IDF_VER\
-" | <a href='https://github.com/martin-ger/esp32_nat_router' style='color: #00d9ff; text-decoration: none;'>Source</a></span>\
+" | <a href='https://github.com/martin-ger/esp32_nat_router' target='_blank' rel='noopener' style='color: #00d9ff; text-decoration: none;'>Source</a></span>\
 </div>\
 </div>\
 </body>\
@@ -496,6 +500,33 @@ setTimeout(\"location.href = '/'\", 10000);\
 </tr>\
 </table>\
 <small>Leave empty for DHCP</small>\
+</form>\
+\
+<h2>PCAP Packet Capture</h2>\
+<form action='' method='GET'>\
+<table>\
+<tr>\
+<td>Status</td>\
+<td><strong style='color: %s;'>%s</strong></td>\
+</tr>\
+<tr>\
+<td>Capture</td>\
+<td><input type='submit' name='pcap_toggle' value='%s' class='%s'/></td>\
+</tr>\
+</table>\
+</form>\
+<form action='' method='GET'>\
+<table>\
+<tr>\
+<td>Snaplen</td>\
+<td><input type='text' name='pcap_snaplen' value='%d' placeholder='64-1600'/></td>\
+</tr>\
+<tr>\
+<td></td>\
+<td><input type='submit' value='Set Snaplen' class='ok-button'/></td>\
+</tr>\
+</table>\
+<small>Max bytes to capture per packet (64-1600). Lower values save buffer space.</small>\
 </form>\
 \
 <h2>Device Management</h2>\

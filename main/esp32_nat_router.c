@@ -47,13 +47,7 @@
 #include "lwip/netif.h"
 #include "lwip/ip_addr.h"
 #include "esp_netif.h"
-
-// On board LED
-#if defined(CONFIG_IDF_TARGET_ESP32S3)
-#define BLINK_GPIO 44
-#else
-#define BLINK_GPIO 2
-#endif
+#include "pcap_capture.h"
 
 // Byte counting variables
 uint64_t sta_bytes_sent = 0;
@@ -83,6 +77,7 @@ const int WIFI_CONNECTED_BIT = BIT0;
 uint16_t connect_count = 0;
 bool ap_connect = false;
 bool has_static_ip = false;
+int led_gpio = -1;  // -1 means LED disabled (none)
 
 uint32_t my_ip;
 uint32_t my_ap_ip;
@@ -505,22 +500,31 @@ int get_connected_clients(connected_client_t *clients, int max_clients) {
         clients[count].has_ip = false;
         clients[count].name[0] = '\0';
 
-        // Look up IP address in DHCP leases
+        // Look up IP address and hostname in DHCP leases
         for (int j = 0; j < lease_count; j++) {
             if (memcmp(leases[j].mac, sta->mac, 6) == 0) {
                 clients[count].ip = leases[j].ip;
                 clients[count].has_ip = true;
+                // Use DHCP hostname if provided by client
+                if (leases[j].hostname[0] != '\0') {
+                    strncpy(clients[count].name, leases[j].hostname,
+                            DHCP_RESERVATION_NAME_LEN - 1);
+                    clients[count].name[DHCP_RESERVATION_NAME_LEN - 1] = '\0';
+                }
                 break;
             }
         }
 
-        // Look up device name in DHCP reservations
+        // Look up device name in DHCP reservations (overrides DHCP hostname)
         for (int j = 0; j < MAX_DHCP_RESERVATIONS; j++) {
             if (dhcp_reservations[j].valid &&
                 memcmp(dhcp_reservations[j].mac, sta->mac, 6) == 0) {
-                strncpy(clients[count].name, dhcp_reservations[j].name,
-                        DHCP_RESERVATION_NAME_LEN - 1);
-                clients[count].name[DHCP_RESERVATION_NAME_LEN - 1] = '\0';
+                // Reservation name takes priority over DHCP hostname
+                if (dhcp_reservations[j].name[0] != '\0') {
+                    strncpy(clients[count].name, dhcp_reservations[j].name,
+                            DHCP_RESERVATION_NAME_LEN - 1);
+                    clients[count].name[DHCP_RESERVATION_NAME_LEN - 1] = '\0';
+                }
                 break;
             }
         }
@@ -599,22 +603,32 @@ void reset_sta_byte_counts(void) {
     sta_bytes_received = 0;
 }
 
-// AP netif hook functions (for future use)
+// AP netif hook functions (for PCAP capture)
 static err_t ap_netif_input_hook(struct pbuf *p, struct netif *netif) {
+    // Capture incoming packets on AP interface
+    if (pcap_capture_enabled()) {
+        pcap_capture_packet(p);
+    }
+
     // Call original input function
     if (original_ap_netif_input != NULL) {
         return original_ap_netif_input(p, netif);
     }
-    
+
     return ERR_VAL;
 }
 
 static err_t ap_netif_linkoutput_hook(struct netif *netif, struct pbuf *p) {
+    // Capture outgoing packets on AP interface
+    if (pcap_capture_enabled()) {
+        pcap_capture_packet(p);
+    }
+
     // Call original linkoutput function
     if (original_ap_netif_linkoutput != NULL) {
         return original_ap_netif_linkoutput(netif, p);
     }
-    
+
     return ERR_IF;
 }
 
@@ -733,18 +747,25 @@ static void initialize_console(void)
 
 void * led_status_thread(void * p)
 {
-    gpio_reset_pin(BLINK_GPIO);
-    gpio_set_direction(BLINK_GPIO, GPIO_MODE_OUTPUT);
+    // If LED GPIO is not configured (-1), exit the thread
+    if (led_gpio < 0) {
+        ESP_LOGI(TAG, "LED status disabled (no GPIO configured)");
+        return NULL;
+    }
+
+    ESP_LOGI(TAG, "LED status on GPIO %d", led_gpio);
+    gpio_reset_pin(led_gpio);
+    gpio_set_direction(led_gpio, GPIO_MODE_OUTPUT);
 
     while (true)
     {
-        gpio_set_level(BLINK_GPIO, ap_connect);
+        gpio_set_level(led_gpio, ap_connect);
 
         for (int i = 0; i < connect_count; i++)
         {
-            gpio_set_level(BLINK_GPIO, 1 - ap_connect);
+            gpio_set_level(led_gpio, 1 - ap_connect);
             vTaskDelay(50 / portTICK_PERIOD_MS);
-            gpio_set_level(BLINK_GPIO, ap_connect);
+            gpio_set_level(led_gpio, ap_connect);
             vTaskDelay(50 / portTICK_PERIOD_MS);
         }
 
@@ -788,6 +809,12 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
         
         xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);
     }
+    else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_AP_START)
+    {
+        ESP_LOGI(TAG, "AP started");
+        // Initialize AP netif hooks now that interface is ready
+        init_ap_netif_hooks();
+    }
     else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_AP_STACONNECTED)
     {
         connect_count++;
@@ -815,9 +842,6 @@ void wifi_init(const uint8_t* mac, const char* ssid, const char* ent_username, c
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     wifiAP = esp_netif_create_default_wifi_ap();
     wifiSTA = esp_netif_create_default_wifi_sta();
-
-    // Initialize AP netif hooks (for future use)
-    init_ap_netif_hooks();
 
     esp_netif_ip_info_t ipInfo_sta;
     if ((strlen(ssid) > 0) && (strlen(static_ip) > 0) && (strlen(subnet_mask) > 0) && (strlen(gateway_addr) > 0)) {
@@ -1016,6 +1040,13 @@ void app_main(void)
     get_portmap_tab();
     get_dhcp_reservations();
 
+    // Load LED GPIO setting from NVS (default -1 = disabled)
+    int led_gpio_setting = -1;
+    if (get_config_param_int("led_gpio", &led_gpio_setting) == ESP_OK) {
+        led_gpio = led_gpio_setting;
+    }
+    // led_gpio remains -1 (disabled) if not set in NVS
+
     // Setup WIFI
     wifi_init(mac, ssid, ent_username, ent_identity, passwd, static_ip, subnet_mask, gateway_addr, ap_mac, ap_ssid, ap_passwd, ap_ip);
 
@@ -1035,6 +1066,9 @@ void app_main(void)
         start_webserver();
     }
     free(web_disabled);
+
+    // Initialize PCAP capture (TCP server on port 19000)
+    pcap_init();
 
     initialize_console();
 

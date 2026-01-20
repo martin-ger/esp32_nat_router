@@ -63,6 +63,7 @@ static const char *TAG = "custom_dhcps";
 #define DHCP_OPTION_INTERFACE_MTU 26
 #define DHCP_OPTION_PERFORM_ROUTER_DISCOVERY 31
 #define DHCP_OPTION_BROADCAST_ADDRESS 28
+#define DHCP_OPTION_HOSTNAME     12
 #define DHCP_OPTION_REQ_LIST     55
 #define DHCP_OPTION_CAPTIVEPORTAL_URI 114
 #define DHCP_OPTION_END         255
@@ -149,6 +150,7 @@ struct dhcps_t {
     struct udp_pcb *dhcps_pcb;
     dhcps_handle_state state;
     bool has_declined_ip;
+    char current_hostname[DHCPS_MAX_HOSTNAME_LEN];  // Temporary storage for current client's hostname
 };
 
 
@@ -920,6 +922,9 @@ static u8_t parse_options(dhcps_t *dhcps, u8_t *optptr, s16_t len)
 
     s.state = DHCPS_STATE_IDLE;
 
+    // Clear the temporary hostname for this client
+    dhcps->current_hostname[0] = '\0';
+
     while (optptr < end) {
 #if DHCPS_DEBUG
         DHCPS_LOG("dhcps: (s16_t)*optptr = %d\n", (s16_t)*optptr);
@@ -930,6 +935,22 @@ static u8_t parse_options(dhcps_t *dhcps, u8_t *optptr, s16_t len)
             case DHCP_OPTION_MSG_TYPE:	//53
                 type = *(optptr + 2);
                 break;
+
+            case DHCP_OPTION_HOSTNAME: { //12
+                u8_t hostname_len = *(optptr + 1);
+                if (hostname_len > 0) {
+                    // Limit to our buffer size minus null terminator
+                    if (hostname_len >= DHCPS_MAX_HOSTNAME_LEN) {
+                        hostname_len = DHCPS_MAX_HOSTNAME_LEN - 1;
+                    }
+                    memcpy(dhcps->current_hostname, optptr + 2, hostname_len);
+                    dhcps->current_hostname[hostname_len] = '\0';
+#if DHCPS_DEBUG
+                    DHCPS_LOG("dhcps: DHCP_OPTION_HOSTNAME = %s\n", dhcps->current_hostname);
+#endif
+                }
+                break;
+            }
 
             case DHCP_OPTION_REQ_IPADDR://50
                 if (memcmp((char *) &client.addr, (char *) optptr + 2, 4) == 0) {
@@ -1156,6 +1177,10 @@ POOL_CHECK:
                 dhcps->has_declined_ip = true;
             }
             memset(&dhcps->client_address, 0x0, sizeof(dhcps->client_address));
+        } else if (pdhcps_pool != NULL) {
+            // Copy hostname from parse_options to the lease entry
+            strncpy(pdhcps_pool->hostname, dhcps->current_hostname, DHCPS_MAX_HOSTNAME_LEN - 1);
+            pdhcps_pool->hostname[DHCPS_MAX_HOSTNAME_LEN - 1] = '\0';
         }
 
 #if DHCPS_DEBUG
@@ -1677,6 +1702,8 @@ int dhcps_get_active_leases(dhcp_lease_info_t *leases, int max_leases)
             memcpy(leases[count].mac, pdhcps_pool->mac, 6);
             leases[count].ip = pdhcps_pool->ip.addr;
             leases[count].lease_timer = pdhcps_pool->lease_timer;
+            strncpy(leases[count].hostname, pdhcps_pool->hostname, sizeof(leases[count].hostname) - 1);
+            leases[count].hostname[sizeof(leases[count].hostname) - 1] = '\0';
             count++;
         }
     }

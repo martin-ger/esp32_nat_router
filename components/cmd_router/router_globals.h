@@ -69,6 +69,9 @@ extern uint32_t my_ap_ip;
 extern uint64_t sta_bytes_sent;
 extern uint64_t sta_bytes_received;
 
+// LED GPIO configuration (-1 means disabled/none)
+extern int led_gpio;
+
 void preprocess_string(char* str);
 int set_sta(int argc, char **argv);
 int set_sta_static(int argc, char **argv);
@@ -112,6 +115,7 @@ typedef struct {
     uint8_t mac[6];       /**< Client MAC address */
     uint32_t ip;          /**< Client IP address (network byte order) */
     uint32_t lease_timer; /**< Remaining lease time in seconds */
+    char hostname[DHCP_RESERVATION_NAME_LEN]; /**< Client hostname from DHCP Option 12 */
 } dhcp_lease_info_t;
 
 /**

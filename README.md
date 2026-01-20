@@ -12,8 +12,8 @@ This is a firmware to use the ESP32 as WiFi NAT router. It can be used as:
 - **Port Forwarding**: Map external ports to internal devices
 - **Connected Clients Display**: View all connected devices with MAC, IP, and device names
 - **Web Interface**: Modern web UI at 192.168.4.1 for easy configuration
-- **Connected Clients Display**: View all connected devices with MAC, IP, and device names
 - **Password Protection**: Optional password protection for web interface configuration pages
+- **PCAP Capture**: Live packet capture streamed to Wireshark via TCP
 - **Static IP Support**: Configure static IP for the STA (upstream) interface
 - **WPA2-Enterprise Support**: Connect to corporate networks and convert them to WPA2-PSK
 - **Serial Console**: Full CLI for advanced configuration
@@ -38,6 +38,7 @@ The main dashboard displays:
 - Used IP pool for DHCP
 - Number of connected clients
 - Bytes sent and received
+- PCAP capture status (when enabled: captured/dropped packet counts)
 
 <img src="https://raw.githubusercontent.com/martin-ger/esp32_nat_router/master/UI_Index.png">
 
@@ -46,6 +47,7 @@ Configure all router settings:
 - **Access Point Settings**: Configure the ESP32's access point name, password, IP address (default: 192.168.4.1), and MAC address
 - **Station Settings (Uplink)**: Enter the SSID and password for the upstream WiFi network (leave password blank for open networks), with optional WPA2-Enterprise credentials and MAC address customization
 - **Static IP Settings**: Optionally configure a static IP for the STA (upstream) interface
+- **PCAP Packet Capture**: Enable/disable packet capture and configure snaplen (max bytes per packet)
 - **Device Management**: Reboot the device
 - Click "Apply", "Connect", or "Set Static IP" to apply changes (the ESP32 will reboot)
 
@@ -143,20 +145,119 @@ portmap add TCP 8080 192.168.4.2 80
 
 Assuming the esp32NAT's IP address in your `local router` is `192.168.0.57`, you can access the server by typing `192.168.0.57:8080` into your browser.
 
-## Interpreting the on board LED
+## PCAP Packet Capture
 
-If the ESP32 is connected to the upstream AP then the on board LED should be on, otherwise off.
-If there are devices connected to the ESP32 then the on board LED will keep blinking as many times as the number of devices connected.
+The router includes a built-in packet capture feature that streams AP interface traffic to Wireshark in real-time via TCP.
+
+### Quick Start
+
+1. Enable capture via the web interface (`/config` page) or serial console:
+```
+pcap start
+```
+
+2. Connect Wireshark from your computer:
+```bash
+nc 192.168.4.1 19000 | wireshark -k -i -
+```
+
+Or configure Wireshark directly:
+- Go to Capture > Options > Manage Interfaces > Pipes
+- Add new pipe: `TCP@192.168.4.1:19000`
+
+### Web Interface
+
+On the **Configuration page** (`/config`), the PCAP Packet Capture section allows you to:
+- View current capture status (On/Off)
+- Enable or disable capture with a single click
+- Set the snaplen value (64-1600 bytes)
+
+The **System Status page** (`/`) shows the current capture state and, when enabled, displays the number of captured and dropped packets.
+
+### Console Commands
+
+```
+pcap start           # Enable packet capture
+pcap stop            # Disable packet capture
+pcap status          # Show capture statistics
+pcap snaplen         # Show current snaplen (bytes per packet)
+pcap snaplen 1500    # Set snaplen (64-1600 bytes)
+```
+
+### Example Status Output
+
+```
+PCAP Capture Status:
+====================
+Capture:  enabled
+Client:   connected
+Snaplen:  512 bytes
+Buffer:   4096 / 32768 bytes (12.5%)
+Captured: 1523 packets
+Dropped:  0 packets
+
+Connection: nc <esp32_ip> 19000 | wireshark -k -i -
+```
+
+### Technical Details
+
+- **TCP Port**: 19000
+- **Buffer Size**: 32KB ring buffer
+- **Default Snaplen**: 512 bytes (configurable 64-1600)
+- **Format**: Standard PCAP with DLT_EN10MB (Ethernet)
+- **Single Client**: One Wireshark connection at a time
+- **AP Traffic Only**: Captures packets to/from WiFi clients connected to the ESP32
+
+### Tips
+
+- Use a smaller snaplen (e.g., 128) to capture more packets in the buffer if you only need headers
+- Use a larger snaplen (e.g., 1500) to capture full packet contents
+- Check `pcap status` to monitor for dropped packets (buffer overflow)
+- Capture is automatically paused when no client is connected to save CPU
+
+## LED Status Indicator
+
+The on-board LED provides visual feedback about connection status:
+- **LED on**: ESP32 is connected to the upstream AP
+- **LED off**: ESP32 is not connected to upstream
+- **Blinking**: Number of blinks indicates the number of connected clients
 
 For example:
 
-One device connected to the ESP32, and the ESP32 is connected to upstream: 
+One device connected to the ESP32, and the ESP32 is connected to upstream:
 
 `*****.*****`
 
-Two devices are connected to the ESP32, but the ESP32 is not connected to upstream: 
+Two devices are connected to the ESP32, but the ESP32 is not connected to upstream:
 
 `....*.*....`
+
+### Configuring the LED GPIO
+
+By default, the LED is **disabled**. To enable it, configure the GPIO pin for your board:
+
+```
+set_led_gpio 2          # Set LED to GPIO 2
+set_led_gpio none       # Disable LED (default)
+set_led_gpio            # Show current setting
+```
+
+Changes take effect after restart.
+
+### Common LED GPIO Pins by Board
+
+| Board / Chip | Default LED GPIO |
+|--------------|------------------|
+| ESP32 DevKit v1 / WROOM | GPIO 2 |
+| ESP32-S2 | GPIO 2 (varies) |
+| ESP32-S3 DevKitC | GPIO 48 (RGB) |
+| ESP32-C3 DevKitM / SuperMini | GPIO 8 |
+| ESP32-C6 DevKitC | GPIO 8 |
+| NodeMCU-32S | GPIO 2 |
+| Lolin D32 | GPIO 5 |
+| Lolin32 Lite | GPIO 22 |
+
+**Note**: Some boards have active-low LEDs. ESP32-S3 often uses GPIO 48 for an addressable RGB LED (WS2812) which may require different handling.
 
 # Command Line Interface
 
@@ -291,6 +392,16 @@ show  [status|config|mappings]
 
 bytes  [[reset]]
   Show or reset STA interface byte counts
+
+pcap  <action> [<bytes>]
+  Control PCAP packet capture (TCP port 19000)
+      <action>  start|stop|status|snaplen
+       <bytes>  snaplen value (64-1600)
+
+set_led_gpio  [<gpio>|none]
+  Set GPIO for status LED blinking
+       <gpio>  GPIO pin number (0-48), or 'none' to disable
+               Without arguments, shows current setting
 
 ```
 

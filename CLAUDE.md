@@ -153,6 +153,47 @@ Access at `http://192.168.4.1` when connected to the AP.
 - `clear_session()` - Logout / invalidate session
 - Session state stored in static variables (lost on reboot)
 
+### Network Interface Hooks (Byte Counting)
+The firmware hooks into the lwIP network interface to count bytes transmitted/received on the STA interface.
+
+**How it works** (`esp32_nat_router.c`):
+- Uses `esp_netif_get_netif_impl()` to access the underlying lwIP `struct netif`
+- Saves original function pointers and installs custom hooks
+- Hooks intercept packets, count bytes, then call original functions
+
+**STA Interface Hooks (active):**
+```c
+// Original function pointer storage
+static netif_input_fn original_netif_input;        // For received packets
+static netif_linkoutput_fn original_netif_linkoutput;  // For sent packets
+
+// Hook functions
+netif_input_hook(pbuf, netif)      // Counts sta_bytes_received
+netif_linkoutput_hook(netif, pbuf) // Counts sta_bytes_sent
+```
+
+**AP Interface Hooks (scaffolding for future use):**
+```c
+static netif_input_fn original_ap_netif_input;
+static netif_linkoutput_fn original_ap_netif_linkoutput;
+
+ap_netif_input_hook(pbuf, netif)      // Currently pass-through
+ap_netif_linkoutput_hook(netif, pbuf) // Currently pass-through
+```
+
+**Public API** (`router_globals.h`):
+- `init_byte_counter()` - Install STA hooks (called after WiFi init)
+- `init_ap_netif_hooks()` - Install AP hooks (called during app_main)
+- `get_sta_bytes_sent()` - Get total bytes sent via STA
+- `get_sta_bytes_received()` - Get total bytes received via STA
+- `reset_sta_byte_counts()` - Reset counters to zero
+
+**Global counters:**
+- `sta_bytes_sent` (uint64_t) - Total bytes sent through STA interface
+- `sta_bytes_received` (uint64_t) - Total bytes received through STA interface
+
+**Note:** Uses internal ESP-IDF API (`esp_netif_get_netif_impl`) which may change between versions.
+
 ## LED Status (GPIO 2)
 - Solid on: Connected to upstream AP
 - Solid off: Not connected

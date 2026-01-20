@@ -32,6 +32,7 @@
 
 #include "router_globals.h"
 #include "cmd_router.h"
+#include "pcap_capture.h"
 
 #ifdef CONFIG_FREERTOS_USE_STATS_FORMATTING_FUNCTIONS
 #define WITH_TASKS_INFO 1
@@ -50,6 +51,8 @@ static void register_dhcp_reserve(void);
 static void register_set_web_password(void);
 static void register_disable_enable(void);
 static void register_bytes(void);
+static void register_pcap(void);
+static void register_set_led_gpio(void);
 
 void preprocess_string(char* str)
 {
@@ -168,6 +171,8 @@ void register_router(void)
     register_disable_enable();
     register_set_web_password();
     register_bytes();
+    register_pcap();
+    register_set_led_gpio();
 }
 
 /** Arguments used by 'set_sta' function */
@@ -1041,4 +1046,157 @@ static void register_bytes(void)
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }
 
+/* 'pcap' command arguments */
+static struct {
+    struct arg_str* action;
+    struct arg_int* snaplen;
+    struct arg_end* end;
+} pcap_args;
 
+/* 'pcap' command implementation */
+static int pcap(int argc, char **argv)
+{
+    int nerrors = arg_parse(argc, argv, (void **) &pcap_args);
+    if (nerrors != 0) {
+        arg_print_errors(stderr, pcap_args.end, argv[0]);
+        return 1;
+    }
+
+    if (pcap_args.action->count == 0) {
+        printf("Usage: pcap <start|stop|status|snaplen> [value]\n");
+        printf("  start       - Enable packet capture\n");
+        printf("  stop        - Disable packet capture\n");
+        printf("  status      - Show capture status\n");
+        printf("  snaplen [n] - Get or set max capture bytes per packet (64-1600)\n");
+        return 1;
+    }
+
+    const char *action = pcap_args.action->sval[0];
+
+    if (strcmp(action, "start") == 0) {
+        pcap_capture_start();
+        printf("PCAP capture started (snaplen=%d)\n", pcap_get_snaplen());
+        printf("Connect Wireshark to TCP port 19000\n");
+    } else if (strcmp(action, "stop") == 0) {
+        pcap_capture_stop();
+        printf("PCAP capture stopped\n");
+    } else if (strcmp(action, "snaplen") == 0) {
+        if (pcap_args.snaplen->count > 0) {
+            int val = pcap_args.snaplen->ival[0];
+            if (pcap_set_snaplen((uint16_t)val)) {
+                printf("Snaplen set to %d bytes\n", pcap_get_snaplen());
+            } else {
+                printf("Error: snaplen must be between 64 and 1600\n");
+                return 1;
+            }
+        } else {
+            printf("Current snaplen: %d bytes\n", pcap_get_snaplen());
+        }
+    } else if (strcmp(action, "status") == 0) {
+        printf("PCAP Capture Status:\n");
+        printf("====================\n");
+        printf("Capture:  %s\n", pcap_capture_enabled() ? "enabled" : "disabled");
+        printf("Client:   %s\n", pcap_client_connected() ? "connected" : "not connected");
+        printf("Snaplen:  %d bytes\n", pcap_get_snaplen());
+
+        size_t used, total;
+        pcap_get_buffer_usage(&used, &total);
+        printf("Buffer:   %u / %u bytes (%.1f%%)\n",
+               (unsigned)used, (unsigned)total,
+               total > 0 ? (100.0f * used / total) : 0.0f);
+
+        printf("Captured: %lu packets\n", (unsigned long)pcap_get_captured_count());
+        printf("Dropped:  %lu packets\n", (unsigned long)pcap_get_dropped_count());
+        printf("\nConnection: nc <esp32_ip> 19000 | wireshark -k -i -\n");
+    } else {
+        printf("Invalid action. Use: pcap <start|stop|status|snaplen>\n");
+        return 1;
+    }
+
+    return 0;
+}
+
+static void register_pcap(void)
+{
+    pcap_args.action = arg_str1(NULL, NULL, "<action>", "start|stop|status|snaplen");
+    pcap_args.snaplen = arg_int0(NULL, NULL, "<bytes>", "snaplen value (64-1600)");
+    pcap_args.end = arg_end(2);
+
+    const esp_console_cmd_t cmd = {
+        .command = "pcap",
+        .help = "Control PCAP packet capture (TCP port 19000)",
+        .hint = NULL,
+        .func = &pcap,
+        .argtable = &pcap_args
+    };
+    ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
+}
+
+/* 'set_led_gpio' command */
+static int set_led_gpio_cmd(int argc, char **argv)
+{
+    if (argc < 2) {
+        printf("Usage: set_led_gpio <gpio_number|none>\n");
+        printf("  gpio_number: GPIO pin number (0-48)\n");
+        printf("  none: disable LED status blinking\n");
+        printf("\nCurrent setting: ");
+        if (led_gpio < 0) {
+            printf("none (disabled)\n");
+        } else {
+            printf("GPIO %d\n", led_gpio);
+        }
+        return 0;
+    }
+
+    esp_err_t err;
+    nvs_handle_t nvs;
+    int gpio_num;
+
+    // Parse argument
+    if (strcasecmp(argv[1], "none") == 0 || strcmp(argv[1], "-1") == 0) {
+        gpio_num = -1;
+    } else {
+        char *endptr;
+        gpio_num = strtol(argv[1], &endptr, 10);
+        if (*endptr != '\0' || gpio_num < 0 || gpio_num > 48) {
+            printf("Invalid GPIO number. Use 0-48 or 'none'.\n");
+            return 1;
+        }
+    }
+
+    err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err != ESP_OK) {
+        printf("Failed to open NVS\n");
+        return err;
+    }
+
+    err = nvs_set_i32(nvs, "led_gpio", gpio_num);
+    if (err == ESP_OK) {
+        err = nvs_commit(nvs);
+        if (err == ESP_OK) {
+            if (gpio_num < 0) {
+                ESP_LOGI(TAG, "LED GPIO disabled.");
+                printf("LED status blinking disabled.\n");
+            } else {
+                ESP_LOGI(TAG, "LED GPIO set to %d.", gpio_num);
+                printf("LED status blinking set to GPIO %d.\n", gpio_num);
+            }
+            printf("Restart the device for changes to take effect.\n");
+        }
+    } else {
+        printf("Failed to save setting\n");
+    }
+    nvs_close(nvs);
+    return err;
+}
+
+static void register_set_led_gpio(void)
+{
+    const esp_console_cmd_t cmd = {
+        .command = "set_led_gpio",
+        .help = "Set GPIO for status LED blinking (use 'none' to disable)",
+        .hint = NULL,
+        .func = &set_led_gpio_cmd,
+    };
+    ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
+}

@@ -25,6 +25,7 @@
 #include "pages.h"
 #include "favicon_png.h"
 #include "router_globals.h"
+#include "pcap_capture.h"
 
 static const char *TAG = "HTTPServer";
 
@@ -366,6 +367,17 @@ static esp_err_t index_get_handler(httpd_req_t *req)
     float sent_mb = bytes_sent / (1024.0 * 1024.0);
     float received_mb = bytes_received / (1024.0 * 1024.0);
 
+    // Build PCAP status string
+    char pcap_status_str[128];
+    if (pcap_capture_enabled()) {
+        snprintf(pcap_status_str, sizeof(pcap_status_str),
+                 "<span style='color: #4caf50;'>On</span> <br>captured: %lu, dropped: %lu",
+                 (unsigned long)pcap_get_captured_count(),
+                 (unsigned long)pcap_get_dropped_count());
+    } else {
+        strcpy(pcap_status_str, "<span style='color: #888;'>Off</span>");
+    }
+
     /* Build header section with logout button */
     char header_ui[320] = "";
     if (authenticated) {
@@ -430,7 +442,7 @@ static esp_err_t index_get_handler(httpd_req_t *req)
 
     /* Build the page */
     const char* index_page_template = INDEX_PAGE;
-    int page_len = strlen(index_page_template) + strlen(header_ui) + strlen(auth_ui) + 512;
+    int page_len = strlen(index_page_template) + strlen(header_ui) + strlen(auth_ui) + strlen(pcap_status_str) + 512;
     char* index_page = malloc(page_len);
 
     if (index_page == NULL) {
@@ -440,7 +452,7 @@ static esp_err_t index_get_handler(httpd_req_t *req)
     }
 
     snprintf(index_page, page_len, index_page_template,
-        header_ui, conn_status, sta_ip_str, ap_ip_str, dhcp_pool_str, connect_count, sent_mb, received_mb, auth_ui);
+        header_ui, conn_status, sta_ip_str, ap_ip_str, dhcp_pool_str, connect_count, sent_mb, received_mb, pcap_status_str, auth_ui);
 
     httpd_resp_send(req, index_page, strlen(index_page));
     free(index_page);
@@ -639,6 +651,38 @@ static esp_err_t config_get_handler(httpd_req_t *req)
                     }
                 }
             }
+
+            /* Handle PCAP toggle */
+            if (httpd_query_key_value(buf, "pcap_toggle", param1, sizeof(param1)) == ESP_OK) {
+                preprocess_string(param1);
+                if (strcmp(param1, "Enable") == 0) {
+                    pcap_capture_start();
+                    ESP_LOGI(TAG, "PCAP capture enabled via web");
+                } else if (strcmp(param1, "Disable") == 0) {
+                    pcap_capture_stop();
+                    ESP_LOGI(TAG, "PCAP capture disabled via web");
+                }
+                free(buf);
+                httpd_resp_set_status(req, "303 See Other");
+                httpd_resp_set_hdr(req, "Location", "/config");
+                httpd_resp_send(req, NULL, 0);
+                return ESP_OK;
+            }
+
+            /* Handle PCAP snaplen */
+            if (httpd_query_key_value(buf, "pcap_snaplen", param1, sizeof(param1)) == ESP_OK) {
+                preprocess_string(param1);
+                int snaplen = atoi(param1);
+                if (snaplen >= 64 && snaplen <= 1600) {
+                    pcap_set_snaplen((uint16_t)snaplen);
+                    ESP_LOGI(TAG, "PCAP snaplen set to %d via web", snaplen);
+                }
+                free(buf);
+                httpd_resp_set_status(req, "303 See Other");
+                httpd_resp_set_hdr(req, "Location", "/config");
+                httpd_resp_send(req, NULL, 0);
+                return ESP_OK;
+            }
         }
         free(buf);
     }
@@ -701,6 +745,14 @@ static esp_err_t config_get_handler(httpd_req_t *req)
         return ESP_ERR_NO_MEM;
     }
 
+    // PCAP state for template
+    bool pcap_on = pcap_capture_enabled();
+    const char* pcap_status_color = pcap_on ? "#4caf50" : "#888";
+    const char* pcap_status_text = pcap_on ? "On" : "Off";
+    const char* pcap_button_value = pcap_on ? "Disable" : "Enable";
+    const char* pcap_button_class = pcap_on ? "red-button" : "ok-button";
+    int current_snaplen = pcap_get_snaplen();
+
     int page_len =
         strlen(config_page_template) +
         strlen(safe_ap_ssid) +
@@ -735,7 +787,8 @@ static esp_err_t config_get_handler(httpd_req_t *req)
         logout_section,
         safe_ap_ssid, safe_ap_passwd, ap_ip_str, ap_mac_str,
         safe_ssid, safe_passwd, safe_ent_username, safe_ent_identity, sta_mac_str,
-        static_ip, subnet_mask, gateway_addr);
+        static_ip, subnet_mask, gateway_addr,
+        pcap_status_color, pcap_status_text, pcap_button_value, pcap_button_class, current_snaplen);
 
     free(safe_ap_ssid);
     free(safe_ap_passwd);

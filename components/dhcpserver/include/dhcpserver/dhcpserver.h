@@ -75,10 +75,13 @@ typedef enum
 #define DHCPS_LEASE_TIME_DEF (120)
 #define DHCPS_LEASE_UNIT CONFIG_LWIP_DHCPS_LEASE_UNIT
 
+#define DHCPS_MAX_HOSTNAME_LEN 32
+
 struct dhcps_pool{
 	ip4_addr_t ip;
 	u8_t mac[6];
 	u32_t lease_timer;
+	char hostname[DHCPS_MAX_HOSTNAME_LEN];  // Client-provided hostname from DHCP Option 12
 };
 
 typedef u32_t dhcps_time_t;

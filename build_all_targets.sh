@@ -156,6 +156,7 @@ main() {
     declare -A TARGETS=(
         ["esp32"]="ESP32 (Original)"
         ["esp32c2"]="ESP32-C2" 
+        ["esp32c3"]="ESP32-C3"
         ["esp32s3"]="ESP32-S3"
     )
     
