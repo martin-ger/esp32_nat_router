@@ -33,6 +33,7 @@
 #include "router_globals.h"
 #include "cmd_router.h"
 #include "pcap_capture.h"
+#include "acl.h"
 
 #ifdef CONFIG_FREERTOS_USE_STATS_FORMATTING_FUNCTIONS
 #define WITH_TASKS_INFO 1
@@ -53,6 +54,24 @@ static void register_disable_enable(void);
 static void register_bytes(void);
 static void register_pcap(void);
 static void register_set_led_gpio(void);
+static void register_acl(void);
+
+/* Check if character is a valid hex digit */
+static inline int is_hex_digit(char c)
+{
+    return (c >= '0' && c <= '9') ||
+           (c >= 'A' && c <= 'F') ||
+           (c >= 'a' && c <= 'f');
+}
+
+/* Convert hex digit to value (assumes valid hex digit) */
+static inline uint8_t hex_digit_value(char c)
+{
+    if (c >= '0' && c <= '9')
+        return c - '0';
+    else
+        return toupper((unsigned char)c) - 'A' + 10;
+}
 
 void preprocess_string(char* str)
 {
@@ -60,21 +79,14 @@ void preprocess_string(char* str)
 
     for (p = q = str; *p != 0; p++)
     {
-        if (*(p) == '%' && *(p + 1) != 0 && *(p + 2) != 0)
+        if (*(p) == '%' && *(p + 1) != 0 && *(p + 2) != 0 &&
+            is_hex_digit(*(p + 1)) && is_hex_digit(*(p + 2)))
         {
-            // quoted hex
-            uint8_t a;
+            // Valid percent-encoded hex sequence
             p++;
-            if (*p <= '9')
-                a = *p - '0';
-            else
-                a = toupper((unsigned char)*p) - 'A' + 10;
-            a <<= 4;
+            uint8_t a = hex_digit_value(*p) << 4;
             p++;
-            if (*p <= '9')
-                a += *p - '0';
-            else
-                a += toupper((unsigned char)*p) - 'A' + 10;
+            a += hex_digit_value(*p);
             *q++ = a;
         }
         else if (*(p) == '+') {
@@ -173,6 +185,7 @@ void register_router(void)
     register_bytes();
     register_pcap();
     register_set_led_gpio();
+    register_acl();
 }
 
 /** Arguments used by 'set_sta' function */
@@ -737,10 +750,11 @@ static int show(int argc, char **argv)
     }
 
     if (show_args.type->count == 0) {
-        printf("Usage: show <status|config|mappings>\n");
+        printf("Usage: show <status|config|mappings|acl>\n");
         printf("  status   - Show router status (connection, clients, memory)\n");
         printf("  config   - Show router configuration (AP/STA settings)\n");
         printf("  mappings - Show DHCP pool, reservations and port mappings\n");
+        printf("  acl      - Show firewall ACL rules\n");
         return 1;
     }
 
@@ -863,7 +877,7 @@ static int show(int argc, char **argv)
         // Show mappings
         printf("Network Mappings:\n");
         printf("=================\n");
-        
+
         printf("\nDHCP Pool:\n");
         print_dhcp_pool();
 
@@ -872,9 +886,18 @@ static int show(int argc, char **argv)
 
         printf("\nPort Mappings:\n");
         print_portmap_tab();
-        
+
+    } else if (strcmp(type, "acl") == 0) {
+        // Show ACL rules
+        printf("Firewall ACL Rules:\n");
+        printf("===================\n");
+
+        for (int i = 0; i < MAX_ACL_LISTS; i++) {
+            acl_print(i);
+        }
+
     } else {
-        printf("Invalid parameter. Use: show <status|config|mappings>\n");
+        printf("Invalid parameter. Use: show <status|config|mappings|acl>\n");
         return 1;
     }
 
@@ -883,12 +906,12 @@ static int show(int argc, char **argv)
 
 static void register_show(void)
 {
-    show_args.type = arg_str1(NULL, NULL, "[status|config|mappings]", "Type of information");
+    show_args.type = arg_str1(NULL, NULL, "[status|config|mappings|acl]", "Type of information");
     show_args.end = arg_end(1);
 
     const esp_console_cmd_t cmd = {
         .command = "show",
-        .help = "Show router status, config or mappings",
+        .help = "Show router status, config, mappings or ACL rules",
         .hint = NULL,
         .func = &show,
         .argtable = &show_args
@@ -1197,6 +1220,194 @@ static void register_set_led_gpio(void)
         .help = "Set GPIO for status LED blinking (use 'none' to disable)",
         .hint = NULL,
         .func = &set_led_gpio_cmd,
+    };
+    ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
+}
+
+/* 'acl' command implementation */
+static int acl_cmd(int argc, char **argv)
+{
+    if (argc < 2) {
+        printf("Usage: acl <list> <action> [params...]\n");
+        printf("Lists: from_sta, to_sta, from_ap, to_ap\n");
+        printf("\nActions:\n");
+        printf("  acl <list> clear              - Clear all rules from list\n");
+        printf("  acl <list> clear_stats        - Clear statistics for list\n");
+        printf("  acl <list> del <idx>          - Delete rule at index\n");
+        printf("  acl <list> <proto> <src> [<s_port>] <dst> [<d_port>] <action>\n");
+        printf("\nProtocols: IP, TCP, UDP, ICMP\n");
+        printf("Addresses: IP/mask (e.g., 192.168.1.0/24) or 'any'\n");
+        printf("Ports:     Port number or '*' for any (TCP/UDP only)\n");
+        printf("Actions:   allow, deny, allow_monitor, deny_monitor\n");
+        printf("\nExamples:\n");
+        printf("  acl from_sta clear\n");
+        printf("  acl from_sta IP any 255.255.255.255 allow\n");
+        printf("  acl from_sta UDP any any any 53 allow\n");
+        printf("  acl from_sta TCP any 22 192.168.4.0/24 * deny\n");
+        printf("  acl from_sta IP any any deny          # Block all at end\n");
+        printf("  acl from_sta del 0                    # Delete first rule\n");
+        return 0;
+    }
+
+    /* Parse list name */
+    int list_no = acl_parse_name(argv[1]);
+    if (list_no < 0) {
+        printf("Invalid ACL list: %s\n", argv[1]);
+        printf("Use: from_sta, to_sta, from_ap, to_ap\n");
+        return 1;
+    }
+
+    if (argc < 3) {
+        printf("Missing action. Use: clear, clear_stats, del, or <proto> <src> <dst> <action>\n");
+        return 1;
+    }
+
+    /* Handle 'clear' action */
+    if (strcmp(argv[2], "clear") == 0) {
+        acl_clear(list_no);
+        save_acl_rules();
+        printf("ACL list %s cleared.\n", acl_get_name(list_no));
+        return 0;
+    }
+
+    /* Handle 'clear_stats' action */
+    if (strcmp(argv[2], "clear_stats") == 0) {
+        acl_clear_stats(list_no);
+        printf("ACL statistics for %s cleared.\n", acl_get_name(list_no));
+        return 0;
+    }
+
+    /* Handle 'del' action */
+    if (strcmp(argv[2], "del") == 0) {
+        if (argc < 4) {
+            printf("Usage: acl <list> del <index>\n");
+            return 1;
+        }
+        int idx = atoi(argv[3]);
+        if (idx < 0 || idx >= MAX_ACL_ENTRIES) {
+            printf("Invalid rule index: %d (0-%d)\n", idx, MAX_ACL_ENTRIES - 1);
+            return 1;
+        }
+        if (acl_delete(list_no, idx)) {
+            save_acl_rules();
+            printf("Deleted rule %d from %s\n", idx, acl_get_name(list_no));
+        } else {
+            printf("No rule at index %d\n", idx);
+        }
+        return 0;
+    }
+
+    /* Parse as add rule: <proto> <src> [<s_port>] <dst> [<d_port>] <action> */
+    const char *proto_str = argv[2];
+    uint8_t proto;
+
+    if (strcasecmp(proto_str, "IP") == 0) {
+        proto = 0;
+    } else if (strcasecmp(proto_str, "ICMP") == 0) {
+        proto = 1;
+    } else if (strcasecmp(proto_str, "TCP") == 0) {
+        proto = 6;
+    } else if (strcasecmp(proto_str, "UDP") == 0) {
+        proto = 17;
+    } else {
+        printf("Invalid protocol: %s (use IP, ICMP, TCP, UDP)\n", proto_str);
+        return 1;
+    }
+
+    /* For TCP/UDP, we expect: proto src s_port dst d_port action (7 args total)
+       For IP/ICMP, we expect: proto src dst action (5 args total)
+       But we also support: proto src dst action (no ports) for TCP/UDP */
+
+    uint32_t src_ip, src_mask, dst_ip, dst_mask;
+    uint16_t s_port = 0, d_port = 0;
+    uint8_t allow;
+    int arg_idx = 3;
+
+    /* Parse source */
+    if (arg_idx >= argc) {
+        printf("Missing source address\n");
+        return 1;
+    }
+    if (!acl_parse_ip(argv[arg_idx], &src_ip, &src_mask)) {
+        printf("Invalid source address: %s\n", argv[arg_idx]);
+        return 1;
+    }
+    arg_idx++;
+
+    /* For TCP/UDP, check if next arg is a port */
+    if ((proto == 6 || proto == 17) && arg_idx < argc) {
+        if (strcmp(argv[arg_idx], "*") == 0 || strcmp(argv[arg_idx], "any") == 0) {
+            s_port = 0;
+            arg_idx++;
+        } else if (argv[arg_idx][0] >= '0' && argv[arg_idx][0] <= '9') {
+            s_port = atoi(argv[arg_idx]);
+            arg_idx++;
+        }
+        /* If not a port-like value, treat as destination */
+    }
+
+    /* Parse destination */
+    if (arg_idx >= argc) {
+        printf("Missing destination address\n");
+        return 1;
+    }
+    if (!acl_parse_ip(argv[arg_idx], &dst_ip, &dst_mask)) {
+        printf("Invalid destination address: %s\n", argv[arg_idx]);
+        return 1;
+    }
+    arg_idx++;
+
+    /* For TCP/UDP, check if next arg is a port */
+    if ((proto == 6 || proto == 17) && arg_idx < argc) {
+        if (strcmp(argv[arg_idx], "*") == 0 || strcmp(argv[arg_idx], "any") == 0) {
+            d_port = 0;
+            arg_idx++;
+        } else if (argv[arg_idx][0] >= '0' && argv[arg_idx][0] <= '9') {
+            d_port = atoi(argv[arg_idx]);
+            arg_idx++;
+        }
+        /* If not a port-like value, treat as action */
+    }
+
+    /* Parse action */
+    if (arg_idx >= argc) {
+        printf("Missing action (allow, deny, allow_monitor, deny_monitor)\n");
+        return 1;
+    }
+    const char *action_str = argv[arg_idx];
+
+    if (strcasecmp(action_str, "allow") == 0) {
+        allow = ACL_ALLOW;
+    } else if (strcasecmp(action_str, "deny") == 0) {
+        allow = ACL_DENY;
+    } else if (strcasecmp(action_str, "allow_monitor") == 0) {
+        allow = ACL_ALLOW | ACL_MONITOR;
+    } else if (strcasecmp(action_str, "deny_monitor") == 0) {
+        allow = ACL_DENY | ACL_MONITOR;
+    } else {
+        printf("Invalid action: %s (use allow, deny, allow_monitor, deny_monitor)\n", action_str);
+        return 1;
+    }
+
+    /* Add the rule */
+    if (acl_add(list_no, src_ip, src_mask, dst_ip, dst_mask, proto, s_port, d_port, allow)) {
+        save_acl_rules();
+        printf("Rule added to %s\n", acl_get_name(list_no));
+    } else {
+        printf("Failed to add rule (list may be full)\n");
+        return 1;
+    }
+
+    return 0;
+}
+
+static void register_acl(void)
+{
+    const esp_console_cmd_t cmd = {
+        .command = "acl",
+        .help = "Manage firewall ACL rules",
+        .hint = NULL,
+        .func = &acl_cmd,
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }

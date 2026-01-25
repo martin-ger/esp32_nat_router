@@ -10,24 +10,24 @@ This is a firmware to use the ESP32 as WiFi NAT router. It can be used as:
 - **NAT Routing**: Full WiFi NAT router with IP forwarding (15+ Mbps throughput)
 - **DHCP Reservations**: Assign fixed IPs to specific MAC addresses
 - **Port Forwarding**: Map external ports to internal devices
-- **Connected Clients Display**: View all connected devices with MAC, IP, and device names
+- **WPA2-Enterprise Support**: Connect to corporate networks and convert them to WPA2-PSK
 - **Web Interface**: Modern web UI at 192.168.4.1 for easy configuration
+- **Connected Clients Display**: View all connected devices with MAC, IP, and device names
 - **Password Protection**: Optional password protection for web interface configuration pages
 - **PCAP Capture**: Live packet capture streamed to Wireshark via TCP
 - **Static IP Support**: Configure static IP for the STA (upstream) interface
-- **WPA2-Enterprise Support**: Connect to corporate networks and convert them to WPA2-PSK
 - **Serial Console**: Full CLI for advanced configuration
 - **Persistent Storage**: All settings stored in NVS, survive firmware updates
 - **LED Status Indicator**: Visual feedback for connection status and connected clients
 It can achieve a bandwidth of more than 15mbps.
 
-The code is based on the [Console Component](https://docs.espressif.com/projects/esp-idf/en/latest/api-guides/console.html#console) and the [esp-idf-nat-example](https://github.com/jonask1337/esp-idf-nat-example). 
+The code is originally based on the [Console Component](https://docs.espressif.com/projects/esp-idf/en/latest/api-guides/console.html#console) and the [esp-idf-nat-example](https://github.com/jonask1337/esp-idf-nat-example). 
 
 ## First Boot
 After first boot the ESP32 NAT Router will offer a WiFi network with an open AP and the ssid "ESP32_NAT_Router". Configuration can either be done via a simple web interface or via the serial console. 
 
 ## Web Config Interface
-The web interface allows for the configuration of all parameters. Connect your PC or smartphone to the WiFi SSID "ESP32_NAT_Router" and point your browser to "http://192.168.4.1" (or the configured AP IP address).
+The web interface allows for the configuration of all parameters. Connect your PC or smartphone to the WiFi SSID "ESP32_NAT_Router" and point your browser to "http://192.168.4.1" (or later the configured AP IP address).
 
 The web interface consists of three pages:
 
@@ -214,6 +214,115 @@ Connection: nc <esp32_ip> 19000 | wireshark -k -i -
 - Use a larger snaplen (e.g., 1500) to capture full packet contents
 - Check `pcap status` to monitor for dropped packets (buffer overflow)
 - Capture is automatically paused when no client is connected to save CPU
+
+## Firewall (ACL)
+
+The router includes a stateless packet filtering firewall with four Access Control Lists (ACLs), one for each traffic direction.
+
+### Network Topology
+
+```
+                              ESP32 NAT Router
+                        ┌───────────────────────┐
+                        │                       │
+   Internet ◄──────────►│  STA            AP    │◄──────────► Internal
+  (Upstream)            │  Interface  Interface │              Clients
+                        │                       │
+                        └───────────────────────┘
+```
+
+### ACL Naming Convention
+
+ACLs are named from the perspective of each interface - "to" means traffic arriving at the interface, "from" means traffic leaving the interface:
+
+```
+                              ESP32
+                        ┌───────────────────────┐
+                        │                       │
+   Internet ──to_sta───►│  STA            AP    │◄───to_ap─── Clients
+            ◄──from_sta─│                       │───from_ap──►
+                        │                       │
+                        └───────────────────────┘
+```
+
+| ACL | Interface | Direction | Description |
+|-----|-----------|-----------|-------------|
+| **to_sta** | STA | Inbound | Internet → ESP32 (traffic arriving at STA interface) |
+| **from_sta** | STA | Outbound | ESP32 → Internet (traffic leaving STA interface) |
+| **to_ap** | AP | Inbound | Clients → ESP32 (traffic arriving at AP interface) |
+| **from_ap** | AP | Outbound | ESP32 → Clients (traffic leaving AP interface) |
+
+### Use Cases
+
+- **to_sta**: Block unwanted incoming traffic from the Internet
+- **from_sta**: Control what internal clients can access on the Internet
+- **to_ap**: Filter traffic from specific internal clients
+- **from_ap**: Control what traffic reaches internal clients
+
+### Web Interface
+
+Access the firewall configuration at `/firewall`. For each ACL you can:
+- Add rules with source/destination IP (CIDR notation), protocol, ports, and action
+- Enable monitoring to capture matching packets to PCAP
+- View hit counters and statistics
+- Delete individual rules or clear entire lists
+
+### Console Commands
+
+```
+acl show [<list>]                    # Show rules and stats
+acl add <list> <proto> <src> <sport> <dst> <dport> <action>
+acl del <list> <index>               # Delete rule by index
+acl clear <list>                     # Clear all rules
+```
+
+**Examples:**
+```
+# Block incoming traffic from a specific IP
+acl add to_sta IP 203.0.113.50 * any * deny
+
+# Allow only DNS and HTTP/HTTPS from clients to Internet
+acl add to_ap UDP any * any 53 allow
+acl add to_ap TCP any * any 80 allow
+acl add to_ap TCP any * any 443 allow
+acl add from_sta IP any * any * deny
+```
+
+### Rule Processing
+
+- Rules are evaluated in order (first match wins)
+- If no rule matches, the packet is **allowed** (permissive default)
+- Non-IPv4 traffic (ARP, IPv6) passes through without filtering
+- Port filters only apply to TCP/UDP packets; rules with port filters won't match ICMP or other protocols
+- Rules persist in NVS storage
+
+### ACL Actions and PCAP Capture
+
+Each rule can have one of four actions:
+
+| Action | Packet | Captured to PCAP |
+|--------|--------|------------------|
+| `allow` | ✅ Allowed | ❌ No |
+| `deny` | ❌ Dropped | ❌ No |
+| `allow_monitor` | ✅ Allowed | ✅ Yes |
+| `deny_monitor` | ❌ Dropped | ✅ Yes (before drop) |
+
+**PCAP capture behavior:**
+
+- **AP interface** (client traffic): Captured automatically when PCAP is enabled
+- **STA interface** (Internet traffic): Only captured when a `+monitor` rule matches
+
+The STA interface is intentionally not captured by default to avoid a feedback loop - the PCAP stream itself is sent over the STA interface to Wireshark, so capturing all STA traffic would capture the PCAP stream itself.
+
+**Use cases for monitor rules:**
+
+```
+# Capture all DNS queries going to the Internet (for debugging)
+acl add from_sta UDP any * any 53 allow_monitor
+
+# Capture specific client's traffic without blocking
+acl add to_ap IP 192.168.4.100 * any * allow_monitor
+```
 
 ## LED Status Indicator
 
@@ -462,6 +571,17 @@ esptool.py --chip esp32c2 \
 0x0 firmware_esp32c2/bootloader.bin \
 0x8000 firmware_esp32c2/partition-table.bin \
 0x10000 firmware_esp32c2/esp32_nat_router.bin
+```
+
+For ESP32-C3:
+
+```bash
+esptool.py --chip esp32c3 \
+--before default_reset --after hard_reset write_flash \
+-z --flash_size detect \
+0x0 firmware_esp32c3/bootloader.bin \
+0x8000 firmware_esp32c3/partition-table.bin \
+0x10000 firmware_esp32c3/esp32_nat_router.bin
 ```
 
 For ESP32-S3:

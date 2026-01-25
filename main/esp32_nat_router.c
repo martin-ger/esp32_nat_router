@@ -48,6 +48,7 @@
 #include "lwip/ip_addr.h"
 #include "esp_netif.h"
 #include "pcap_capture.h"
+#include "acl.h"
 
 // Byte counting variables
 uint64_t sta_bytes_sent = 0;
@@ -472,6 +473,75 @@ uint32_t lookup_dhcp_reservation(const uint8_t *mac) {
     return 0;
 }
 
+/* ACL NVS persistence */
+esp_err_t save_acl_rules(void) {
+    esp_err_t err;
+    nvs_handle_t nvs;
+
+    err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    /* Save each ACL list */
+    const char* acl_keys[MAX_ACL_LISTS] = {"acl_0", "acl_1", "acl_2", "acl_3"};
+    for (int i = 0; i < MAX_ACL_LISTS; i++) {
+        acl_entry_t* rules = acl_get_rules(i);
+        if (rules != NULL) {
+            err = nvs_set_blob(nvs, acl_keys[i], rules, sizeof(acl_entry_t) * MAX_ACL_ENTRIES);
+            if (err != ESP_OK) {
+                ESP_LOGE(TAG, "Failed to save ACL list %d: %s", i, esp_err_to_name(err));
+            }
+        }
+    }
+
+    err = nvs_commit(nvs);
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "ACL rules saved to NVS");
+    }
+    nvs_close(nvs);
+    return err;
+}
+
+esp_err_t load_acl_rules(void) {
+    esp_err_t err;
+    nvs_handle_t nvs;
+    size_t len;
+
+    /* Initialize ACL subsystem first */
+    acl_init();
+
+    err = nvs_open(PARAM_NAMESPACE, NVS_READONLY, &nvs);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    /* Load each ACL list */
+    const char* acl_keys[MAX_ACL_LISTS] = {"acl_0", "acl_1", "acl_2", "acl_3"};
+    for (int i = 0; i < MAX_ACL_LISTS; i++) {
+        acl_entry_t* rules = acl_get_rules(i);
+        if (rules == NULL) continue;
+
+        len = sizeof(acl_entry_t) * MAX_ACL_ENTRIES;
+        err = nvs_get_blob(nvs, acl_keys[i], rules, &len);
+        if (err == ESP_OK) {
+            /* Count loaded rules */
+            int count = 0;
+            for (int j = 0; j < MAX_ACL_ENTRIES; j++) {
+                if (rules[j].valid) count++;
+            }
+            if (count > 0) {
+                ESP_LOGI(TAG, "Loaded %d ACL rules for %s", count, acl_get_name(i));
+            }
+        } else if (err != ESP_ERR_NVS_NOT_FOUND) {
+            ESP_LOGW(TAG, "Failed to load ACL list %d: %s", i, esp_err_to_name(err));
+        }
+    }
+
+    nvs_close(nvs);
+    return ESP_OK;
+}
+
 int get_connected_clients(connected_client_t *clients, int max_clients) {
     if (clients == NULL || max_clients <= 0) {
         return 0;
@@ -535,34 +605,85 @@ int get_connected_clients(connected_client_t *clients, int max_clients) {
     return count;
 }
 
-// Hook function to count received bytes via netif linkoutput
+// Helper to log denied packet info
+static void log_acl_deny(const char *acl_name, struct pbuf *p) {
+    if (p == NULL || p->payload == NULL || p->len < 14) {
+        ESP_LOGW("ACL", "%s DENY: len=%d", acl_name, p ? p->len : 0);
+        return;
+    }
+    uint8_t *data = (uint8_t *)p->payload;
+    uint16_t ethertype = (data[12] << 8) | data[13];
+    if (ethertype == 0x0800 && p->len >= 34) {
+        ESP_LOGW("ACL", "%s DENY: %d.%d.%d.%d -> %d.%d.%d.%d proto=%d",
+                 acl_name,
+                 data[26], data[27], data[28], data[29],
+                 data[30], data[31], data[32], data[33], data[23]);
+    } else {
+        ESP_LOGW("ACL", "%s DENY: ethertype=0x%04x len=%d", acl_name, ethertype, p->len);
+    }
+}
+
+// Hook function to count received bytes via netif input and ACL check
 static err_t netif_input_hook(struct pbuf *p, struct netif *netif) {
+    // Check to_sta ACL (packets from Internet to ESP32)
+    if (!acl_is_empty(ACL_TO_STA)) {
+        uint8_t result = acl_check_packet(ACL_TO_STA, p);
+
+        // Handle monitor flag - capture regardless of pcap status
+        if (result & ACL_MONITOR) {
+            pcap_capture_packet(p);
+        }
+
+        // Handle deny action
+        if ((result & 0x01) == ACL_DENY && result != ACL_NO_MATCH) {
+            log_acl_deny("to_sta", p);
+            pbuf_free(p);
+            return ERR_OK;
+        }
+    }
+
     // Count received bytes
     if (netif == sta_netif && p != NULL) {
         sta_bytes_received += p->tot_len;
     }
-    
+
     // Call original input function
     if (original_netif_input != NULL) {
         return original_netif_input(p, netif);
     }
-    
+
     return ERR_VAL;
 }
 
 
-// Hook function to count sent bytes via netif linkoutput
+// Hook function to count sent bytes via netif linkoutput and ACL check
 static err_t netif_linkoutput_hook(struct netif *netif, struct pbuf *p) {
+    // Check from_sta ACL (packets from ESP32 to Internet)
+    if (!acl_is_empty(ACL_FROM_STA)) {
+        uint8_t result = acl_check_packet(ACL_FROM_STA, p);
+
+        // Handle monitor flag - capture regardless of pcap status
+        if (result & ACL_MONITOR) {
+            pcap_capture_packet(p);
+        }
+
+        // Handle deny action
+        if ((result & 0x01) == ACL_DENY && result != ACL_NO_MATCH) {
+            log_acl_deny("from_sta", p);
+            return ERR_OK;
+        }
+    }
+
     // Count sent bytes
     if (netif == sta_netif && p != NULL) {
         sta_bytes_sent += p->tot_len;
     }
-    
+
     // Call original linkoutput function
     if (original_netif_linkoutput != NULL) {
         return original_netif_linkoutput(netif, p);
     }
-    
+
     return ERR_IF;
 }
 
@@ -603,10 +724,30 @@ void reset_sta_byte_counts(void) {
     sta_bytes_received = 0;
 }
 
-// AP netif hook functions (for PCAP capture)
+// AP netif hook functions (for PCAP capture and ACL)
 static err_t ap_netif_input_hook(struct pbuf *p, struct netif *netif) {
-    // Capture incoming packets on AP interface
-    if (pcap_capture_enabled()) {
+    bool captured_by_monitor = false;
+
+    // Check to_ap ACL (packets from Clients to ESP32)
+    if (!acl_is_empty(ACL_TO_AP)) {
+        uint8_t result = acl_check_packet(ACL_TO_AP, p);
+
+        // Handle monitor flag - capture regardless of pcap status
+        if (result & ACL_MONITOR) {
+            pcap_capture_packet(p);
+            captured_by_monitor = true;
+        }
+
+        // Handle deny action
+        if ((result & 0x01) == ACL_DENY && result != ACL_NO_MATCH) {
+            log_acl_deny("to_ap", p);
+            pbuf_free(p);
+            return ERR_OK;
+        }
+    }
+
+    // Capture AP traffic if pcap is on (but not if already captured by monitor)
+    if (!captured_by_monitor && pcap_capture_enabled()) {
         pcap_capture_packet(p);
     }
 
@@ -619,8 +760,27 @@ static err_t ap_netif_input_hook(struct pbuf *p, struct netif *netif) {
 }
 
 static err_t ap_netif_linkoutput_hook(struct netif *netif, struct pbuf *p) {
-    // Capture outgoing packets on AP interface
-    if (pcap_capture_enabled()) {
+    bool captured_by_monitor = false;
+
+    // Check from_ap ACL (packets from ESP32 to Clients)
+    if (!acl_is_empty(ACL_FROM_AP)) {
+        uint8_t result = acl_check_packet(ACL_FROM_AP, p);
+
+        // Handle monitor flag - capture regardless of pcap status
+        if (result & ACL_MONITOR) {
+            pcap_capture_packet(p);
+            captured_by_monitor = true;
+        }
+
+        // Handle deny action
+        if ((result & 0x01) == ACL_DENY && result != ACL_NO_MATCH) {
+            log_acl_deny("from_ap", p);
+            return ERR_OK;
+        }
+    }
+
+    // Capture AP traffic if pcap is on (but not if already captured by monitor)
+    if (!captured_by_monitor && pcap_capture_enabled()) {
         pcap_capture_packet(p);
     }
 
@@ -1039,6 +1199,7 @@ void app_main(void)
 
     get_portmap_tab();
     get_dhcp_reservations();
+    load_acl_rules();
 
     // Load LED GPIO setting from NVS (default -1 = disabled)
     int led_gpio_setting = -1;

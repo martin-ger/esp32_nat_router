@@ -135,6 +135,10 @@ void reset_sta_byte_counts(void);
 // AP netif hook functions (for future use)
 void init_ap_netif_hooks(void);
 
+// ACL (Firewall) NVS persistence functions
+esp_err_t save_acl_rules(void);
+esp_err_t load_acl_rules(void);
+
 #ifdef __cplusplus
 }
 #endif

@@ -26,6 +26,7 @@
 #include "favicon_png.h"
 #include "router_globals.h"
 #include "pcap_capture.h"
+#include "acl.h"
 
 static const char *TAG = "HTTPServer";
 
@@ -1066,6 +1067,258 @@ static httpd_uri_t mappingsp = {
     .handler   = mappings_get_handler,
 };
 
+/* Firewall (ACL) page GET handler */
+static esp_err_t firewall_get_handler(httpd_req_t *req)
+{
+    /* Check authentication if password protection is enabled */
+    char password[64];
+    bool password_protection_enabled = get_web_password(password, sizeof(password));
+
+    if (password_protection_enabled && !is_authenticated(req)) {
+        /* Redirect to index page with auth_required flag */
+        httpd_resp_set_status(req, "303 See Other");
+        httpd_resp_set_hdr(req, "Location", "/?auth_required=1");
+        httpd_resp_send(req, NULL, 0);
+        return ESP_OK;
+    }
+
+    char* buf;
+    size_t buf_len;
+    bool action_performed = false;
+
+    /* Read URL query string length and allocate memory for length + 1 */
+    buf_len = httpd_req_get_url_query_len(req) + 1;
+    if (buf_len > 1) {
+        buf = malloc(buf_len);
+        if (buf == NULL) {
+            ESP_LOGE(TAG, "Failed to allocate memory for query string");
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+            return ESP_ERR_NO_MEM;
+        }
+
+        if (httpd_req_get_url_query_str(req, buf, buf_len) == ESP_OK) {
+            ESP_LOGI(TAG, "Firewall query => %s", buf);
+
+            char param[64];
+
+            /* Handle Add Rule */
+            if (httpd_query_key_value(buf, "acl_action", param, sizeof(param)) == ESP_OK) {
+                if (strcmp(param, "Add+Rule") == 0 || strcmp(param, "Add Rule") == 0) {
+                    char list_str[8], proto_str[8], src_ip_str[32], src_port_str[8];
+                    char dst_ip_str[32], dst_port_str[8], action_str[8];
+
+                    if (httpd_query_key_value(buf, "acl_list", list_str, sizeof(list_str)) == ESP_OK &&
+                        httpd_query_key_value(buf, "proto", proto_str, sizeof(proto_str)) == ESP_OK &&
+                        httpd_query_key_value(buf, "src_ip", src_ip_str, sizeof(src_ip_str)) == ESP_OK &&
+                        httpd_query_key_value(buf, "dst_ip", dst_ip_str, sizeof(dst_ip_str)) == ESP_OK &&
+                        httpd_query_key_value(buf, "action", action_str, sizeof(action_str)) == ESP_OK) {
+
+                        preprocess_string(src_ip_str);
+                        preprocess_string(dst_ip_str);
+
+                        uint8_t list_no = atoi(list_str);
+                        uint8_t proto = atoi(proto_str);
+                        uint8_t action = atoi(action_str);
+
+                        /* Parse source IP */
+                        uint32_t src_ip, src_mask;
+                        if (strlen(src_ip_str) == 0 || !acl_parse_ip(src_ip_str, &src_ip, &src_mask)) {
+                            src_ip = 0;
+                            src_mask = 0;  /* any */
+                        }
+
+                        /* Parse destination IP */
+                        uint32_t dst_ip, dst_mask;
+                        if (strlen(dst_ip_str) == 0 || !acl_parse_ip(dst_ip_str, &dst_ip, &dst_mask)) {
+                            dst_ip = 0;
+                            dst_mask = 0;  /* any */
+                        }
+
+                        /* Parse ports */
+                        uint16_t s_port = 0, d_port = 0;
+                        if (httpd_query_key_value(buf, "src_port", src_port_str, sizeof(src_port_str)) == ESP_OK) {
+                            preprocess_string(src_port_str);
+                            if (strcmp(src_port_str, "*") != 0 && strlen(src_port_str) > 0) {
+                                s_port = atoi(src_port_str);
+                            }
+                        }
+                        if (httpd_query_key_value(buf, "dst_port", dst_port_str, sizeof(dst_port_str)) == ESP_OK) {
+                            preprocess_string(dst_port_str);
+                            if (strcmp(dst_port_str, "*") != 0 && strlen(dst_port_str) > 0) {
+                                d_port = atoi(dst_port_str);
+                            }
+                        }
+
+                        if (list_no < MAX_ACL_LISTS) {
+                            if (acl_add(list_no, src_ip, src_mask, dst_ip, dst_mask, proto, s_port, d_port, action)) {
+                                save_acl_rules();
+                                ESP_LOGI(TAG, "Added ACL rule to list %d", list_no);
+                                action_performed = true;
+                            }
+                        }
+                    }
+                }
+            }
+
+            /* Handle Delete Rule */
+            if (httpd_query_key_value(buf, "del_acl", param, sizeof(param)) == ESP_OK) {
+                uint8_t list_no = atoi(param);
+                char idx_str[8];
+                if (httpd_query_key_value(buf, "del_idx", idx_str, sizeof(idx_str)) == ESP_OK) {
+                    uint8_t rule_idx = atoi(idx_str);
+                    if (list_no < MAX_ACL_LISTS && acl_delete(list_no, rule_idx)) {
+                        save_acl_rules();
+                        ESP_LOGI(TAG, "Deleted ACL rule %d from list %d", rule_idx, list_no);
+                        action_performed = true;
+                    }
+                }
+            }
+
+            /* Handle Clear List */
+            if (httpd_query_key_value(buf, "clear_acl", param, sizeof(param)) == ESP_OK) {
+                uint8_t list_no = atoi(param);
+                if (list_no < MAX_ACL_LISTS) {
+                    acl_clear(list_no);
+                    save_acl_rules();
+                    ESP_LOGI(TAG, "Cleared ACL list %d", list_no);
+                    action_performed = true;
+                }
+            }
+        }
+        free(buf);
+    }
+
+    /* Redirect after action to prevent duplicate submissions on refresh */
+    if (action_performed) {
+        httpd_resp_set_status(req, "303 See Other");
+        httpd_resp_set_hdr(req, "Location", "/firewall");
+        httpd_resp_send(req, NULL, 0);
+        return ESP_OK;
+    }
+
+    /* Build ACL sections HTML */
+    char acl_html[8192] = "";
+    int html_offset = 0;
+
+    for (int list_no = 0; list_no < MAX_ACL_LISTS; list_no++) {
+        acl_entry_t* rules = acl_get_rules(list_no);
+        acl_stats_t* stats = acl_get_stats(list_no);
+        const char* list_desc = acl_get_desc(list_no);
+
+        /* Section header */
+        html_offset += snprintf(acl_html + html_offset, sizeof(acl_html) - html_offset,
+            "<div class='acl-section'>"
+            "<h3>%s</h3>"
+            "<div class='stats'>"
+            "<span class='allowed'>Allowed: %lu</span>"
+            "<span class='denied'>Denied: %lu</span>"
+            "<span>No match: %lu</span>"
+            "<a href='/firewall?clear_acl=%d' class='orange-button' style='float:right;'>Clear</a>"
+            "</div>",
+            list_desc,
+            (unsigned long)stats->packets_allowed,
+            (unsigned long)stats->packets_denied,
+            (unsigned long)stats->packets_nomatch,
+            list_no);
+
+        /* Rules table */
+        html_offset += snprintf(acl_html + html_offset, sizeof(acl_html) - html_offset,
+            "<table class='data-table'>"
+            "<thead><tr>"
+            "<th>#</th><th>Proto</th><th>Source</th><th>SPort</th>"
+            "<th>Dest</th><th>DPort</th><th>Action</th><th>Hits</th><th></th>"
+            "</tr></thead><tbody>");
+
+        int rule_count = 0;
+        for (int i = 0; i < MAX_ACL_ENTRIES; i++) {
+            if (!rules[i].valid) continue;
+            rule_count++;
+
+            /* Format protocol */
+            const char *proto_str;
+            switch (rules[i].proto) {
+                case 0:  proto_str = "IP"; break;
+                case 1:  proto_str = "ICMP"; break;
+                case 6:  proto_str = "TCP"; break;
+                case 17: proto_str = "UDP"; break;
+                default: proto_str = "?"; break;
+            }
+
+            /* Format IP addresses */
+            char src_str[24], dst_str[24];
+            acl_format_ip(rules[i].src, rules[i].s_mask, src_str, sizeof(src_str));
+            acl_format_ip(rules[i].dest, rules[i].d_mask, dst_str, sizeof(dst_str));
+
+            /* Format ports */
+            char s_port_str[8], d_port_str[8];
+            if (rules[i].s_port == 0) strcpy(s_port_str, "*");
+            else snprintf(s_port_str, sizeof(s_port_str), "%d", rules[i].s_port);
+            if (rules[i].d_port == 0) strcpy(d_port_str, "*");
+            else snprintf(d_port_str, sizeof(d_port_str), "%d", rules[i].d_port);
+
+            /* Format action */
+            const char *action_str;
+            uint8_t action = rules[i].allow & 0x01;
+            uint8_t monitor = rules[i].allow & ACL_MONITOR;
+            if (action == ACL_ALLOW) {
+                action_str = monitor ? "Allow+M" : "Allow";
+            } else {
+                action_str = monitor ? "Deny+M" : "Deny";
+            }
+
+            html_offset += snprintf(acl_html + html_offset, sizeof(acl_html) - html_offset,
+                "<tr>"
+                "<td>%d</td><td>%s</td><td>%s</td><td>%s</td>"
+                "<td>%s</td><td>%s</td><td>%s</td><td>%lu</td>"
+                "<td><a href='/firewall?del_acl=%d&del_idx=%d' class='red-button'>Del</a></td>"
+                "</tr>",
+                i, proto_str, src_str, s_port_str,
+                dst_str, d_port_str, action_str, (unsigned long)rules[i].hit_count,
+                list_no, i);
+        }
+
+        if (rule_count == 0) {
+            html_offset += snprintf(acl_html + html_offset, sizeof(acl_html) - html_offset,
+                "<tr><td colspan='9' style='text-align:center; color:#888;'>No rules (all packets allowed)</td></tr>");
+        }
+
+        html_offset += snprintf(acl_html + html_offset, sizeof(acl_html) - html_offset,
+            "</tbody></table></div>");
+    }
+
+    /* Check session status for logout button */
+    bool session_active_for_logout = session_active && password_protection_enabled;
+    char logout_section[256] = "";
+    if (session_active_for_logout) {
+        snprintf(logout_section, sizeof(logout_section),
+                 "<a href='/?logout=1' style='padding: 0.4rem 1rem; background: rgba(255,82,82,0.15); color: #ff5252; border: 1px solid #ff5252; border-radius: 6px; text-decoration: none; font-size: 0.85rem; font-weight: 500;'>Logout</a>");
+    }
+
+    /* Build the page */
+    const char* firewall_page_template = FIREWALL_PAGE;
+    int page_len = strlen(firewall_page_template) + strlen(acl_html) + 512;
+    char* firewall_page = malloc(page_len);
+
+    if (firewall_page == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate memory for firewall page");
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+        return ESP_ERR_NO_MEM;
+    }
+
+    snprintf(firewall_page, page_len, firewall_page_template, logout_section, acl_html);
+
+    httpd_resp_send(req, firewall_page, strlen(firewall_page));
+    free(firewall_page);
+
+    return ESP_OK;
+}
+
+static httpd_uri_t firewallp = {
+    .uri       = "/firewall",
+    .method    = HTTP_GET,
+    .handler   = firewall_get_handler,
+};
+
 httpd_handle_t start_webserver(void)
 {
     httpd_handle_t server = NULL;
@@ -1082,6 +1335,7 @@ httpd_handle_t start_webserver(void)
         httpd_register_uri_handler(server, &indexp);
         httpd_register_uri_handler(server, &configp);
         httpd_register_uri_handler(server, &mappingsp);
+        httpd_register_uri_handler(server, &firewallp);
         httpd_register_uri_handler(server, &favicon_uri);
         return server;
     }
