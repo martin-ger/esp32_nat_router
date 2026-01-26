@@ -388,8 +388,11 @@ heap
 version 
   Get version of chip and SDK
 
-restart 
+restart
   Software reset of the chip
+
+factory_reset
+  Erase all settings (NVS namespace 'esp32_nat') and restart
 
 deep_sleep  [-t <t>] [--io=<n>] [--io_level=<0|1>]
   Enter deep sleep mode. Two wakeup modes are supported: timer and GPIO. If no

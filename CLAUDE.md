@@ -35,9 +35,10 @@ main/
 └── cmd_decl.h           # Command declarations
 
 components/
+├── acl/                 # Stateless packet filtering firewall (4 ACL lists, 16 rules each)
 ├── dhcpserver/          # Custom DHCP server with reservation support (overrides ESP-IDF built-in)
-├── cmd_router/          # CLI commands: set_sta, set_ap, portmap, dhcp_reserve, disable/enable, set_web_password, show
-├── cmd_system/          # System commands: free, heap, restart, tasks
+├── cmd_router/          # CLI commands: set_sta, set_ap, portmap, dhcp_reserve, disable/enable, set_web_password, show, acl
+├── cmd_system/          # System commands: free, heap, restart, factory_reset, tasks
 └── cmd_nvs/             # NVS storage commands: nvs_set, nvs_get, nvs_erase
 ```
 
@@ -98,6 +99,79 @@ struct dhcp_reservation_entry {
 
 **Storage:** Persisted in NVS as blob under key `"dhcp_res"`
 
+### ACL Firewall Component
+The `components/acl/` directory implements a stateless packet filtering firewall with four ACL lists.
+
+**Structure:**
+```
+components/acl/
+├── CMakeLists.txt
+├── acl.c                    # Implementation: packet matching, rule management
+└── include/acl.h            # Public API and data structures
+```
+
+**Network topology and ACL naming:**
+```
+                          ESP32 NAT Router
+                    ┌───────────────────────┐
+                    │                       │
+Internet ──to_sta──►│  STA            AP    │◄──to_ap─── Clients
+         ◄─from_sta─│                       │──from_ap──►
+                    └───────────────────────┘
+```
+
+**ACL Lists** (defined in `acl.h`):
+| Index | Name | Direction | Description |
+|-------|------|-----------|-------------|
+| 0 | `to_sta` | STA inbound | Internet → ESP32 |
+| 1 | `from_sta` | STA outbound | ESP32 → Internet |
+| 2 | `to_ap` | AP inbound | Clients → ESP32 |
+| 3 | `from_ap` | AP outbound | ESP32 → Clients |
+
+**Data structure** (`acl.h`):
+```c
+typedef struct {
+    uint32_t src;        // Source IP (pre-masked, network byte order)
+    uint32_t s_mask;     // Source subnet mask
+    uint32_t dest;       // Destination IP (pre-masked)
+    uint32_t d_mask;     // Destination subnet mask
+    uint16_t s_port;     // Source port (0 = any, TCP/UDP only)
+    uint16_t d_port;     // Destination port (0 = any)
+    uint8_t proto;       // Protocol: 0=any, 1=ICMP, 6=TCP, 17=UDP
+    uint8_t allow;       // Action: ACL_DENY, ACL_ALLOW, or with ACL_MONITOR
+    uint32_t hit_count;  // Packets matched by this rule
+    uint8_t valid;       // Entry is active
+} acl_entry_t;
+```
+
+**Action codes:**
+- `ACL_DENY` (0x00) - Drop packet
+- `ACL_ALLOW` (0x01) - Allow packet
+- `ACL_MONITOR` (0x02) - Flag: also capture to PCAP
+- `ACL_NO_MATCH` (0xFF) - No rule matched (packet allowed by default)
+
+**Key functions** (`acl.c`):
+- `acl_init()` - Initialize ACL subsystem
+- `acl_add(acl_no, src, s_mask, dest, d_mask, proto, s_port, d_port, allow)` - Add rule
+- `acl_delete(acl_no, rule_idx)` - Delete rule by index (compacts list)
+- `acl_check_packet(acl_no, pbuf)` - Check packet against ACL, returns action
+- `acl_clear(acl_no)` - Clear all rules from list
+- `acl_parse_ip(str, &ip, &mask)` - Parse "192.168.1.0/24" or "any"
+- `acl_format_ip(ip, mask, buf, len)` - Format IP with CIDR notation
+
+**Rule processing:**
+- Rules evaluated in order (first match wins)
+- No match = packet allowed (permissive default)
+- Non-IPv4 traffic (ARP, IPv6) passes without filtering
+- Port filters only match TCP/UDP packets
+
+**Storage:** Persisted in NVS as blobs under keys `"acl_0"` through `"acl_3"`
+
+**Integration points:**
+- Hooks called from `netif_input_hook()` and `netif_linkoutput_hook()` in `esp32_nat_router.c`
+- Web interface at `/firewall` for rule management
+- CLI commands via `cmd_router.c`
+
 ### Configuration Storage
 All settings persist in NVS (Non-Volatile Storage) under namespace `esp32_nat`:
 - WiFi credentials, static IP settings, port mappings, DHCP reservations
@@ -129,6 +203,11 @@ enable                            # Re-enable web interface
 show status                       # Show router status (connection, clients, memory)
 show config                       # Show router configuration (AP/STA settings)
 show mappings                     # Show DHCP pool, reservations and port mappings
+factory_reset                     # Erase all settings and restart (factory reset)
+acl show [<list>]                 # Show ACL rules and statistics
+acl add <list> <proto> <src> <sport> <dst> <dport> <action>  # Add ACL rule
+acl del <list> <index>            # Delete ACL rule by index
+acl clear <list>                  # Clear all rules from ACL list
 ```
 
 ## Web Interface
@@ -139,6 +218,7 @@ Access at `http://192.168.4.1` when connected to the AP.
 - `/` - System status (connection, IPs, clients, heap), login form, password management
 - `/config` - Router configuration (AP/STA settings, static IP, MAC addresses) - protected
 - `/mappings` - DHCP reservations and port forwarding management - protected
+- `/firewall` - ACL firewall rules management (4 lists, add/delete rules, view stats) - protected
 
 **Password Protection:**
 - Optional password protects `/config` and `/mappings` pages

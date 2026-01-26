@@ -13,6 +13,8 @@
 #include "esp_log.h"
 #include "esp_console.h"
 #include "esp_system.h"
+#include "nvs.h"
+#include "router_globals.h"
 #include "esp_sleep.h"
 #include "esp_flash.h"
 #include "esp_chip_info.h"
@@ -35,6 +37,7 @@ static void register_free(void);
 static void register_heap(void);
 static void register_version(void);
 static void register_restart(void);
+static void register_factory_reset(void);
 static void register_deep_sleep(void);
 static void register_light_sleep(void);
 #if WITH_TASKS_INFO
@@ -47,6 +50,7 @@ void register_system(void)
     register_heap();
     register_version();
     register_restart();
+    register_factory_reset();
     register_deep_sleep();
     register_light_sleep();
 #if WITH_TASKS_INFO
@@ -101,6 +105,39 @@ static void register_restart(void)
         .help = "Software reset of the chip",
         .hint = NULL,
         .func = &restart,
+    };
+    ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
+}
+
+/** 'factory_reset' command erases all settings and restarts */
+
+static int factory_reset(int argc, char **argv)
+{
+    nvs_handle_t nvs;
+    esp_err_t err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err == ESP_OK) {
+        err = nvs_erase_all(nvs);
+        if (err == ESP_OK) {
+            err = nvs_commit(nvs);
+        }
+        nvs_close(nvs);
+    }
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to erase NVS namespace: %s", esp_err_to_name(err));
+        return 1;
+    }
+    ESP_LOGI(TAG, "NVS namespace '%s' erased, restarting...", PARAM_NAMESPACE);
+    esp_restart();
+    return 0; // Never reached
+}
+
+static void register_factory_reset(void)
+{
+    const esp_console_cmd_t cmd = {
+        .command = "factory_reset",
+        .help = "Erase all settings (NVS namespace '" PARAM_NAMESPACE "') and restart",
+        .hint = NULL,
+        .func = &factory_reset,
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }
