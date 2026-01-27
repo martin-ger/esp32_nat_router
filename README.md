@@ -2,8 +2,9 @@
 
 This is a firmware to use the ESP32 as WiFi NAT router. It can be used as:
 - Simple range extender for an existing WiFi network
-- Setting up an additional WiFi network with different SSID/password for guests or IOT devices
+- Setting up an additional WiFi network with different SSID/password and restricted access for guests or IOT devices
 - Convert a corporate (WPA2-Enterprise) network to a regular network, for simple devices
+- Debugging and monitoring of WiFi devices
 
 ## Key Features
 
@@ -11,13 +12,14 @@ This is a firmware to use the ESP32 as WiFi NAT router. It can be used as:
 - **DHCP Reservations**: Assign fixed IPs to specific MAC addresses
 - **Port Forwarding**: Map external ports to internal devices
 - **Firewall**: Define ACL to restrict or monitor traffic
+- **PCAP Capture**: Live packet capture can be streamed to Wireshark
 - **WPA2-Enterprise Support**: Connect to corporate networks and convert them to WPA2-PSK
-- **Web Interface**: Modern web UI at 192.168.4.1 for easy configuration with password protection
-- **Connected Clients Display**: View all connected devices with MAC, IP, and device names
-- **PCAP Capture**: Live packet capture streamed to Wireshark via TCP
-- **Static IP Support**: Configure static IP for the STA (upstream) interface
+- **Web Interface**: Web UI with password protection for easy configuration
 - **Serial Console**: Full CLI for advanced configuration
+- **Connected Clients Display**: View all connected devices with MAC, IP, and device names
+- **Static IP Support**: Configure static IP for the STA (upstream) interface
 - **LED Status Indicator**: Visual feedback for connection status and connected clients
+
 It can achieve a bandwidth of more than 15mbps.
 
 The code is originally based on the [Console Component](https://docs.espressif.com/projects/esp-idf/en/latest/api-guides/console.html#console) and the [esp-idf-nat-example](https://github.com/jonask1337/esp-idf-nat-example). 
@@ -533,6 +535,9 @@ pcap  <action> [<mode>] [<bytes>]
       <action>  mode|status|snaplen|start|stop
         <mode>  off|acl|promisc
        <bytes>  snaplen value (64-1600)
+
+acl 
+  Manage firewall ACL rules
 
 set_led_gpio  [<gpio>|none]
   Set GPIO for status LED blinking

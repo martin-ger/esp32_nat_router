@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ESP32 NAT Router - Multi-Target Build Script
-# Compiles for ESP32, ESP32-C2, and ESP32-S3 sequentially
+# Compiles for ESP32, ESP32-C2, ESP32-C3, and ESP32-S3 sequentially
 
 set -e  # Exit on any error
 
@@ -219,7 +219,7 @@ main() {
     # Show total size of all preserved artifacts
     echo ""
     total_size=0
-    for target in "esp32" "esp32c2" "esp32s3"; do
+    for target in "esp32" "esp32c2" "esp32c3" "esp32s3"; do
         artifacts_dir="firmware_$target"
         if [ -d "$artifacts_dir" ]; then
             for bin_file in "$artifacts_dir"/*.bin; do

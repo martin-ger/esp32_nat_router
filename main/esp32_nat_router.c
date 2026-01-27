@@ -152,8 +152,15 @@ void print_portmap_tab() {
             ip4_addr_t addr;
             addr.addr = my_ip;
             printf (IPSTR":%d -> ", IP2STR(&addr), portmap_tab[i].mport);
-            addr.addr = portmap_tab[i].daddr;
-            printf (IPSTR":%d\n", IP2STR(&addr), portmap_tab[i].dport);
+
+            /* Try to look up device name for destination IP */
+            const char *name = lookup_device_name_by_ip(portmap_tab[i].daddr);
+            if (name) {
+                printf ("%s:%d\n", name, portmap_tab[i].dport);
+            } else {
+                addr.addr = portmap_tab[i].daddr;
+                printf (IPSTR":%d\n", IP2STR(&addr), portmap_tab[i].dport);
+            }
         }
     }
 }
@@ -551,10 +558,13 @@ esp_err_t load_acl_rules(void) {
         len = sizeof(acl_entry_t) * MAX_ACL_ENTRIES;
         err = nvs_get_blob(nvs, acl_keys[i], rules, &len);
         if (err == ESP_OK) {
-            /* Count loaded rules */
+            /* Count loaded rules and reset hit counters */
             int count = 0;
             for (int j = 0; j < MAX_ACL_ENTRIES; j++) {
-                if (rules[j].valid) count++;
+                if (rules[j].valid) {
+                    count++;
+                    rules[j].hit_count = 0;  /* Reset hit counter on boot */
+                }
             }
             if (count > 0) {
                 ESP_LOGI(TAG, "Loaded %d ACL rules for %s", count, acl_get_name(i));

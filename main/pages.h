@@ -1,4 +1,5 @@
 //#include "esp_idf_version.h"
+#include "router_globals.h"
 
 /* Index Page - System Status with navigation buttons */
 #define INDEX_PAGE "<html>\
@@ -208,7 +209,9 @@ font-size: 0.8rem;\
 </div>\
 %s\
 <div style='margin-top: 2rem; padding-top: 1rem; border-top: 1px solid rgba(255, 255, 255, 0.1); text-align: center;'>\
-<span style='color: #666; font-size: 0.75rem; font-family: monospace;'>Build: "\
+<span style='color: #666; font-size: 0.75rem; font-family: monospace;'>v"\
+ROUTER_VERSION\
+" | Build: "\
 __DATE__\
 " | ESP-IDF: "\
 IDF_VER\
@@ -800,8 +803,15 @@ font-size: 0.9rem;\
 padding: 0.65rem;\
 }\
 }\
+.modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%%; height: 100%%; background: rgba(0,0,0,0.7); z-index: 1000; justify-content: center; align-items: center; }\
+.modal-overlay.show { display: flex; }\
+.modal-box { background: rgba(30, 30, 46, 0.98); border: 2px solid #f5576c; border-radius: 12px; padding: 1.5rem; max-width: 400px; text-align: center; box-shadow: 0 8px 32px rgba(245, 87, 108, 0.3); }\
+.modal-box h3 { color: #f5576c; margin-bottom: 1rem; }\
+.modal-box p { color: #e0e0e0; margin-bottom: 1.5rem; }\
+.modal-box button { background: linear-gradient(135deg, #667eea 0%%, #764ba2 100%%); color: #fff; border: none; border-radius: 8px; padding: 0.75rem 2rem; font-size: 1rem; cursor: pointer; }\
 </style>\
 <body>\
+%s\
 <div id='container'>\
 <div style='display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;'>\
 <div style='display: flex; align-items: center;'>\
@@ -901,7 +911,7 @@ padding: 0.65rem;\
 </tr>\
 <tr>\
 <td>Internal IP</td>\
-<td><input type='text' name='int_ip' placeholder='192.168.4.2'/></td>\
+<td><input type='text' name='int_ip' placeholder='IP or device name'/></td>\
 </tr>\
 <tr>\
 <td>Internal Port</td>\
@@ -961,8 +971,15 @@ input:focus, select:focus { outline: none; border-color: #00d9ff; }\
 .stats .allowed { color: #4caf50; }\
 .stats .denied { color: #f44336; }\
 @media (max-width: 768px) { body { padding: 0.5rem; } #container { padding: 1rem; } .data-table { font-size: 0.65rem; display: block; overflow-x: auto; } .data-table th, .data-table td { padding: 0.2rem 0.1rem; font-size: 0.65rem; } }\
+.modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%%; height: 100%%; background: rgba(0,0,0,0.7); z-index: 1000; justify-content: center; align-items: center; }\
+.modal-overlay.show { display: flex; }\
+.modal-box { background: rgba(30, 30, 46, 0.98); border: 2px solid #f5576c; border-radius: 12px; padding: 1.5rem; max-width: 400px; text-align: center; box-shadow: 0 8px 32px rgba(245, 87, 108, 0.3); }\
+.modal-box h3 { color: #f5576c; margin-bottom: 1rem; }\
+.modal-box p { color: #e0e0e0; margin-bottom: 1.5rem; }\
+.modal-box button { background: linear-gradient(135deg, #667eea 0%%, #764ba2 100%%); color: #fff; border: none; border-radius: 6px; padding: 0.5rem 1.5rem; font-size: 0.9rem; font-weight: 600; cursor: pointer; }\
 </style>\
 <body>\
+%s\
 <div id='container'>\
 <div style='display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;'>\
 <div style='display: flex; align-items: center;'>\

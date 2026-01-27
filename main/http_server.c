@@ -869,20 +869,27 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
                         preprocess_string(param1);
                         preprocess_string(param2);
 
+                        const char *error_msg = NULL;
+
                         // Parse MAC address
                         unsigned int mac[6];
+                        uint8_t mac_bytes[6];
                         if (sscanf(param1, "%02x:%02x:%02x:%02x:%02x:%02x",
-                                   &mac[0], &mac[1], &mac[2], &mac[3], &mac[4], &mac[5]) == 6 ||
+                                   &mac[0], &mac[1], &mac[2], &mac[3], &mac[4], &mac[5]) != 6 &&
                             sscanf(param1, "%02x-%02x-%02x-%02x-%02x-%02x",
-                                   &mac[0], &mac[1], &mac[2], &mac[3], &mac[4], &mac[5]) == 6) {
-
-                            uint8_t mac_bytes[6];
+                                   &mac[0], &mac[1], &mac[2], &mac[3], &mac[4], &mac[5]) != 6) {
+                            error_msg = "Invalid MAC address format";
+                        } else {
                             for (int i = 0; i < 6; i++) {
                                 mac_bytes[i] = (uint8_t)mac[i];
                             }
 
                             uint32_t ip = esp_ip4addr_aton(param2);
-                            if (ip != 0) {
+                            if (ip == IPADDR_NONE) {
+                                error_msg = "Invalid IP address";
+                            } else if ((ip & 0x00FFFFFF) != (my_ap_ip & 0x00FFFFFF)) {
+                                error_msg = "IP must be in the same network as the AP";
+                            } else {
                                 const char *name = NULL;
                                 if (httpd_query_key_value(buf, "dhcp_name", param3, sizeof(param3)) == ESP_OK && strlen(param3) > 0) {
                                     preprocess_string(param3);
@@ -891,6 +898,20 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
                                 add_dhcp_reservation(mac_bytes, ip, name);
                                 ESP_LOGI(TAG, "Added DHCP reservation: %s -> %s", param1, param2);
                             }
+                        }
+
+                        if (error_msg != NULL) {
+                            /* Redirect back with error parameter */
+                            char redirect_url[128];
+                            snprintf(redirect_url, sizeof(redirect_url), "/mappings?error=%s", error_msg);
+                            for (char *p = redirect_url; *p; p++) {
+                                if (*p == ' ') *p = '+';
+                            }
+                            httpd_resp_set_status(req, "303 See Other");
+                            httpd_resp_set_hdr(req, "Location", redirect_url);
+                            httpd_resp_send(req, NULL, 0);
+                            free(buf);
+                            return ESP_OK;
                         }
                     }
                 }
@@ -921,13 +942,58 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
                         httpd_query_key_value(buf, "int_ip", param3, sizeof(param3)) == ESP_OK &&
                         httpd_query_key_value(buf, "int_port", param4, sizeof(param4)) == ESP_OK) {
 
+                        preprocess_string(param3);
                         uint8_t proto = (strcmp(param1, "TCP") == 0) ? PROTO_TCP : PROTO_UDP;
                         uint16_t ext_port = atoi(param2);
                         uint32_t int_ip = esp_ip4addr_aton(param3);
+
+                        /* If IP parsing failed, try resolving as device name */
+                        if (int_ip == IPADDR_NONE) {
+                            if (!resolve_device_name_to_ip(param3, &int_ip)) {
+                                ESP_LOGW(TAG, "Invalid IP or device name: %s", param3);
+                            }
+                        }
                         uint16_t int_port = atoi(param4);
 
-                        add_portmap(proto, ext_port, int_ip, int_port);
-                        ESP_LOGI(TAG, "Added port mapping: %s %d -> %s:%d", param1, ext_port, param3, int_port);
+                        /* Validate internal IP is in same /24 network as AP interface */
+                        const char *error_msg = NULL;
+                        if (int_ip == IPADDR_NONE) {
+                            error_msg = "Invalid IP address or device name";
+                        } else if ((int_ip & 0x00FFFFFF) != (my_ap_ip & 0x00FFFFFF)) {
+                            esp_ip4_addr_t ap_addr;
+                            ap_addr.addr = my_ap_ip;
+                            ESP_LOGW(TAG, "Internal IP not in AP network (" IPSTR "/24)", IP2STR(&ap_addr));
+                            error_msg = "Internal IP must be in the same network as the AP";
+                        } else {
+                            /* Check if external port is already in use for this protocol */
+                            for (int i = 0; i < IP_PORTMAP_MAX; i++) {
+                                if (portmap_tab[i].valid &&
+                                    portmap_tab[i].proto == proto &&
+                                    portmap_tab[i].mport == ext_port) {
+                                    ESP_LOGW(TAG, "External port %d already mapped", ext_port);
+                                    error_msg = "External port is already in use";
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (error_msg == NULL) {
+                            add_portmap(proto, ext_port, int_ip, int_port);
+                            ESP_LOGI(TAG, "Added port mapping: %s %d -> %s:%d", param1, ext_port, param3, int_port);
+                        } else {
+                            /* Redirect back with error parameter */
+                            char redirect_url[128];
+                            snprintf(redirect_url, sizeof(redirect_url), "/mappings?error=%s", error_msg);
+                            /* URL encode spaces */
+                            for (char *p = redirect_url; *p; p++) {
+                                if (*p == ' ') *p = '+';
+                            }
+                            httpd_resp_set_status(req, "303 See Other");
+                            httpd_resp_set_hdr(req, "Location", redirect_url);
+                            httpd_resp_send(req, NULL, 0);
+                            free(buf);
+                            return ESP_OK;
+                        }
                     }
                 }
             }
@@ -942,6 +1008,24 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
             }
         }
         free(buf);
+    }
+
+    /* Check for error parameter (from redirect after validation failure) */
+    char error_msg[128] = "";
+    buf_len = httpd_req_get_url_query_len(req) + 1;
+    if (buf_len > 1) {
+        buf = malloc(buf_len);
+        if (buf && httpd_req_get_url_query_str(req, buf, buf_len) == ESP_OK) {
+            char error_param[128];
+            if (httpd_query_key_value(buf, "error", error_param, sizeof(error_param)) == ESP_OK) {
+                /* Decode + back to spaces */
+                for (char *p = error_param; *p; p++) {
+                    if (*p == '+') *p = ' ';
+                }
+                snprintf(error_msg, sizeof(error_msg), "%s", error_param);
+            }
+        }
+        if (buf) free(buf);
     }
 
     /* Build connected clients table HTML */
@@ -1021,20 +1105,29 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
     for (int i = 0; i < IP_PORTMAP_MAX; i++) {
         if (portmap_tab[i].valid) {
             has_mappings = true;
-            esp_ip4_addr_t addr;
-            addr.addr = portmap_tab[i].daddr;
+
+            /* Try to look up device name for destination IP */
+            const char *name = lookup_device_name_by_ip(portmap_tab[i].daddr);
+            char ip_or_name[DHCP_RESERVATION_NAME_LEN];
+            if (name) {
+                snprintf(ip_or_name, sizeof(ip_or_name), "%s", name);
+            } else {
+                esp_ip4_addr_t addr;
+                addr.addr = portmap_tab[i].daddr;
+                snprintf(ip_or_name, sizeof(ip_or_name), IPSTR, IP2STR(&addr));
+            }
 
             offset += snprintf(portmap_html + offset, sizeof(portmap_html) - offset,
                 "<tr>"
                 "<td>%s</td>"
                 "<td>%d</td>"
-                "<td>" IPSTR "</td>"
+                "<td>%s</td>"
                 "<td>%d</td>"
                 "<td><a href='/mappings?del_proto=%s&del_port=%d' class='red-button'>Delete</a></td>"
                 "</tr>",
                 portmap_tab[i].proto == PROTO_TCP ? "TCP" : "UDP",
                 portmap_tab[i].mport,
-                IP2STR(&addr),
+                ip_or_name,
                 portmap_tab[i].dport,
                 portmap_tab[i].proto == PROTO_TCP ? "TCP" : "UDP",
                 portmap_tab[i].mport
@@ -1055,9 +1148,23 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
                  "<a href='/?logout=1' style='padding: 0.4rem 1rem; background: rgba(255,82,82,0.15); color: #ff5252; border: 1px solid #ff5252; border-radius: 6px; text-decoration: none; font-size: 0.85rem; font-weight: 500;'>Logout</a>");
     }
 
+    /* Build error modal HTML if there's an error */
+    char error_modal_html[512] = "";
+    if (error_msg[0] != '\0') {
+        snprintf(error_modal_html, sizeof(error_modal_html),
+            "<div class='modal-overlay show' id='errorModal'>"
+            "<div class='modal-box'>"
+            "<h3>Error</h3>"
+            "<p>%s</p>"
+            "<button onclick=\"document.getElementById('errorModal').classList.remove('show'); history.replaceState(null, '', '/mappings');\">OK</button>"
+            "</div>"
+            "</div>",
+            error_msg);
+    }
+
     /* Build the page */
     const char* mappings_page_template = MAPPINGS_PAGE;
-    int page_len = strlen(mappings_page_template) + strlen(clients_html) + strlen(dhcp_html) + strlen(portmap_html) + 512;
+    int page_len = strlen(mappings_page_template) + strlen(error_modal_html) + strlen(clients_html) + strlen(dhcp_html) + strlen(portmap_html) + 512;
     char* mappings_page = malloc(page_len);
 
     if (mappings_page == NULL) {
@@ -1066,7 +1173,7 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
         return ESP_ERR_NO_MEM;
     }
 
-    snprintf(mappings_page, page_len, mappings_page_template, logout_section, clients_html, dhcp_html, portmap_html);
+    snprintf(mappings_page, page_len, mappings_page_template, error_modal_html, logout_section, clients_html, dhcp_html, portmap_html);
 
     httpd_resp_send(req, mappings_page, strlen(mappings_page));
     free(mappings_page);
@@ -1098,6 +1205,7 @@ static esp_err_t firewall_get_handler(httpd_req_t *req)
     char* buf;
     size_t buf_len;
     bool action_performed = false;
+    char error_msg[128] = "";
 
     /* Read URL query string length and allocate memory for length + 1 */
     buf_len = httpd_req_get_url_query_len(req) + 1;
@@ -1113,6 +1221,16 @@ static esp_err_t firewall_get_handler(httpd_req_t *req)
             ESP_LOGI(TAG, "Firewall query => %s", buf);
 
             char param[64];
+
+            /* Check for error parameter first */
+            char error_param[128];
+            if (httpd_query_key_value(buf, "error", error_param, sizeof(error_param)) == ESP_OK) {
+                /* Decode + back to spaces */
+                for (char *p = error_param; *p; p++) {
+                    if (*p == '+') *p = ' ';
+                }
+                snprintf(error_msg, sizeof(error_msg), "%s", error_param);
+            }
 
             /* Handle Add Rule */
             if (httpd_query_key_value(buf, "acl_action", param, sizeof(param)) == ESP_OK) {
@@ -1133,6 +1251,8 @@ static esp_err_t firewall_get_handler(httpd_req_t *req)
                         uint8_t proto = atoi(proto_str);
                         uint8_t action = atoi(action_str);
 
+                        const char *validation_error = NULL;
+
                         /* Parse source IP (try IP/CIDR first, then device name) */
                         uint32_t src_ip, src_mask;
                         if (strlen(src_ip_str) == 0) {
@@ -1143,23 +1263,23 @@ static esp_err_t firewall_get_handler(httpd_req_t *req)
                             if (resolve_device_name_to_ip(src_ip_str, &src_ip)) {
                                 src_mask = 0xFFFFFFFF;  /* /32 for device names */
                             } else {
-                                src_ip = 0;
-                                src_mask = 0;  /* any */
+                                validation_error = "Invalid source IP address or device name";
                             }
                         }
 
                         /* Parse destination IP (try IP/CIDR first, then device name) */
                         uint32_t dst_ip, dst_mask;
-                        if (strlen(dst_ip_str) == 0) {
-                            dst_ip = 0;
-                            dst_mask = 0;  /* any */
-                        } else if (!acl_parse_ip(dst_ip_str, &dst_ip, &dst_mask)) {
-                            /* Try resolving as device name */
-                            if (resolve_device_name_to_ip(dst_ip_str, &dst_ip)) {
-                                dst_mask = 0xFFFFFFFF;  /* /32 for device names */
-                            } else {
+                        if (validation_error == NULL) {
+                            if (strlen(dst_ip_str) == 0) {
                                 dst_ip = 0;
                                 dst_mask = 0;  /* any */
+                            } else if (!acl_parse_ip(dst_ip_str, &dst_ip, &dst_mask)) {
+                                /* Try resolving as device name */
+                                if (resolve_device_name_to_ip(dst_ip_str, &dst_ip)) {
+                                    dst_mask = 0xFFFFFFFF;  /* /32 for device names */
+                                } else {
+                                    validation_error = "Invalid destination IP address or device name";
+                                }
                             }
                         }
 
@@ -1176,6 +1296,21 @@ static esp_err_t firewall_get_handler(httpd_req_t *req)
                             if (strcmp(dst_port_str, "*") != 0 && strlen(dst_port_str) > 0) {
                                 d_port = atoi(dst_port_str);
                             }
+                        }
+
+                        if (validation_error != NULL) {
+                            /* Redirect back with error parameter */
+                            char redirect_url[192];
+                            snprintf(redirect_url, sizeof(redirect_url), "/firewall?error=%s", validation_error);
+                            /* URL encode spaces */
+                            for (char *p = redirect_url; *p; p++) {
+                                if (*p == ' ') *p = '+';
+                            }
+                            httpd_resp_set_status(req, "303 See Other");
+                            httpd_resp_set_hdr(req, "Location", redirect_url);
+                            httpd_resp_send(req, NULL, 0);
+                            free(buf);
+                            return ESP_OK;
                         }
 
                         if (list_no < MAX_ACL_LISTS) {
@@ -1341,9 +1476,23 @@ static esp_err_t firewall_get_handler(httpd_req_t *req)
                  "<a href='/?logout=1' style='padding: 0.4rem 1rem; background: rgba(255,82,82,0.15); color: #ff5252; border: 1px solid #ff5252; border-radius: 6px; text-decoration: none; font-size: 0.85rem; font-weight: 500;'>Logout</a>");
     }
 
+    /* Build error modal HTML if there's an error */
+    char error_modal_html[512] = "";
+    if (error_msg[0] != '\0') {
+        snprintf(error_modal_html, sizeof(error_modal_html),
+            "<div class='modal-overlay show' id='errorModal'>"
+            "<div class='modal-box'>"
+            "<h3>Error</h3>"
+            "<p>%s</p>"
+            "<button onclick=\"document.getElementById('errorModal').classList.remove('show'); history.replaceState(null, '', '/firewall');\">OK</button>"
+            "</div>"
+            "</div>",
+            error_msg);
+    }
+
     /* Build the page */
     const char* firewall_page_template = FIREWALL_PAGE;
-    int page_len = strlen(firewall_page_template) + strlen(acl_html) + 512;
+    int page_len = strlen(firewall_page_template) + strlen(error_modal_html) + strlen(acl_html) + 512;
     char* firewall_page = malloc(page_len);
 
     if (firewall_page == NULL) {
@@ -1352,7 +1501,7 @@ static esp_err_t firewall_get_handler(httpd_req_t *req)
         return ESP_ERR_NO_MEM;
     }
 
-    snprintf(firewall_page, page_len, firewall_page_template, logout_section, acl_html);
+    snprintf(firewall_page, page_len, firewall_page_template, error_modal_html, logout_section, acl_html);
 
     httpd_resp_send(req, firewall_page, strlen(firewall_page));
     free(firewall_page);

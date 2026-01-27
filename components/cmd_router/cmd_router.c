@@ -706,12 +706,40 @@ int portmap(int argc, char **argv)
     }
 
     uint16_t ext_port = portmap_args.ext_port->ival[0];
-    uint32_t int_ip = esp_ip4addr_aton((char *)portmap_args.int_ip->sval[0]);
+    const char *ip_str = (char *)portmap_args.int_ip->sval[0];
+    uint32_t int_ip = esp_ip4addr_aton(ip_str);
+
+    /* If IP parsing failed (returns IPADDR_NONE), try device name */
+    if (int_ip == IPADDR_NONE) {
+        if (!resolve_device_name_to_ip(ip_str, &int_ip)) {
+            printf("Invalid IP address or device name: %s\n", ip_str);
+            return 1;
+        }
+    }
     uint16_t int_port = portmap_args.int_port->ival[0];
 
-    //printf("portmap %d %d %x %d %x %d\n", add, tcp_udp, my_ip, ext_port, int_ip, int_port);
-
     if (add) {
+        /* Validate internal IP is in same /24 network as AP interface */
+        if ((int_ip & 0x00FFFFFF) != (my_ap_ip & 0x00FFFFFF)) {
+            ip4_addr_t ap_addr, int_addr;
+            ap_addr.addr = my_ap_ip;
+            int_addr.addr = int_ip;
+            printf("Internal IP " IPSTR " must be in same network as AP (" IPSTR "/24)\n",
+                   IP2STR(&int_addr), IP2STR(&ap_addr));
+            return 1;
+        }
+
+        /* Check if external port is already in use for this protocol */
+        for (int i = 0; i < IP_PORTMAP_MAX; i++) {
+            if (portmap_tab[i].valid &&
+                portmap_tab[i].proto == tcp_udp &&
+                portmap_tab[i].mport == ext_port) {
+                printf("External port %d/%s is already mapped\n",
+                       ext_port, tcp_udp == PROTO_TCP ? "TCP" : "UDP");
+                return 1;
+            }
+        }
+
         add_portmap(tcp_udp, ext_port, int_ip, int_port);
     } else {
         del_portmap(tcp_udp, ext_port);
@@ -725,7 +753,7 @@ static void register_portmap(void)
     portmap_args.add_del = arg_str1(NULL, NULL, "[add|del]", "add or delete portmapping");
     portmap_args.TCP_UDP = arg_str1(NULL, NULL, "[TCP|UDP]", "TCP or UDP port");
     portmap_args.ext_port = arg_int1(NULL, NULL, "<ext_portno>", "external port number");
-    portmap_args.int_ip = arg_str1(NULL, NULL, "<int_ip>", "internal IP");
+    portmap_args.int_ip = arg_str1(NULL, NULL, "<int_ip>", "internal IP or device name");
     portmap_args.int_port = arg_int1(NULL, NULL, "<int_portno>", "internal port number");
     portmap_args.end = arg_end(5);
 
@@ -971,8 +999,18 @@ int dhcp_reserve(int argc, char **argv)
     if (add) {
         // Parse IP address
         uint32_t ip = esp_ip4addr_aton((char *)dhcp_reserve_args.ip_addr->sval[0]);
-        if (ip == 0) {
+        if (ip == IPADDR_NONE) {
             printf("Invalid IP address\n");
+            return 1;
+        }
+
+        // Validate IP is in same /24 network as AP interface
+        if ((ip & 0x00FFFFFF) != (my_ap_ip & 0x00FFFFFF)) {
+            ip4_addr_t ap_addr, res_addr;
+            ap_addr.addr = my_ap_ip;
+            res_addr.addr = ip;
+            printf("IP " IPSTR " must be in same network as AP (" IPSTR "/24)\n",
+                   IP2STR(&res_addr), IP2STR(&ap_addr));
             return 1;
         }
 
