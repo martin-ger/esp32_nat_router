@@ -1,4 +1,4 @@
-# ESP32 NAT Router with WPA2 Enterprise support
+# ESP32 NAT Router
 
 This is a firmware to use the ESP32 as WiFi NAT router. It can be used as:
 - Simple range extender for an existing WiFi network
@@ -10,26 +10,25 @@ This is a firmware to use the ESP32 as WiFi NAT router. It can be used as:
 - **NAT Routing**: Full WiFi NAT router with IP forwarding (15+ Mbps throughput)
 - **DHCP Reservations**: Assign fixed IPs to specific MAC addresses
 - **Port Forwarding**: Map external ports to internal devices
+- **Firewall**: Define ACL to restrict or monitor traffic
 - **WPA2-Enterprise Support**: Connect to corporate networks and convert them to WPA2-PSK
-- **Web Interface**: Modern web UI at 192.168.4.1 for easy configuration
+- **Web Interface**: Modern web UI at 192.168.4.1 for easy configuration with password protection
 - **Connected Clients Display**: View all connected devices with MAC, IP, and device names
-- **Password Protection**: Optional password protection for web interface configuration pages
 - **PCAP Capture**: Live packet capture streamed to Wireshark via TCP
 - **Static IP Support**: Configure static IP for the STA (upstream) interface
 - **Serial Console**: Full CLI for advanced configuration
-- **Persistent Storage**: All settings stored in NVS, survive firmware updates
 - **LED Status Indicator**: Visual feedback for connection status and connected clients
 It can achieve a bandwidth of more than 15mbps.
 
 The code is originally based on the [Console Component](https://docs.espressif.com/projects/esp-idf/en/latest/api-guides/console.html#console) and the [esp-idf-nat-example](https://github.com/jonask1337/esp-idf-nat-example). 
 
 ## First Boot
-After first boot the ESP32 NAT Router will offer a WiFi network with an open AP and the ssid "ESP32_NAT_Router". Configuration can either be done via a simple web interface or via the serial console. 
+After first boot the ESP32 NAT Router will offer a WiFi network with an open AP and the ssid "ESP32_NAT_Router". Configuration can either be done via a web interface or via the serial console. 
 
 ## Web Config Interface
 The web interface allows for the configuration of all parameters. Connect your PC or smartphone to the WiFi SSID "ESP32_NAT_Router" and point your browser to "http://192.168.4.1" (or later the configured AP IP address).
 
-The web interface consists of three pages:
+The web interface consists of four pages:
 
 ### System Status Page (/)
 The main dashboard displays:
@@ -62,6 +61,16 @@ Manage network mappings:
 - **Port Forwarding**: Create port mappings to access devices behind the NAT router (e.g., `TCP 8080 -> 192.168.4.2:80`)
 
 <img src="https://raw.githubusercontent.com/martin-ger/esp32_nat_router/master/UI_Mappings.png">
+
+### Firewall Page (/firewall)
+Configure Access Control Lists (ACLs) for packet filtering:
+- **Four ACL Lists**: Control traffic in each direction (to_sta, from_sta, to_ap, from_ap)
+- **Rule Management**: Add rules with protocol, source/destination IP, ports, and action (allow/deny)
+- **Device Names**: Use device names from DHCP reservations instead of IP addresses for single-host rules
+- **Monitoring**: Enable packet capture for specific rules with the Monitor flag
+- **Statistics**: View hit counters for each rule and overall ACL statistics
+
+<img src="https://raw.githubusercontent.com/martin-ger/esp32_nat_router/master/UI_Firewall.png">
 
 ### Web Interface Security
 
@@ -145,98 +154,7 @@ portmap add TCP 8080 192.168.4.2 80
 
 Assuming the esp32NAT's IP address in your `local router` is `192.168.0.57`, you can access the server by typing `192.168.0.57:8080` into your browser.
 
-## PCAP Packet Capture
-
-The router includes a built-in packet capture feature that streams traffic to Wireshark in real-time via TCP.
-
-### Capture Modes
-
-The capture system supports three modes:
-
-| Mode | Description | STA Traffic | AP Traffic |
-|------|-------------|-------------|------------|
-| **off** | Capture disabled | ❌ | ❌ |
-| **acl** | ACL Monitor mode - only capture packets matching ACL rules with `+M` flag | ✅ (if flagged) | ✅ (if flagged) |
-| **promisc** | Promiscuous mode - capture all AP client traffic | ❌ | ✅ All |
-
-**Key behavior:**
-- Packets are only buffered when a Wireshark client is connected (saves resources)
-- In **promiscuous mode**, only AP (client) traffic is captured, not STA (upstream) traffic
-- In **ACL monitor mode**, any interface's traffic can be captured if it matches a `+M` ACL rule
-
-### Quick Start
-
-1. Set capture mode via the web interface (`/config` page) or serial console:
-```
-pcap mode promisc    # Capture all AP client traffic
-pcap mode acl        # Capture only ACL-monitored packets
-pcap mode off        # Disable capture
-```
-
-2. Connect Wireshark from your computer:
-```bash
-nc 192.168.4.1 19000 | wireshark -k -i -
-```
-
-Or configure Wireshark directly:
-- Go to Capture > Options > Manage Interfaces > Pipes
-- Add new pipe: `TCP@192.168.4.1:19000`
-
-### Web Interface
-
-On the **Configuration page** (`/config`), the PCAP Packet Capture section allows you to:
-- Select capture mode (Off / ACL Monitor / Promiscuous)
-- View client connection status
-- See captured/dropped packet counts
-- Set the snaplen value (64-1600 bytes)
-
-The **System Status page** (`/`) shows the current capture mode and statistics.
-
-### Console Commands
-
-```
-pcap mode            # Show current capture mode
-pcap mode off        # Disable capture
-pcap mode acl        # ACL monitor mode (only +M flagged packets)
-pcap mode promisc    # Promiscuous mode (all AP traffic)
-pcap status          # Show capture statistics
-pcap snaplen         # Show current snaplen (bytes per packet)
-pcap snaplen 1500    # Set snaplen (64-1600 bytes)
-pcap start           # Legacy: enable promiscuous mode
-pcap stop            # Legacy: disable capture
-```
-
-### Example Status Output
-
-```
-PCAP Capture Status:
-====================
-Mode:     promiscuous
-Client:   connected
-Snaplen:  512 bytes
-Buffer:   4096 / 32768 bytes (12.5%)
-Captured: 1523 packets
-Dropped:  0 packets
-
-Connection: nc <esp32_ip> 19000 | wireshark -k -i -
-```
-
-### Technical Details
-
-- **TCP Port**: 19000
-- **Buffer Size**: 32KB ring buffer
-- **Default Snaplen**: 512 bytes (configurable 64-1600)
-- **Format**: Standard PCAP with DLT_EN10MB (Ethernet)
-- **Single Client**: One Wireshark connection at a time
-
-### Tips
-
-- Use **promiscuous mode** to capture all traffic from WiFi clients
-- Use **ACL monitor mode** to selectively capture specific traffic (e.g., DNS queries, specific hosts)
-- Use a smaller snaplen (e.g., 128) to capture more packets in the buffer if you only need headers
-- Use a larger snaplen (e.g., 1500) to capture full packet contents
-- Check `pcap status` to monitor for dropped packets (buffer overflow)
-- No packets are buffered until Wireshark connects, saving CPU and memory
+**Tip:** When you assign a name to a DHCP reservation, you can use that name instead of the IP address when creating firewall (ACL) rules. For example, after creating a reservation with `-n MyPhone`, you can use `MyPhone` as source or destination in ACL rules.
 
 ## Firewall (ACL)
 
@@ -286,8 +204,9 @@ ACLs are named from the perspective of each interface - "to" means traffic arriv
 
 Access the firewall configuration at `/firewall`. For each ACL you can:
 - Add rules with source/destination IP (CIDR notation), protocol, ports, and action
+- Use device names from DHCP reservations instead of IP addresses (for single-host /32 rules)
 - Enable monitoring to capture matching packets to PCAP
-- View hit counters and statistics
+- View hit counters and statistics (device names shown for /32 addresses with reservations)
 - Delete individual rules or clear entire lists
 
 ### Console Commands
@@ -299,10 +218,21 @@ acl del <list> <index>               # Delete rule by index
 acl clear <list>                     # Clear all rules
 ```
 
+**Address formats:**
+- `any` - matches any IP address
+- `192.168.4.0/24` - CIDR notation (network/mask)
+- `192.168.4.100` - single host (equivalent to /32)
+- `MyPhone` - device name from DHCP reservations (resolved to /32)
+
+When displaying rules, device names are shown instead of IP addresses for /32 rules that have a matching DHCP reservation with a name.
+
 **Examples:**
 ```
 # Block incoming traffic from a specific IP
 acl add to_sta IP 203.0.113.50 * any * deny
+
+# Block a specific device by name (from DHCP reservation)
+acl add from_ap IP any * MyPhone * deny
 
 # Allow only DNS and HTTP/HTTPS from clients to Internet
 acl add to_ap UDP any * any 53 allow
@@ -330,14 +260,22 @@ Each rule can have one of four actions:
 | `allow_monitor` | ✅ Allowed | ✅ Yes (in ACL mode) |
 | `deny_monitor` | ❌ Dropped | ✅ Yes (in ACL mode, before drop) |
 
-**PCAP capture modes and ACL interaction:**
+## PCAP Packet Capture
 
-| PCAP Mode | AP Traffic | STA Traffic |
-|-----------|------------|-------------|
-| **off** | Not captured | Not captured |
-| **acl** | Only `+M` flagged | Only `+M` flagged |
-| **promisc** | All captured | Not captured |
+The router includes a built-in packet capture feature that streams traffic to Wireshark in real-time via TCP.
 
+### Capture Modes
+
+The capture system supports three modes:
+
+| Mode | Description | STA Traffic | AP Traffic |
+|------|-------------|-------------|------------|
+| **off** | Capture disabled | ❌ | ❌ |
+| **acl** | ACL Monitor mode - only capture packets matching ACL rules with `+M` flag | ✅ (if flagged) | ✅ (if flagged) |
+| **promisc** | Promiscuous mode - capture all AP client traffic | ❌ | ✅ All |
+
+**Key behavior:**
+- Packets are only buffered when a Wireshark client is connected (saves resources)
 - In **ACL monitor mode** (`pcap mode acl`): Only packets matching rules with `+M` (monitor) flag are captured, from any interface
 - In **promiscuous mode** (`pcap mode promisc`): All AP traffic is captured; STA traffic is only captured if it matches an ACL `+M` rule
 
@@ -349,12 +287,65 @@ The STA interface is intentionally excluded from promiscuous capture to avoid a 
 # Capture all DNS queries going to the Internet (for debugging)
 acl add from_sta UDP any * any 53 allow_monitor
 
-# Capture specific client's traffic without blocking
+# Capture specific client's traffic without blocking (by IP)
 acl add to_ap IP 192.168.4.100 * any * allow_monitor
 
-# Capture and block suspicious traffic
-acl add to_sta IP 192.168.4.50 * any * deny_monitor
+# Capture specific client's traffic using device name
+acl add to_ap IP MyPhone * any * allow_monitor
 ```
+
+### Quick Start
+
+1. Set capture mode via the web interface (`/config` page) or serial console:
+
+2. Connect Wireshark from your computer:
+```bash
+nc <ESP32's IP address> | wireshark -k -i -
+```
+
+Or configure Wireshark directly:
+- Go to Capture > Options > Manage Interfaces > Pipes
+- Add new pipe: `TCP@<ESP32's IP address>:19000`
+
+### Web Interface
+
+On the **Configuration page** (`/config`), the PCAP Packet Capture section allows you to:
+- Select capture mode (Off / ACL Monitor / Promiscuous)
+- View client connection status
+- See captured/dropped packet counts
+- Set the snaplen value (64-1600 bytes)
+
+The **System Status page** (`/`) shows the current capture mode and statistics.
+
+### Console Commands
+
+```
+pcap mode            # Show current capture mode
+pcap mode off        # Disable capture
+pcap mode acl        # ACL monitor mode (only +M flagged packets)
+pcap mode promisc    # Promiscuous mode (all AP traffic)
+pcap status          # Show capture statistics
+pcap snaplen         # Show current snaplen (bytes per packet)
+pcap snaplen 1500    # Set snaplen (64-1600 bytes)
+pcap start           # Legacy: enable promiscuous mode
+pcap stop            # Legacy: disable capture
+```
+### Technical Details
+
+- **TCP Port**: 19000
+- **Buffer Size**: 32KB ring buffer
+- **Default Snaplen**: 512 bytes (configurable 64-1600)
+- **Format**: Standard PCAP with DLT_EN10MB (Ethernet)
+- **Single Client**: One Wireshark connection at a time
+
+### Tips
+
+- Use **promiscuous mode** to capture all traffic from WiFi clients
+- Use **ACL monitor mode** to selectively capture specific traffic (e.g., DNS queries, specific hosts)
+- Use a smaller snaplen (e.g., 128) to capture more packets in the buffer if you only need headers
+- Use a larger snaplen (e.g., 1500) to capture full packet contents
+- Check `pcap status` to monitor for dropped packets (buffer overflow)
+- No packets are buffered until Wireshark connects, saving CPU and memory
 
 ## LED Status Indicator
 
