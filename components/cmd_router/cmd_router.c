@@ -56,6 +56,11 @@ static void register_pcap(void);
 static void register_set_led_gpio(void);
 static void register_acl(void);
 
+/* ACL helper functions (forward declarations) */
+static char* acl_format_ip_with_name(uint32_t ip, uint32_t mask, char* buf, size_t buf_len);
+static bool acl_parse_ip_or_name(const char* str, uint32_t* ip, uint32_t* mask);
+static void acl_print_with_names(uint8_t acl_no);
+
 /* Check if character is a valid hex digit */
 static inline int is_hex_digit(char c)
 {
@@ -888,12 +893,12 @@ static int show(int argc, char **argv)
         print_portmap_tab();
 
     } else if (strcmp(type, "acl") == 0) {
-        // Show ACL rules
+        // Show ACL rules with device names
         printf("Firewall ACL Rules:\n");
         printf("===================\n");
 
         for (int i = 0; i < MAX_ACL_LISTS; i++) {
-            acl_print(i);
+            acl_print_with_names(i);
         }
 
     } else {
@@ -1072,6 +1077,7 @@ static void register_bytes(void)
 /* 'pcap' command arguments */
 static struct {
     struct arg_str* action;
+    struct arg_str* mode;
     struct arg_int* snaplen;
     struct arg_end* end;
 } pcap_args;
@@ -1086,22 +1092,50 @@ static int pcap(int argc, char **argv)
     }
 
     if (pcap_args.action->count == 0) {
-        printf("Usage: pcap <start|stop|status|snaplen> [value]\n");
-        printf("  start       - Enable packet capture\n");
-        printf("  stop        - Disable packet capture\n");
-        printf("  status      - Show capture status\n");
-        printf("  snaplen [n] - Get or set max capture bytes per packet (64-1600)\n");
+        printf("Usage: pcap <action> [args]\n");
+        printf("  mode [off|acl|promisc] - Get or set capture mode\n");
+        printf("    off      - Capture disabled\n");
+        printf("    acl      - Capture ACL_MONITOR flagged packets (any interface)\n");
+        printf("    promisc  - Capture all AP client traffic (not STA)\n");
+        printf("  status     - Show capture status\n");
+        printf("  snaplen [n]- Get or set max capture bytes (64-1600)\n");
+        printf("  start      - Legacy: enable promiscuous mode\n");
+        printf("  stop       - Legacy: disable capture\n");
         return 1;
     }
 
     const char *action = pcap_args.action->sval[0];
 
-    if (strcmp(action, "start") == 0) {
-        pcap_capture_start();
-        printf("PCAP capture started (snaplen=%d)\n", pcap_get_snaplen());
+    if (strcmp(action, "mode") == 0) {
+        if (pcap_args.mode->count > 0) {
+            const char *mode_str = pcap_args.mode->sval[0];
+            if (strcmp(mode_str, "off") == 0) {
+                pcap_set_mode(PCAP_MODE_OFF);
+                printf("Capture mode: off\n");
+            } else if (strcmp(mode_str, "acl") == 0) {
+                pcap_set_mode(PCAP_MODE_ACL_MONITOR);
+                printf("Capture mode: acl-monitor\n");
+                printf("Only packets matching ACL rules with +M flag will be captured (any interface)\n");
+            } else if (strcmp(mode_str, "promisc") == 0 || strcmp(mode_str, "promiscuous") == 0) {
+                pcap_set_mode(PCAP_MODE_PROMISCUOUS);
+                printf("Capture mode: promiscuous\n");
+                printf("All AP client traffic will be captured (STA excluded)\n");
+            } else {
+                printf("Invalid mode. Use: off, acl, or promisc\n");
+                return 1;
+            }
+            printf("Connect Wireshark to TCP port 19000\n");
+        } else {
+            printf("Current mode: %s\n", pcap_mode_to_string(pcap_get_mode()));
+        }
+    } else if (strcmp(action, "start") == 0) {
+        // Legacy: start = promiscuous mode
+        pcap_set_mode(PCAP_MODE_PROMISCUOUS);
+        printf("PCAP capture started in promiscuous mode (snaplen=%d)\n", pcap_get_snaplen());
         printf("Connect Wireshark to TCP port 19000\n");
     } else if (strcmp(action, "stop") == 0) {
-        pcap_capture_stop();
+        // Legacy: stop = off mode
+        pcap_set_mode(PCAP_MODE_OFF);
         printf("PCAP capture stopped\n");
     } else if (strcmp(action, "snaplen") == 0) {
         if (pcap_args.snaplen->count > 0) {
@@ -1118,7 +1152,7 @@ static int pcap(int argc, char **argv)
     } else if (strcmp(action, "status") == 0) {
         printf("PCAP Capture Status:\n");
         printf("====================\n");
-        printf("Capture:  %s\n", pcap_capture_enabled() ? "enabled" : "disabled");
+        printf("Mode:     %s\n", pcap_mode_to_string(pcap_get_mode()));
         printf("Client:   %s\n", pcap_client_connected() ? "connected" : "not connected");
         printf("Snaplen:  %d bytes\n", pcap_get_snaplen());
 
@@ -1132,7 +1166,7 @@ static int pcap(int argc, char **argv)
         printf("Dropped:  %lu packets\n", (unsigned long)pcap_get_dropped_count());
         printf("\nConnection: nc <esp32_ip> 19000 | wireshark -k -i -\n");
     } else {
-        printf("Invalid action. Use: pcap <start|stop|status|snaplen>\n");
+        printf("Invalid action. Use: pcap <mode|status|snaplen|start|stop>\n");
         return 1;
     }
 
@@ -1141,9 +1175,10 @@ static int pcap(int argc, char **argv)
 
 static void register_pcap(void)
 {
-    pcap_args.action = arg_str1(NULL, NULL, "<action>", "start|stop|status|snaplen");
+    pcap_args.action = arg_str1(NULL, NULL, "<action>", "mode|status|snaplen|start|stop");
+    pcap_args.mode = arg_str0(NULL, NULL, "<mode>", "off|acl|promisc");
     pcap_args.snaplen = arg_int0(NULL, NULL, "<bytes>", "snaplen value (64-1600)");
-    pcap_args.end = arg_end(2);
+    pcap_args.end = arg_end(3);
 
     const esp_console_cmd_t cmd = {
         .command = "pcap",
@@ -1224,6 +1259,132 @@ static void register_set_led_gpio(void)
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }
 
+/**
+ * @brief Format IP address with device name for /32 addresses
+ * If the IP has a full /32 mask and a matching DHCP reservation with a name,
+ * returns the device name. Otherwise returns the formatted IP/mask.
+ */
+static char* acl_format_ip_with_name(uint32_t ip, uint32_t mask, char* buf, size_t buf_len)
+{
+    /* Check for "any" (0.0.0.0/0) */
+    if (ip == 0 && mask == 0) {
+        snprintf(buf, buf_len, "any");
+        return buf;
+    }
+
+    /* For /32 addresses, try to look up device name */
+    if (mask == 0xFFFFFFFF) {
+        const char* name = lookup_device_name_by_ip(ip);
+        if (name != NULL) {
+            snprintf(buf, buf_len, "%s", name);
+            return buf;
+        }
+    }
+
+    /* Fall back to standard IP formatting */
+    return acl_format_ip(ip, mask, buf, buf_len);
+}
+
+/**
+ * @brief Parse IP address or device name for ACL rules
+ * First tries to parse as IP/CIDR, then tries to resolve as device name.
+ * Device names are resolved to /32 addresses.
+ */
+static bool acl_parse_ip_or_name(const char* str, uint32_t* ip, uint32_t* mask)
+{
+    /* First try standard IP parsing */
+    if (acl_parse_ip(str, ip, mask)) {
+        return true;
+    }
+
+    /* Try to resolve as device name (case-insensitive) */
+    if (resolve_device_name_to_ip(str, ip)) {
+        *mask = 0xFFFFFFFF;  /* /32 for device names */
+        return true;
+    }
+
+    return false;
+}
+
+/**
+ * @brief Print ACL rules with device names for /32 addresses
+ */
+static void acl_print_with_names(uint8_t acl_no)
+{
+    if (acl_no >= MAX_ACL_LISTS) {
+        printf("Invalid ACL list number\n");
+        return;
+    }
+
+    printf("\nACL: %s\n", acl_get_name(acl_no));
+    printf("==========\n");
+
+    acl_stats_t *stats = acl_get_stats(acl_no);
+    printf("Stats: allowed=%lu, denied=%lu, no_match=%lu\n",
+           (unsigned long)stats->packets_allowed,
+           (unsigned long)stats->packets_denied,
+           (unsigned long)stats->packets_nomatch);
+
+    if (acl_is_empty(acl_no)) {
+        printf("No rules configured (all packets allowed)\n");
+        return;
+    }
+
+    printf("\n%3s  %-6s  %-20s  %-20s  %-6s  %-6s  %-8s  %s\n",
+           "Idx", "Proto", "Source", "Destination", "SPort", "DPort", "Action", "Hits");
+    printf("---  ------  --------------------  --------------------  ------  ------  --------  ----\n");
+
+    acl_entry_t *rules = acl_get_rules(acl_no);
+    for (int i = 0; i < MAX_ACL_ENTRIES; i++) {
+        acl_entry_t *rule = &rules[i];
+        if (!rule->valid) {
+            continue;
+        }
+
+        /* Format protocol */
+        const char *proto_str;
+        switch (rule->proto) {
+            case 0:  proto_str = "IP"; break;
+            case 1:  proto_str = "ICMP"; break;
+            case 6:  proto_str = "TCP"; break;
+            case 17: proto_str = "UDP"; break;
+            default: proto_str = "?"; break;
+        }
+
+        /* Format IP addresses with device names */
+        char src_str[24], dest_str[24];
+        acl_format_ip_with_name(rule->src, rule->s_mask, src_str, sizeof(src_str));
+        acl_format_ip_with_name(rule->dest, rule->d_mask, dest_str, sizeof(dest_str));
+
+        /* Format ports */
+        char s_port_str[8], d_port_str[8];
+        if (rule->s_port == 0) {
+            strcpy(s_port_str, "*");
+        } else {
+            snprintf(s_port_str, sizeof(s_port_str), "%d", rule->s_port);
+        }
+        if (rule->d_port == 0) {
+            strcpy(d_port_str, "*");
+        } else {
+            snprintf(d_port_str, sizeof(d_port_str), "%d", rule->d_port);
+        }
+
+        /* Format action */
+        const char *action_str;
+        uint8_t action = rule->allow & 0x01;
+        uint8_t monitor = rule->allow & ACL_MONITOR;
+        if (action == ACL_ALLOW) {
+            action_str = monitor ? "allow+M" : "allow";
+        } else {
+            action_str = monitor ? "deny+M" : "deny";
+        }
+
+        printf("%3d  %-6s  %-20s  %-20s  %-6s  %-6s  %-8s  %lu\n",
+               i, proto_str, src_str, dest_str, s_port_str, d_port_str,
+               action_str, (unsigned long)rule->hit_count);
+    }
+}
+
 /* 'acl' command implementation */
 static int acl_cmd(int argc, char **argv)
 {
@@ -1236,7 +1397,7 @@ static int acl_cmd(int argc, char **argv)
         printf("  acl <list> del <idx>          - Delete rule at index\n");
         printf("  acl <list> <proto> <src> [<s_port>] <dst> [<d_port>] <action>\n");
         printf("\nProtocols: IP, TCP, UDP, ICMP\n");
-        printf("Addresses: IP/mask (e.g., 192.168.1.0/24) or 'any'\n");
+        printf("Addresses: IP/mask, 'any', or device name from DHCP reservations\n");
         printf("Ports:     Port number or '*' for any (TCP/UDP only)\n");
         printf("Actions:   allow, deny, allow_monitor, deny_monitor\n");
         printf("\nExamples:\n");
@@ -1244,6 +1405,7 @@ static int acl_cmd(int argc, char **argv)
         printf("  acl from_sta IP any 255.255.255.255 allow\n");
         printf("  acl from_sta UDP any any any 53 allow\n");
         printf("  acl from_sta TCP any 22 192.168.4.0/24 * deny\n");
+        printf("  acl from_sta IP any MyPhone deny      # Use device name\n");
         printf("  acl from_sta IP any any deny          # Block all at end\n");
         printf("  acl from_sta del 0                    # Delete first rule\n");
         return 0;
@@ -1323,13 +1485,13 @@ static int acl_cmd(int argc, char **argv)
     uint8_t allow;
     int arg_idx = 3;
 
-    /* Parse source */
+    /* Parse source (IP/CIDR, 'any', or device name) */
     if (arg_idx >= argc) {
         printf("Missing source address\n");
         return 1;
     }
-    if (!acl_parse_ip(argv[arg_idx], &src_ip, &src_mask)) {
-        printf("Invalid source address: %s\n", argv[arg_idx]);
+    if (!acl_parse_ip_or_name(argv[arg_idx], &src_ip, &src_mask)) {
+        printf("Invalid source address or device name: %s\n", argv[arg_idx]);
         return 1;
     }
     arg_idx++;
@@ -1346,13 +1508,13 @@ static int acl_cmd(int argc, char **argv)
         /* If not a port-like value, treat as destination */
     }
 
-    /* Parse destination */
+    /* Parse destination (IP/CIDR, 'any', or device name) */
     if (arg_idx >= argc) {
         printf("Missing destination address\n");
         return 1;
     }
-    if (!acl_parse_ip(argv[arg_idx], &dst_ip, &dst_mask)) {
-        printf("Invalid destination address: %s\n", argv[arg_idx]);
+    if (!acl_parse_ip_or_name(argv[arg_idx], &dst_ip, &dst_mask)) {
+        printf("Invalid destination address or device name: %s\n", argv[arg_idx]);
         return 1;
     }
     arg_idx++;

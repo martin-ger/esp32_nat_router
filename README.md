@@ -147,13 +147,30 @@ Assuming the esp32NAT's IP address in your `local router` is `192.168.0.57`, you
 
 ## PCAP Packet Capture
 
-The router includes a built-in packet capture feature that streams AP interface traffic to Wireshark in real-time via TCP.
+The router includes a built-in packet capture feature that streams traffic to Wireshark in real-time via TCP.
+
+### Capture Modes
+
+The capture system supports three modes:
+
+| Mode | Description | STA Traffic | AP Traffic |
+|------|-------------|-------------|------------|
+| **off** | Capture disabled | ❌ | ❌ |
+| **acl** | ACL Monitor mode - only capture packets matching ACL rules with `+M` flag | ✅ (if flagged) | ✅ (if flagged) |
+| **promisc** | Promiscuous mode - capture all AP client traffic | ❌ | ✅ All |
+
+**Key behavior:**
+- Packets are only buffered when a Wireshark client is connected (saves resources)
+- In **promiscuous mode**, only AP (client) traffic is captured, not STA (upstream) traffic
+- In **ACL monitor mode**, any interface's traffic can be captured if it matches a `+M` ACL rule
 
 ### Quick Start
 
-1. Enable capture via the web interface (`/config` page) or serial console:
+1. Set capture mode via the web interface (`/config` page) or serial console:
 ```
-pcap start
+pcap mode promisc    # Capture all AP client traffic
+pcap mode acl        # Capture only ACL-monitored packets
+pcap mode off        # Disable capture
 ```
 
 2. Connect Wireshark from your computer:
@@ -168,20 +185,25 @@ Or configure Wireshark directly:
 ### Web Interface
 
 On the **Configuration page** (`/config`), the PCAP Packet Capture section allows you to:
-- View current capture status (On/Off)
-- Enable or disable capture with a single click
+- Select capture mode (Off / ACL Monitor / Promiscuous)
+- View client connection status
+- See captured/dropped packet counts
 - Set the snaplen value (64-1600 bytes)
 
-The **System Status page** (`/`) shows the current capture state and, when enabled, displays the number of captured and dropped packets.
+The **System Status page** (`/`) shows the current capture mode and statistics.
 
 ### Console Commands
 
 ```
-pcap start           # Enable packet capture
-pcap stop            # Disable packet capture
+pcap mode            # Show current capture mode
+pcap mode off        # Disable capture
+pcap mode acl        # ACL monitor mode (only +M flagged packets)
+pcap mode promisc    # Promiscuous mode (all AP traffic)
 pcap status          # Show capture statistics
 pcap snaplen         # Show current snaplen (bytes per packet)
 pcap snaplen 1500    # Set snaplen (64-1600 bytes)
+pcap start           # Legacy: enable promiscuous mode
+pcap stop            # Legacy: disable capture
 ```
 
 ### Example Status Output
@@ -189,7 +211,7 @@ pcap snaplen 1500    # Set snaplen (64-1600 bytes)
 ```
 PCAP Capture Status:
 ====================
-Capture:  enabled
+Mode:     promiscuous
 Client:   connected
 Snaplen:  512 bytes
 Buffer:   4096 / 32768 bytes (12.5%)
@@ -206,14 +228,15 @@ Connection: nc <esp32_ip> 19000 | wireshark -k -i -
 - **Default Snaplen**: 512 bytes (configurable 64-1600)
 - **Format**: Standard PCAP with DLT_EN10MB (Ethernet)
 - **Single Client**: One Wireshark connection at a time
-- **AP Traffic Only**: Captures packets to/from WiFi clients connected to the ESP32
 
 ### Tips
 
+- Use **promiscuous mode** to capture all traffic from WiFi clients
+- Use **ACL monitor mode** to selectively capture specific traffic (e.g., DNS queries, specific hosts)
 - Use a smaller snaplen (e.g., 128) to capture more packets in the buffer if you only need headers
 - Use a larger snaplen (e.g., 1500) to capture full packet contents
 - Check `pcap status` to monitor for dropped packets (buffer overflow)
-- Capture is automatically paused when no client is connected to save CPU
+- No packets are buffered until Wireshark connects, saving CPU and memory
 
 ## Firewall (ACL)
 
@@ -304,15 +327,21 @@ Each rule can have one of four actions:
 |--------|--------|------------------|
 | `allow` | ✅ Allowed | ❌ No |
 | `deny` | ❌ Dropped | ❌ No |
-| `allow_monitor` | ✅ Allowed | ✅ Yes |
-| `deny_monitor` | ❌ Dropped | ✅ Yes (before drop) |
+| `allow_monitor` | ✅ Allowed | ✅ Yes (in ACL mode) |
+| `deny_monitor` | ❌ Dropped | ✅ Yes (in ACL mode, before drop) |
 
-**PCAP capture behavior:**
+**PCAP capture modes and ACL interaction:**
 
-- **AP interface** (client traffic): Captured automatically when PCAP is enabled
-- **STA interface** (Internet traffic): Only captured when a `+monitor` rule matches
+| PCAP Mode | AP Traffic | STA Traffic |
+|-----------|------------|-------------|
+| **off** | Not captured | Not captured |
+| **acl** | Only `+M` flagged | Only `+M` flagged |
+| **promisc** | All captured | Not captured |
 
-The STA interface is intentionally not captured by default to avoid a feedback loop - the PCAP stream itself is sent over the STA interface to Wireshark, so capturing all STA traffic would capture the PCAP stream itself.
+- In **ACL monitor mode** (`pcap mode acl`): Only packets matching rules with `+M` (monitor) flag are captured, from any interface
+- In **promiscuous mode** (`pcap mode promisc`): All AP traffic is captured; STA traffic is only captured if it matches an ACL `+M` rule
+
+The STA interface is intentionally excluded from promiscuous capture to avoid a feedback loop - the PCAP stream itself is sent over the STA interface to Wireshark.
 
 **Use cases for monitor rules:**
 
@@ -322,6 +351,9 @@ acl add from_sta UDP any * any 53 allow_monitor
 
 # Capture specific client's traffic without blocking
 acl add to_ap IP 192.168.4.100 * any * allow_monitor
+
+# Capture and block suspicious traffic
+acl add to_sta IP 192.168.4.50 * any * deny_monitor
 ```
 
 ## LED Status Indicator
@@ -505,9 +537,10 @@ show  [status|config|mappings]
 bytes  [[reset]]
   Show or reset STA interface byte counts
 
-pcap  <action> [<bytes>]
+pcap  <action> [<mode>] [<bytes>]
   Control PCAP packet capture (TCP port 19000)
-      <action>  start|stop|status|snaplen
+      <action>  mode|status|snaplen|start|stop
+        <mode>  off|acl|promisc
        <bytes>  snaplen value (64-1600)
 
 set_led_gpio  [<gpio>|none]

@@ -49,7 +49,7 @@ typedef struct __attribute__((packed)) {
 } pcap_packet_header_t;
 
 // State
-static bool capture_enabled = false;
+static pcap_capture_mode_t capture_mode = PCAP_MODE_OFF;
 static bool client_connected = false;
 static int client_socket = -1;
 static TaskHandle_t pcap_task_handle = NULL;
@@ -232,14 +232,29 @@ void pcap_init(void)
              pcap_snaplen, PCAP_RINGBUF_SIZE / 1024);
 }
 
-void pcap_capture_packet(struct pbuf *p)
+bool pcap_should_capture(bool is_acl_monitored, bool is_ap_interface)
 {
-    if (!capture_enabled || p == NULL) {
-        return;
+    // Must have a client connected to capture anything
+    if (!client_connected) {
+        return false;
     }
 
-    // Don't capture if no client connected (save CPU)
-    if (!client_connected) {
+    switch (capture_mode) {
+        case PCAP_MODE_OFF:
+            return false;
+        case PCAP_MODE_ACL_MONITOR:
+            // Capture ACL-monitored packets from any interface
+            return is_acl_monitored;
+        case PCAP_MODE_PROMISCUOUS:
+            // Capture all AP traffic, but not STA traffic
+            return is_ap_interface;
+    }
+    return false;
+}
+
+void pcap_capture_packet(struct pbuf *p)
+{
+    if (p == NULL || !client_connected) {
         return;
     }
 
@@ -278,23 +293,49 @@ void pcap_capture_packet(struct pbuf *p)
     }
 }
 
+void pcap_set_mode(pcap_capture_mode_t mode)
+{
+    pcap_capture_mode_t old_mode = capture_mode;
+    capture_mode = mode;
+
+    // Reset counters when enabling capture
+    if (old_mode == PCAP_MODE_OFF && mode != PCAP_MODE_OFF) {
+        captured_packets = 0;
+        ringbuf_reset();
+    }
+
+    ESP_LOGI(TAG, "Capture mode set to: %s", pcap_mode_to_string(mode));
+}
+
+pcap_capture_mode_t pcap_get_mode(void)
+{
+    return capture_mode;
+}
+
+const char* pcap_mode_to_string(pcap_capture_mode_t mode)
+{
+    switch (mode) {
+        case PCAP_MODE_OFF:          return "off";
+        case PCAP_MODE_ACL_MONITOR:  return "acl-monitor";
+        case PCAP_MODE_PROMISCUOUS:  return "promiscuous";
+        default:                     return "unknown";
+    }
+}
+
+// Legacy API - kept for backwards compatibility
 void pcap_capture_start(void)
 {
-    capture_enabled = true;
-    captured_packets = 0;
-    ringbuf_reset();
-    ESP_LOGI(TAG, "Packet capture started");
+    pcap_set_mode(PCAP_MODE_PROMISCUOUS);
 }
 
 void pcap_capture_stop(void)
 {
-    capture_enabled = false;
-    ESP_LOGI(TAG, "Packet capture stopped");
+    pcap_set_mode(PCAP_MODE_OFF);
 }
 
 bool pcap_capture_enabled(void)
 {
-    return capture_enabled;
+    return capture_mode != PCAP_MODE_OFF;
 }
 
 bool pcap_client_connected(void)

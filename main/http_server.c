@@ -369,10 +369,13 @@ static esp_err_t index_get_handler(httpd_req_t *req)
     float received_mb = bytes_received / (1024.0 * 1024.0);
 
     // Build PCAP status string
-    char pcap_status_str[128];
-    if (pcap_capture_enabled()) {
+    char pcap_status_str[160];
+    pcap_capture_mode_t mode = pcap_get_mode();
+    if (mode != PCAP_MODE_OFF) {
+        const char* mode_name = (mode == PCAP_MODE_ACL_MONITOR) ? "ACL Monitor" : "Promiscuous";
         snprintf(pcap_status_str, sizeof(pcap_status_str),
-                 "<span style='color: #4caf50;'>On</span> <br>captured: %lu, dropped: %lu",
+                 "<span style='color: #4caf50;'>%s</span> <br>captured: %lu, dropped: %lu",
+                 mode_name,
                  (unsigned long)pcap_get_captured_count(),
                  (unsigned long)pcap_get_dropped_count());
     } else {
@@ -653,15 +656,18 @@ static esp_err_t config_get_handler(httpd_req_t *req)
                 }
             }
 
-            /* Handle PCAP toggle */
-            if (httpd_query_key_value(buf, "pcap_toggle", param1, sizeof(param1)) == ESP_OK) {
+            /* Handle PCAP mode selection */
+            if (httpd_query_key_value(buf, "pcap_mode", param1, sizeof(param1)) == ESP_OK) {
                 preprocess_string(param1);
-                if (strcmp(param1, "Enable") == 0) {
-                    pcap_capture_start();
-                    ESP_LOGI(TAG, "PCAP capture enabled via web");
-                } else if (strcmp(param1, "Disable") == 0) {
-                    pcap_capture_stop();
-                    ESP_LOGI(TAG, "PCAP capture disabled via web");
+                if (strcmp(param1, "off") == 0) {
+                    pcap_set_mode(PCAP_MODE_OFF);
+                    ESP_LOGI(TAG, "PCAP mode set to OFF via web");
+                } else if (strcmp(param1, "acl") == 0) {
+                    pcap_set_mode(PCAP_MODE_ACL_MONITOR);
+                    ESP_LOGI(TAG, "PCAP mode set to ACL_MONITOR via web");
+                } else if (strcmp(param1, "promisc") == 0) {
+                    pcap_set_mode(PCAP_MODE_PROMISCUOUS);
+                    ESP_LOGI(TAG, "PCAP mode set to PROMISCUOUS via web");
                 }
                 free(buf);
                 httpd_resp_set_status(req, "303 See Other");
@@ -747,11 +753,15 @@ static esp_err_t config_get_handler(httpd_req_t *req)
     }
 
     // PCAP state for template
-    bool pcap_on = pcap_capture_enabled();
-    const char* pcap_status_color = pcap_on ? "#4caf50" : "#888";
-    const char* pcap_status_text = pcap_on ? "On" : "Off";
-    const char* pcap_button_value = pcap_on ? "Disable" : "Enable";
-    const char* pcap_button_class = pcap_on ? "red-button" : "ok-button";
+    pcap_capture_mode_t pcap_mode = pcap_get_mode();
+    const char* pcap_mode_off_sel = (pcap_mode == PCAP_MODE_OFF) ? "selected" : "";
+    const char* pcap_mode_acl_sel = (pcap_mode == PCAP_MODE_ACL_MONITOR) ? "selected" : "";
+    const char* pcap_mode_promisc_sel = (pcap_mode == PCAP_MODE_PROMISCUOUS) ? "selected" : "";
+    bool pcap_client = pcap_client_connected();
+    const char* pcap_client_color = pcap_client ? "#4caf50" : "#888";
+    const char* pcap_client_text = pcap_client ? "Connected" : "Not connected";
+    uint32_t pcap_captured = pcap_get_captured_count();
+    uint32_t pcap_dropped = pcap_get_dropped_count();
     int current_snaplen = pcap_get_snaplen();
 
     int page_len =
@@ -789,7 +799,10 @@ static esp_err_t config_get_handler(httpd_req_t *req)
         safe_ap_ssid, safe_ap_passwd, ap_ip_str, ap_mac_str,
         safe_ssid, safe_passwd, safe_ent_username, safe_ent_identity, sta_mac_str,
         static_ip, subnet_mask, gateway_addr,
-        pcap_status_color, pcap_status_text, pcap_button_value, pcap_button_class, current_snaplen);
+        pcap_mode_off_sel, pcap_mode_acl_sel, pcap_mode_promisc_sel,
+        pcap_client_color, pcap_client_text,
+        (unsigned long)pcap_captured, (unsigned long)pcap_dropped,
+        current_snaplen);
 
     free(safe_ap_ssid);
     free(safe_ap_passwd);
@@ -1120,18 +1133,34 @@ static esp_err_t firewall_get_handler(httpd_req_t *req)
                         uint8_t proto = atoi(proto_str);
                         uint8_t action = atoi(action_str);
 
-                        /* Parse source IP */
+                        /* Parse source IP (try IP/CIDR first, then device name) */
                         uint32_t src_ip, src_mask;
-                        if (strlen(src_ip_str) == 0 || !acl_parse_ip(src_ip_str, &src_ip, &src_mask)) {
+                        if (strlen(src_ip_str) == 0) {
                             src_ip = 0;
                             src_mask = 0;  /* any */
+                        } else if (!acl_parse_ip(src_ip_str, &src_ip, &src_mask)) {
+                            /* Try resolving as device name */
+                            if (resolve_device_name_to_ip(src_ip_str, &src_ip)) {
+                                src_mask = 0xFFFFFFFF;  /* /32 for device names */
+                            } else {
+                                src_ip = 0;
+                                src_mask = 0;  /* any */
+                            }
                         }
 
-                        /* Parse destination IP */
+                        /* Parse destination IP (try IP/CIDR first, then device name) */
                         uint32_t dst_ip, dst_mask;
-                        if (strlen(dst_ip_str) == 0 || !acl_parse_ip(dst_ip_str, &dst_ip, &dst_mask)) {
+                        if (strlen(dst_ip_str) == 0) {
                             dst_ip = 0;
                             dst_mask = 0;  /* any */
+                        } else if (!acl_parse_ip(dst_ip_str, &dst_ip, &dst_mask)) {
+                            /* Try resolving as device name */
+                            if (resolve_device_name_to_ip(dst_ip_str, &dst_ip)) {
+                                dst_mask = 0xFFFFFFFF;  /* /32 for device names */
+                            } else {
+                                dst_ip = 0;
+                                dst_mask = 0;  /* any */
+                            }
                         }
 
                         /* Parse ports */
@@ -1244,10 +1273,28 @@ static esp_err_t firewall_get_handler(httpd_req_t *req)
                 default: proto_str = "?"; break;
             }
 
-            /* Format IP addresses */
-            char src_str[24], dst_str[24];
-            acl_format_ip(rules[i].src, rules[i].s_mask, src_str, sizeof(src_str));
-            acl_format_ip(rules[i].dest, rules[i].d_mask, dst_str, sizeof(dst_str));
+            /* Format IP addresses with device names for /32 */
+            char src_str[DHCP_RESERVATION_NAME_LEN], dst_str[DHCP_RESERVATION_NAME_LEN];
+            if (rules[i].s_mask == 0xFFFFFFFF) {
+                const char* name = lookup_device_name_by_ip(rules[i].src);
+                if (name) {
+                    snprintf(src_str, sizeof(src_str), "%s", name);
+                } else {
+                    acl_format_ip(rules[i].src, rules[i].s_mask, src_str, sizeof(src_str));
+                }
+            } else {
+                acl_format_ip(rules[i].src, rules[i].s_mask, src_str, sizeof(src_str));
+            }
+            if (rules[i].d_mask == 0xFFFFFFFF) {
+                const char* name = lookup_device_name_by_ip(rules[i].dest);
+                if (name) {
+                    snprintf(dst_str, sizeof(dst_str), "%s", name);
+                } else {
+                    acl_format_ip(rules[i].dest, rules[i].d_mask, dst_str, sizeof(dst_str));
+                }
+            } else {
+                acl_format_ip(rules[i].dest, rules[i].d_mask, dst_str, sizeof(dst_str));
+            }
 
             /* Format ports */
             char s_port_str[8], d_port_str[8];

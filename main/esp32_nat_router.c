@@ -473,6 +473,32 @@ uint32_t lookup_dhcp_reservation(const uint8_t *mac) {
     return 0;
 }
 
+const char* lookup_device_name_by_ip(uint32_t ip) {
+    for (int i = 0; i < MAX_DHCP_RESERVATIONS; i++) {
+        if (dhcp_reservations[i].valid &&
+            dhcp_reservations[i].ip == ip &&
+            dhcp_reservations[i].name[0] != '\0') {
+            return dhcp_reservations[i].name;
+        }
+    }
+    return NULL;
+}
+
+bool resolve_device_name_to_ip(const char *name, uint32_t *ip) {
+    if (name == NULL || ip == NULL) {
+        return false;
+    }
+    for (int i = 0; i < MAX_DHCP_RESERVATIONS; i++) {
+        if (dhcp_reservations[i].valid &&
+            dhcp_reservations[i].name[0] != '\0' &&
+            strcasecmp(dhcp_reservations[i].name, name) == 0) {
+            *ip = dhcp_reservations[i].ip;
+            return true;
+        }
+    }
+    return false;
+}
+
 /* ACL NVS persistence */
 esp_err_t save_acl_rules(void) {
     esp_err_t err;
@@ -625,14 +651,14 @@ static void log_acl_deny(const char *acl_name, struct pbuf *p) {
 
 // Hook function to count received bytes via netif input and ACL check
 static err_t netif_input_hook(struct pbuf *p, struct netif *netif) {
+    bool is_acl_monitored = false;
+
     // Check to_sta ACL (packets from Internet to ESP32)
     if (!acl_is_empty(ACL_TO_STA)) {
         uint8_t result = acl_check_packet(ACL_TO_STA, p);
 
-        // Handle monitor flag - capture regardless of pcap status
-        if (result & ACL_MONITOR) {
-            pcap_capture_packet(p);
-        }
+        // Check if packet has monitor flag
+        is_acl_monitored = (result & ACL_MONITOR) != 0;
 
         // Handle deny action
         if ((result & 0x01) == ACL_DENY && result != ACL_NO_MATCH) {
@@ -640,6 +666,11 @@ static err_t netif_input_hook(struct pbuf *p, struct netif *netif) {
             pbuf_free(p);
             return ERR_OK;
         }
+    }
+
+    // Capture packet based on mode and ACL monitor flag (STA interface = false)
+    if (pcap_should_capture(is_acl_monitored, false)) {
+        pcap_capture_packet(p);
     }
 
     // Count received bytes
@@ -658,20 +689,25 @@ static err_t netif_input_hook(struct pbuf *p, struct netif *netif) {
 
 // Hook function to count sent bytes via netif linkoutput and ACL check
 static err_t netif_linkoutput_hook(struct netif *netif, struct pbuf *p) {
+    bool is_acl_monitored = false;
+
     // Check from_sta ACL (packets from ESP32 to Internet)
     if (!acl_is_empty(ACL_FROM_STA)) {
         uint8_t result = acl_check_packet(ACL_FROM_STA, p);
 
-        // Handle monitor flag - capture regardless of pcap status
-        if (result & ACL_MONITOR) {
-            pcap_capture_packet(p);
-        }
+        // Check if packet has monitor flag
+        is_acl_monitored = (result & ACL_MONITOR) != 0;
 
         // Handle deny action
         if ((result & 0x01) == ACL_DENY && result != ACL_NO_MATCH) {
             log_acl_deny("from_sta", p);
             return ERR_OK;
         }
+    }
+
+    // Capture packet based on mode and ACL monitor flag (STA interface = false)
+    if (pcap_should_capture(is_acl_monitored, false)) {
+        pcap_capture_packet(p);
     }
 
     // Count sent bytes
@@ -726,17 +762,14 @@ void reset_sta_byte_counts(void) {
 
 // AP netif hook functions (for PCAP capture and ACL)
 static err_t ap_netif_input_hook(struct pbuf *p, struct netif *netif) {
-    bool captured_by_monitor = false;
+    bool is_acl_monitored = false;
 
     // Check to_ap ACL (packets from Clients to ESP32)
     if (!acl_is_empty(ACL_TO_AP)) {
         uint8_t result = acl_check_packet(ACL_TO_AP, p);
 
-        // Handle monitor flag - capture regardless of pcap status
-        if (result & ACL_MONITOR) {
-            pcap_capture_packet(p);
-            captured_by_monitor = true;
-        }
+        // Check if packet has monitor flag
+        is_acl_monitored = (result & ACL_MONITOR) != 0;
 
         // Handle deny action
         if ((result & 0x01) == ACL_DENY && result != ACL_NO_MATCH) {
@@ -746,8 +779,8 @@ static err_t ap_netif_input_hook(struct pbuf *p, struct netif *netif) {
         }
     }
 
-    // Capture AP traffic if pcap is on (but not if already captured by monitor)
-    if (!captured_by_monitor && pcap_capture_enabled()) {
+    // Capture packet based on mode and ACL monitor flag (AP interface = true)
+    if (pcap_should_capture(is_acl_monitored, true)) {
         pcap_capture_packet(p);
     }
 
@@ -760,17 +793,14 @@ static err_t ap_netif_input_hook(struct pbuf *p, struct netif *netif) {
 }
 
 static err_t ap_netif_linkoutput_hook(struct netif *netif, struct pbuf *p) {
-    bool captured_by_monitor = false;
+    bool is_acl_monitored = false;
 
     // Check from_ap ACL (packets from ESP32 to Clients)
     if (!acl_is_empty(ACL_FROM_AP)) {
         uint8_t result = acl_check_packet(ACL_FROM_AP, p);
 
-        // Handle monitor flag - capture regardless of pcap status
-        if (result & ACL_MONITOR) {
-            pcap_capture_packet(p);
-            captured_by_monitor = true;
-        }
+        // Check if packet has monitor flag
+        is_acl_monitored = (result & ACL_MONITOR) != 0;
 
         // Handle deny action
         if ((result & 0x01) == ACL_DENY && result != ACL_NO_MATCH) {
@@ -779,8 +809,8 @@ static err_t ap_netif_linkoutput_hook(struct netif *netif, struct pbuf *p) {
         }
     }
 
-    // Capture AP traffic if pcap is on (but not if already captured by monitor)
-    if (!captured_by_monitor && pcap_capture_enabled()) {
+    // Capture packet based on mode and ACL monitor flag (AP interface = true)
+    if (pcap_should_capture(is_acl_monitored, true)) {
         pcap_capture_packet(p);
     }
 

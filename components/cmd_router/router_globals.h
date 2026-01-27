@@ -96,6 +96,21 @@ esp_err_t del_dhcp_reservation(const uint8_t *mac);
 esp_err_t clear_all_dhcp_reservations();
 uint32_t lookup_dhcp_reservation(const uint8_t *mac);
 
+/**
+ * @brief Look up device name by IP address from DHCP reservations
+ * @param ip IP address to look up (network byte order)
+ * @return Device name if found, NULL if no reservation with that IP
+ */
+const char* lookup_device_name_by_ip(uint32_t ip);
+
+/**
+ * @brief Resolve a device name to an IP address from DHCP reservations
+ * @param name Device name to look up (case-insensitive)
+ * @param ip Output IP address (network byte order)
+ * @return true if found, false if no reservation with that name
+ */
+bool resolve_device_name_to_ip(const char *name, uint32_t *ip);
+
 void get_dhcp_pool_range(uint32_t server_ip, uint32_t *start_ip, uint32_t *end_ip);
 void print_dhcp_pool();
 

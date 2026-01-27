@@ -15,36 +15,82 @@ extern "C" {
 #endif
 
 /**
+ * @brief Capture mode enumeration
+ */
+typedef enum {
+    PCAP_MODE_OFF = 0,        /**< Capture disabled - no packets recorded */
+    PCAP_MODE_ACL_MONITOR,    /**< Only capture packets with ACL_MONITOR flag */
+    PCAP_MODE_PROMISCUOUS     /**< Capture all traffic on hooked interfaces */
+} pcap_capture_mode_t;
+
+/**
  * @brief Initialize PCAP capture system and start TCP server task
  *
  * Creates ring buffer, starts TCP server listening on port 19000.
- * Capture is disabled by default, use pcap_capture_start() to enable.
+ * Capture mode is OFF by default.
  */
 void pcap_init(void);
 
 /**
+ * @brief Check if a packet should be captured based on current mode and state
+ *
+ * This is the main decision function for capturing. It considers:
+ * - Current capture mode (OFF, ACL_MONITOR, or PROMISCUOUS)
+ * - Whether a Wireshark client is connected
+ * - Whether packet has ACL_MONITOR flag (for ACL_MONITOR mode)
+ * - Interface type (promiscuous mode only captures AP interface)
+ *
+ * @param is_acl_monitored true if packet matched ACL rule with MONITOR flag
+ * @param is_ap_interface true if packet is from AP interface (client traffic)
+ * @return true if packet should be captured
+ */
+bool pcap_should_capture(bool is_acl_monitored, bool is_ap_interface);
+
+/**
  * @brief Capture a packet into the ring buffer
  *
- * Called from AP netif hooks. Non-blocking - if buffer is full,
- * packet is dropped and counter incremented.
+ * Called from netif hooks after pcap_should_capture() returns true.
+ * Non-blocking - if buffer is full, packet is dropped and counter incremented.
  *
  * @param p Packet buffer to capture
  */
 void pcap_capture_packet(struct pbuf *p);
 
 /**
- * @brief Enable packet capture
+ * @brief Set capture mode
+ * @param mode The capture mode to set
+ */
+void pcap_set_mode(pcap_capture_mode_t mode);
+
+/**
+ * @brief Get current capture mode
+ * @return Current capture mode
+ */
+pcap_capture_mode_t pcap_get_mode(void);
+
+/**
+ * @brief Get capture mode name as string
+ * @param mode The capture mode
+ * @return String representation of mode
+ */
+const char* pcap_mode_to_string(pcap_capture_mode_t mode);
+
+/**
+ * @brief Enable packet capture (legacy - sets PROMISCUOUS mode)
+ * @deprecated Use pcap_set_mode() instead
  */
 void pcap_capture_start(void);
 
 /**
- * @brief Disable packet capture
+ * @brief Disable packet capture (legacy - sets OFF mode)
+ * @deprecated Use pcap_set_mode() instead
  */
 void pcap_capture_stop(void);
 
 /**
- * @brief Check if capture is enabled
- * @return true if capture is enabled
+ * @brief Check if capture is enabled (legacy)
+ * @return true if mode is not OFF
+ * @deprecated Use pcap_get_mode() instead
  */
 bool pcap_capture_enabled(void);
 

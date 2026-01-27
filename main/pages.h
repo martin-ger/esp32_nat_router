@@ -507,12 +507,23 @@ setTimeout(\"location.href = '/'\", 10000);\
 <form action='' method='GET'>\
 <table>\
 <tr>\
-<td>Status</td>\
+<td>Mode</td>\
+<td>\
+<select name='pcap_mode' style='padding: 0.4rem; border-radius: 4px; border: 1px solid #ccc;'>\
+<option value='off' %s>Off</option>\
+<option value='acl' %s>ACL Monitor</option>\
+<option value='promisc' %s>Promiscuous</option>\
+</select>\
+<input type='submit' value='Set' class='ok-button' style='margin-left: 0.5rem;'/>\
+</td>\
+</tr>\
+<tr>\
+<td>Client</td>\
 <td><strong style='color: %s;'>%s</strong></td>\
 </tr>\
 <tr>\
-<td>Capture</td>\
-<td><input type='submit' name='pcap_toggle' value='%s' class='%s'/></td>\
+<td>Stats</td>\
+<td>%lu captured, %lu dropped</td>\
 </tr>\
 </table>\
 </form>\
@@ -977,9 +988,9 @@ input:focus, select:focus { outline: none; border-color: #00d9ff; }\
 <option value='17'>UDP</option>\
 <option value='1'>ICMP</option>\
 </select></td></tr>\
-<tr><td>Source IP</td><td><input type='text' name='src_ip' placeholder='any or 192.168.1.0/24'/></td></tr>\
+<tr><td>Source IP</td><td><input type='text' name='src_ip' placeholder='any, IP/CIDR, or device name'/></td></tr>\
 <tr><td>Source Port</td><td><input type='text' name='src_port' placeholder='* or port (TCP/UDP)'/></td></tr>\
-<tr><td>Dest IP</td><td><input type='text' name='dst_ip' placeholder='any or 10.0.0.0/8'/></td></tr>\
+<tr><td>Dest IP</td><td><input type='text' name='dst_ip' placeholder='any, IP/CIDR, or device name'/></td></tr>\
 <tr><td>Dest Port</td><td><input type='text' name='dst_port' placeholder='* or port (TCP/UDP)'/></td></tr>\
 <tr><td>Action</td><td><select name='action'>\
 <option value='1'>Allow</option>\
