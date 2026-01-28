@@ -39,9 +39,8 @@ components/
 ├── dhcpserver/          # Custom DHCP server with reservation support (overrides ESP-IDF built-in)
 ├── pcap_capture/        # PCAP packet capture with TCP streaming to Wireshark
 ├── remote_console/      # Network-accessible CLI via TCP (password protected)
-├── cmd_router/          # CLI commands: set_sta, set_ap, portmap, dhcp_reserve, disable/enable, set_web_password, show, acl, remote_console
-├── cmd_system/          # System commands: free, heap, restart, factory_reset, tasks
-└── cmd_nvs/             # NVS storage commands: nvs_set, nvs_get, nvs_erase
+├── cmd_router/          # CLI commands: set_sta, set_ap, portmap, dhcp_reserve, web_ui, set_web_password, show, acl, remote_console
+└── cmd_system/          # System commands: free, heap, restart, factory_reset, tasks
 ```
 
 ### Custom DHCP Server Component
@@ -248,8 +247,8 @@ portmap del TCP <ext_port>        # Delete port mapping
 dhcp_reserve add <mac> <ip> [-n <name>]         # Add DHCP reservation
 dhcp_reserve del <mac>            # Delete DHCP reservation
 set_web_password <password>       # Set web interface password (empty to disable)
-disable                           # Disable web interface completely
-enable                            # Re-enable web interface
+web_ui enable                     # Enable web interface (after reboot)
+web_ui disable                    # Disable web interface (after reboot)
 show status                       # Show router status (connection, clients, memory)
 show config                       # Show router configuration (AP/STA settings)
 show mappings                     # Show DHCP pool, reservations and port mappings

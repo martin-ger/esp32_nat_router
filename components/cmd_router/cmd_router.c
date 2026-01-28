@@ -51,7 +51,7 @@ static void register_show(void);
 static void register_portmap(void);
 static void register_dhcp_reserve(void);
 static void register_set_web_password(void);
-static void register_disable_enable(void);
+static void register_web_ui(void);
 static void register_bytes(void);
 static void register_pcap(void);
 static void register_set_led_gpio(void);
@@ -187,7 +187,7 @@ void register_router(void)
     register_portmap();
     register_dhcp_reserve();
     register_show();
-    register_disable_enable();
+    register_web_ui();
     register_set_web_password();
     register_bytes();
     register_pcap();
@@ -555,70 +555,72 @@ static void register_set_ap_ip(void)
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }
 
-/* 'disable' command */
-static int disable_webserver(int argc, char **argv)
+/* 'web_ui' command */
+static int web_ui_cmd(int argc, char **argv)
 {
+    if (argc < 2) {
+        /* Show current status */
+        char* lock = NULL;
+        get_config_param_str("lock", &lock);
+        bool enabled = (lock == NULL || strcmp(lock, "0") == 0);
+        printf("Web interface: %s\n", enabled ? "enabled" : "disabled");
+        printf("\nUsage: web_ui <enable|disable>\n");
+        if (lock != NULL) free(lock);
+        return 0;
+    }
+
+    const char *action = argv[1];
     esp_err_t err;
     nvs_handle_t nvs;
 
     err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
     if (err != ESP_OK) {
+        printf("Error opening NVS: %s\n", esp_err_to_name(err));
         return err;
     }
 
-    err = nvs_set_str(nvs, "lock", "1");
-    if (err == ESP_OK) {
-        err = nvs_commit(nvs);
+    if (strcmp(action, "enable") == 0) {
+        err = nvs_set_str(nvs, "lock", "0");
         if (err == ESP_OK) {
-            ESP_LOGI(TAG, "Web interface disabled. Use 'enable' command to re-enable.");
-            printf("Web interface will be disabled after reboot.\n");
-            printf("Use 'enable' command to re-enable it.\n");
+            err = nvs_commit(nvs);
+            if (err == ESP_OK) {
+                ESP_LOGI(TAG, "Web interface enabled.");
+                printf("Web interface will be enabled after reboot.\n");
+            }
         }
+    } else if (strcmp(action, "disable") == 0) {
+        err = nvs_set_str(nvs, "lock", "1");
+        if (err == ESP_OK) {
+            err = nvs_commit(nvs);
+            if (err == ESP_OK) {
+                ESP_LOGI(TAG, "Web interface disabled.");
+                printf("Web interface will be disabled after reboot.\n");
+                printf("Use 'web_ui enable' to re-enable it.\n");
+            }
+        }
+    } else {
+        printf("Unknown action: %s\n", action);
+        printf("Usage: web_ui <enable|disable>\n");
+        nvs_close(nvs);
+        return 1;
     }
+
     nvs_close(nvs);
     return err;
 }
 
-/* 'enable' command */
-static int enable_webserver(int argc, char **argv)
+static void register_web_ui(void)
 {
-    esp_err_t err;
-    nvs_handle_t nvs;
-
-    err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
-    if (err != ESP_OK) {
-        return err;
-    }
-
-    err = nvs_set_str(nvs, "lock", "0");
-    if (err == ESP_OK) {
-        err = nvs_commit(nvs);
-        if (err == ESP_OK) {
-            ESP_LOGI(TAG, "Web interface enabled.");
-            printf("Web interface will be enabled after reboot.\n");
-        }
-    }
-    nvs_close(nvs);
-    return err;
-}
-
-static void register_disable_enable(void)
-{
-    const esp_console_cmd_t disable_cmd = {
-        .command = "disable",
-        .help = "Disable the web interface",
-        .hint = NULL,
-        .func = &disable_webserver,
+    const esp_console_cmd_t cmd = {
+        .command = "web_ui",
+        .help = "Enable or disable the web interface\n"
+                "  web_ui              - Show current status\n"
+                "  web_ui enable       - Enable web interface (after reboot)\n"
+                "  web_ui disable      - Disable web interface (after reboot)",
+        .hint = " <enable|disable>",
+        .func = &web_ui_cmd,
     };
-    ESP_ERROR_CHECK( esp_console_cmd_register(&disable_cmd) );
-
-    const esp_console_cmd_t enable_cmd = {
-        .command = "enable",
-        .help = "Enable the web interface",
-        .hint = NULL,
-        .func = &enable_webserver,
-    };
-    ESP_ERROR_CHECK( esp_console_cmd_register(&enable_cmd) );
+    ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }
 
 /* 'set_web_password' command */
@@ -902,6 +904,12 @@ static int show(int argc, char **argv)
         ip4_addr_t addr;
         addr.addr = my_ap_ip;
         printf("  IP Address: " IPSTR "\n", IP2STR(&addr));
+
+        char* web_lock = NULL;
+        get_config_param_str("lock", &web_lock);
+        bool web_enabled = (web_lock == NULL || strcmp(web_lock, "0") == 0);
+        printf("\nWeb Interface: %s\n", web_enabled ? "enabled" : "disabled");
+        if (web_lock != NULL) free(web_lock);
 
         // Cleanup
         if (ssid != NULL) free(ssid);
@@ -1613,8 +1621,15 @@ static void register_acl(void)
 {
     const esp_console_cmd_t cmd = {
         .command = "acl",
-        .help = "Manage firewall ACL rules",
-        .hint = NULL,
+        .help = "Manage firewall ACL rules\n"
+                "  acl <list> <proto> <src> [<s_port>] <dst> [<d_port>] <action>  - Add rule\n"
+                "  acl <list> del <index>       - Delete rule at index\n"
+                "  acl <list> clear             - Clear all rules from list\n"
+                "  acl <list> clear_stats       - Clear statistics for list\n"
+                "  Lists: to_sta, from_sta, to_ap, from_ap\n"
+                "  Protocols: IP, TCP, UDP, ICMP\n"
+                "  Actions: allow, deny, allow_monitor, deny_monitor",
+        .hint = " <list> <proto> <src> [<s_port>] <dst> [<d_port>] <action>",
         .func = &acl_cmd,
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
@@ -1744,8 +1759,15 @@ static void register_remote_console_cmd(void)
 {
     const esp_console_cmd_t cmd = {
         .command = "remote_console",
-        .help = "Manage remote console (network CLI access)",
-        .hint = NULL,
+        .help = "Manage remote console (network CLI access)\n"
+                "  remote_console status              - Show status and connection info\n"
+                "  remote_console enable               - Enable remote console\n"
+                "  remote_console disable              - Disable remote console\n"
+                "  remote_console port <port>          - Set TCP port (default: 2323)\n"
+                "  remote_console bind <both|ap|sta>   - Set interface binding\n"
+                "  remote_console timeout <seconds>    - Set idle timeout (0=none)\n"
+                "  remote_console kick                 - Disconnect current session",
+        .hint = " <action> [<args>]",
         .func = &remote_console_cmd,
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );

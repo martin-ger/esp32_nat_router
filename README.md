@@ -118,12 +118,12 @@ For maximum security in open environments, you can completely disable the web in
 
 **From the Serial Console:**
 ```
-disable
+web_ui disable
 ```
 
 After disabling, the web interface will be completely inaccessible. Re-enable it via the serial console with:
 ```
-enable
+web_ui enable
 ```
 
 If you made a mistake and have lost all contact with the ESP you can still use the serial console to reconfigure it. All parameter settings are stored in NVS (non volatile storage), which is *not* erased by simple re-flashing the binaries. If you want to wipe it out, use "esptool.py -p /dev/ttyUSB0 erase_flash".
@@ -510,46 +510,6 @@ light_sleep  [-t <t>] [--io=<n>]... [--io_level=<0|1>]...
 tasks 
   Get information about running tasks
 
-nvs_set  <key> <type> -v <value>
-  Set key-value pair in selected namespace.
-Examples:
- nvs_set VarName i32 -v 
-  123 
- nvs_set VarName str -v YourString 
- nvs_set VarName blob -v 0123456789abcdef 
-         <key>  key of the value to be set
-        <type>  type can be: i8, u8, i16, u16 i32, u32 i64, u64, str, blob
-  -v, --value=<value>  value to be stored
-
-nvs_get  <key> <type>
-  Get key-value pair from selected namespace. 
-Example: nvs_get VarName i32
-         <key>  key of the value to be read
-        <type>  type can be: i8, u8, i16, u16 i32, u32 i64, u64, str, blob
-
-nvs_erase  <key>
-  Erase key-value pair from current namespace
-         <key>  key of the value to be erased
-
-nvs_namespace  <namespace>
-  Set current namespace
-   <namespace>  namespace of the partition to be selected
-
-nvs_list  <partition> [-n <namespace>] [-t <type>]
-  List stored key-value pairs stored in NVS.Namespace and type can be specified
-  to print only those key-value pairs.
-  
-Following command list variables stored inside 'nvs' partition, under namespace 'storage' with type uint32_t
-  Example: nvs_list nvs -n storage -t u32 
-
-   <partition>  partition name
-  -n, --namespace=<namespace>  namespace name
-  -t, --type=<type>  type can be: i8, u8, i16, u16 i32, u32 i64, u64, str, blob
-
-nvs_erase_namespace  <namespace>
-  Erases specified namespace
-   <namespace>  namespace to be erased
-
 set_sta  <ssid> <passwd>
   Set SSID and password of the STA interface
         <ssid>  SSID
@@ -587,11 +547,11 @@ dhcp_reserve  [add|del] <mac> <ip> [-n <name>]
           <ip>  IP address to reserve
   -n, --name=<name>  Optional device name
 
-disable
-  Disable the web interface
-
-enable
-  Enable the web interface
+web_ui  <enable|disable>
+  Enable or disable the web interface
+  web_ui              - Show current status
+  web_ui enable       - Enable web interface (after reboot)
+  web_ui disable      - Disable web interface (after reboot)
 
 set_web_password  <password>
   Set web interface password (empty string ("") to disable)
@@ -609,8 +569,17 @@ pcap  <action> [<mode>] [<bytes>]
         <mode>  off|acl|promisc
        <bytes>  snaplen value (64-1600)
 
-acl 
+acl  <list> <proto> <src> [<s_port>] <dst> [<d_port>] <action>
   Manage firewall ACL rules
+       <list>  to_sta|from_sta|to_ap|from_ap
+      <proto>  IP|TCP|UDP|ICMP
+   <src/dst>  IP/mask, 'any', or device name from DHCP reservations
+      <port>  port number, '*' for any (TCP/UDP only)
+     <action>  allow|deny|allow_monitor|deny_monitor
+  Other actions:
+    acl <list> del <index>       - Delete rule at index
+    acl <list> clear             - Clear all rules from list
+    acl <list> clear_stats       - Clear statistics for list
 
 set_led_gpio  [<gpio>|none]
   Set GPIO for status LED blinking

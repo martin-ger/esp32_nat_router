@@ -1302,7 +1302,6 @@ void app_main(void)
     /* Register commands */
     esp_console_register_help_command();
     register_system();
-    register_nvs();
     register_router();
 
     /* Prompt to be printed before each line.
