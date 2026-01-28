@@ -34,6 +34,7 @@
 #include "cmd_router.h"
 #include "pcap_capture.h"
 #include "acl.h"
+#include "remote_console.h"
 
 #ifdef CONFIG_FREERTOS_USE_STATS_FORMATTING_FUNCTIONS
 #define WITH_TASKS_INFO 1
@@ -55,6 +56,7 @@ static void register_bytes(void);
 static void register_pcap(void);
 static void register_set_led_gpio(void);
 static void register_acl(void);
+static void register_remote_console_cmd(void);
 
 /* ACL helper functions (forward declarations) */
 static char* acl_format_ip_with_name(uint32_t ip, uint32_t mask, char* buf, size_t buf_len);
@@ -191,6 +193,7 @@ void register_router(void)
     register_pcap();
     register_set_led_gpio();
     register_acl();
+    register_remote_console_cmd();
 }
 
 /** Arguments used by 'set_sta' function */
@@ -1613,6 +1616,137 @@ static void register_acl(void)
         .help = "Manage firewall ACL rules",
         .hint = NULL,
         .func = &acl_cmd,
+    };
+    ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
+}
+
+/* 'remote_console' command implementation */
+static int remote_console_cmd(int argc, char **argv)
+{
+    if (argc < 2) {
+        printf("Usage: remote_console <action> [args]\n");
+        printf("  status              - Show remote console status\n");
+        printf("  enable              - Enable remote console\n");
+        printf("  disable             - Disable remote console\n");
+        printf("  port <port>         - Set TCP port (requires restart)\n");
+        printf("  bind <both|ap|sta>  - Set interface binding\n");
+        printf("  timeout <seconds>   - Set idle timeout (0=none)\n");
+        printf("  kick                - Disconnect current session\n");
+        return 0;
+    }
+
+    const char *action = argv[1];
+
+    if (strcmp(action, "status") == 0) {
+        remote_console_config_t config;
+        remote_console_status_t status;
+        remote_console_get_config(&config);
+        remote_console_get_status(&status);
+
+        printf("Remote Console Status:\n");
+        printf("======================\n");
+        printf("Enabled:        %s\n", config.enabled ? "yes" : "no");
+        printf("Port:           %d\n", config.port);
+
+        const char *bind_str[] = {"both", "AP only", "STA only"};
+        printf("Interface:      %s\n", bind_str[config.bind]);
+        printf("Idle timeout:   %lu sec\n", (unsigned long)config.idle_timeout_sec);
+
+        const char *state_str[] = {"disabled", "listening", "auth wait", "active"};
+        printf("State:          %s\n", state_str[status.state]);
+
+        if (status.state == RC_STATE_ACTIVE) {
+            printf("Client IP:      %s\n", status.client_ip);
+            printf("Session time:   %lu sec\n", (unsigned long)status.session_duration_sec);
+            printf("Idle:           %lu sec\n", (unsigned long)status.idle_sec);
+        }
+
+        printf("Connections:    %lu total\n", (unsigned long)status.total_connections);
+        printf("Auth failures:  %lu\n", (unsigned long)status.failed_auths);
+
+        printf("\nWARNING: Currently uses plain TCP (not encrypted).\n");
+        printf("Connect: nc %s %d\n",
+               config.bind == RC_BIND_STA_ONLY ? "<STA_IP>" : "192.168.4.1",
+               config.port);
+
+    } else if (strcmp(action, "enable") == 0) {
+        esp_err_t err = remote_console_enable();
+        if (err == ESP_OK) {
+            printf("Remote console enabled.\n");
+        } else if (err == ESP_ERR_INVALID_STATE) {
+            printf("Error: Set a web password first using 'set_web_password'\n");
+        } else {
+            printf("Error: %s\n", esp_err_to_name(err));
+        }
+
+    } else if (strcmp(action, "disable") == 0) {
+        remote_console_disable();
+        printf("Remote console disabled.\n");
+
+    } else if (strcmp(action, "port") == 0) {
+        if (argc < 3) {
+            printf("Usage: remote_console port <port>\n");
+            return 1;
+        }
+        int port = atoi(argv[2]);
+        if (port < 1 || port > 65535) {
+            printf("Invalid port number (1-65535)\n");
+            return 1;
+        }
+        remote_console_set_port((uint16_t)port);
+        printf("Port set to %d. Restart or disable/enable to apply.\n", port);
+
+    } else if (strcmp(action, "bind") == 0) {
+        if (argc < 3) {
+            printf("Usage: remote_console bind <both|ap|sta>\n");
+            return 1;
+        }
+        remote_console_bind_t bind;
+        if (strcmp(argv[2], "both") == 0) {
+            bind = RC_BIND_BOTH;
+        } else if (strcmp(argv[2], "ap") == 0) {
+            bind = RC_BIND_AP_ONLY;
+        } else if (strcmp(argv[2], "sta") == 0) {
+            bind = RC_BIND_STA_ONLY;
+        } else {
+            printf("Invalid bind option. Use: both, ap, or sta\n");
+            return 1;
+        }
+        remote_console_set_bind(bind);
+        printf("Bind set. Restart or disable/enable to apply.\n");
+
+    } else if (strcmp(action, "timeout") == 0) {
+        if (argc < 3) {
+            printf("Usage: remote_console timeout <seconds>\n");
+            return 1;
+        }
+        uint32_t timeout = (uint32_t)atoi(argv[2]);
+        remote_console_set_timeout(timeout);
+        printf("Timeout set to %lu seconds.\n", (unsigned long)timeout);
+
+    } else if (strcmp(action, "kick") == 0) {
+        esp_err_t err = remote_console_kick();
+        if (err == ESP_OK) {
+            printf("Kick request sent.\n");
+        } else {
+            printf("No active session to kick.\n");
+        }
+
+    } else {
+        printf("Unknown action: %s\n", action);
+        return 1;
+    }
+
+    return 0;
+}
+
+static void register_remote_console_cmd(void)
+{
+    const esp_console_cmd_t cmd = {
+        .command = "remote_console",
+        .help = "Manage remote console (network CLI access)",
+        .hint = NULL,
+        .func = &remote_console_cmd,
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }

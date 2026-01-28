@@ -37,7 +37,9 @@ main/
 components/
 ├── acl/                 # Stateless packet filtering firewall (4 ACL lists, 16 rules each)
 ├── dhcpserver/          # Custom DHCP server with reservation support (overrides ESP-IDF built-in)
-├── cmd_router/          # CLI commands: set_sta, set_ap, portmap, dhcp_reserve, disable/enable, set_web_password, show, acl
+├── pcap_capture/        # PCAP packet capture with TCP streaming to Wireshark
+├── remote_console/      # Network-accessible CLI via TCP (password protected)
+├── cmd_router/          # CLI commands: set_sta, set_ap, portmap, dhcp_reserve, disable/enable, set_web_password, show, acl, remote_console
 ├── cmd_system/          # System commands: free, heap, restart, factory_reset, tasks
 └── cmd_nvs/             # NVS storage commands: nvs_set, nvs_get, nvs_erase
 ```
@@ -172,6 +174,54 @@ typedef struct {
 - Web interface at `/firewall` for rule management
 - CLI commands via `cmd_router.c`
 
+### Remote Console Component
+The `components/remote_console/` directory provides network-accessible CLI via TCP.
+
+**Structure:**
+```
+components/remote_console/
+├── CMakeLists.txt           # Build config with linker wrapping for printf capture
+├── include/remote_console.h # Public API
+└── remote_console.c         # TCP server, authentication, session management
+```
+
+**Features:**
+- TCP server on port 2323 (configurable)
+- Password authentication (reuses `web_password` from NVS)
+- Single concurrent session with idle timeout
+- Output capture via linker wrapping (`--wrap=printf`, `--wrap=puts`, etc.)
+- Disabled by default for security
+
+**Key functions:**
+- `remote_console_init()` - Initialize and start if enabled
+- `remote_console_enable()` / `remote_console_disable()` - Control service
+- `remote_console_kick()` - Disconnect current session
+- `remote_console_get_status()` - Get connection status
+
+**Output capture mechanism:**
+Uses linker `--wrap` to intercept output functions:
+- `__wrap_printf`, `__wrap_puts`, `__wrap_putchar`
+- `__wrap_fputs`, `__wrap_fwrite`
+- Only captures during command execution (`rc_capturing` flag)
+- Does NOT wrap `vprintf` (used by ESP_LOG internally)
+
+**NVS keys:**
+- `rc_enabled` (u8) - Service enabled flag
+- `rc_port` (u16) - TCP port (default 2323)
+- `rc_bind` (u8) - Interface binding (0=both, 1=AP, 2=STA)
+- `rc_timeout` (u32) - Idle timeout in seconds
+
+**CLI commands:**
+```
+remote_console status         # Show status
+remote_console enable         # Enable service
+remote_console disable        # Disable service
+remote_console port <port>    # Set TCP port
+remote_console bind <ap|sta|both>
+remote_console timeout <sec>  # Set idle timeout
+remote_console kick           # Disconnect session
+```
+
 ### Configuration Storage
 All settings persist in NVS (Non-Volatile Storage) under namespace `esp32_nat`:
 - WiFi credentials, static IP settings, port mappings, DHCP reservations
@@ -208,6 +258,9 @@ acl show [<list>]                 # Show ACL rules and statistics
 acl add <list> <proto> <src> <sport> <dst> <dport> <action>  # Add ACL rule
 acl del <list> <index>            # Delete ACL rule by index
 acl clear <list>                  # Clear all rules from ACL list
+remote_console status             # Show remote console status
+remote_console enable             # Enable remote console (requires web_password)
+remote_console disable            # Disable remote console
 ```
 
 ## Web Interface

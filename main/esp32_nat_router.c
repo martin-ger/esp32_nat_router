@@ -12,6 +12,7 @@
 #include <pthread.h>
 #include "esp_system.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "esp_console.h"
 #include "esp_vfs_dev.h"
 #include "driver/uart.h"
@@ -49,6 +50,7 @@
 #include "esp_netif.h"
 #include "pcap_capture.h"
 #include "acl.h"
+#include "remote_console.h"
 
 // Byte counting variables
 uint64_t sta_bytes_sent = 0;
@@ -1291,6 +1293,9 @@ void app_main(void)
 
     // Initialize PCAP capture (TCP server on port 19000)
     pcap_init();
+
+    // Initialize remote console (TCP server on port 2323, disabled by default)
+    remote_console_init();
 
     initialize_console();
 

@@ -1,3 +1,3 @@
 idf_component_register(SRCS "cmd_router.c"
                     INCLUDE_DIRS .
-                    REQUIRES console nvs_flash esp_wifi driver spi_flash pcap_capture acl)
+                    REQUIRES console nvs_flash esp_wifi driver spi_flash pcap_capture acl remote_console)

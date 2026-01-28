@@ -16,6 +16,7 @@ This is a firmware to use the ESP32 as WiFi NAT router. It can be used as:
 - **WPA2-Enterprise Support**: Connect to corporate networks and convert them to WPA2-PSK
 - **Web Interface**: Web UI with password protection for easy configuration
 - **Serial Console**: Full CLI for advanced configuration
+- **Remote Console**: Network-accessible CLI via TCP (password protected)
 - **Connected Clients Display**: View all connected devices with MAC, IP, and device names
 - **Static IP Support**: Configure static IP for the STA (upstream) interface
 - **LED Status Indicator**: Visual feedback for connection status and connected clients
@@ -393,6 +394,78 @@ Changes take effect after restart.
 
 **Note**: Some boards have active-low LEDs. ESP32-S3 often uses GPIO 48 for an addressable RGB LED (WS2812) which may require different handling.
 
+## Remote Console
+
+The router provides a network-accessible CLI via TCP, allowing remote configuration without physical serial access.
+
+### Features
+
+- **TCP Connection**: Connect via port 2323 (configurable)
+- **Password Protected**: Uses the same password as the web interface
+- **Full CLI Access**: All serial console commands available remotely
+- **Single Session**: Only one remote session at a time
+- **Idle Timeout**: Automatic disconnect after inactivity (default: 5 minutes)
+- **Disabled by Default**: Must be explicitly enabled for security
+
+### Security Warning
+
+**The remote console currently uses plain TCP (unencrypted).** Only use on trusted networks. Do not expose port 2323 to the internet.
+
+### Enabling Remote Console
+
+First, set a web password (required):
+```
+set_web_password mypassword
+```
+
+Then enable the remote console:
+```
+remote_console enable
+```
+
+### Connecting
+
+From any computer on the network:
+```bash
+nc 192.168.4.1 2323
+```
+
+Or using telnet:
+```bash
+telnet 192.168.4.1 2323
+```
+
+You'll be prompted for the password. After authentication, you get full CLI access.
+
+### Console Commands
+
+```
+remote_console status              # Show remote console status
+remote_console enable              # Enable remote console
+remote_console disable             # Disable remote console
+remote_console port <port>         # Set TCP port (default: 2323)
+remote_console bind <both|ap|sta>  # Set interface binding
+remote_console timeout <seconds>   # Set idle timeout (0 = no timeout)
+remote_console kick                # Disconnect current session
+```
+
+### Configuration Options
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| Port | 2323 | TCP port for connections |
+| Bind | AP only | Which interface(s) to listen on |
+| Timeout | 300 sec | Idle timeout before disconnect |
+| Enabled | No | Service must be explicitly enabled |
+
+### Usage Tips
+
+- Use `quit` or `exit` to disconnect gracefully
+- Press Ctrl+C to cancel current input
+- Press Ctrl+D to disconnect
+- The session shows `^C` when Ctrl+C is pressed
+- All command output appears on the remote console
+
 # Command Line Interface
 
 For configuration you have to use a serial console (Putty or GtkTerm with 115200 bps).
@@ -543,6 +616,13 @@ set_led_gpio  [<gpio>|none]
   Set GPIO for status LED blinking
        <gpio>  GPIO pin number (0-48), or 'none' to disable
                Without arguments, shows current setting
+
+remote_console  <action> [<args>]
+  Manage remote console (network CLI access)
+      <action>  status|enable|disable|port|bind|timeout|kick
+        <port>  TCP port number (default: 2323)
+        <bind>  both|ap|sta - interface binding
+     <timeout>  idle timeout in seconds (0 = no timeout)
 
 ```
 
