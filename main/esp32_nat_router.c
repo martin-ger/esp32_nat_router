@@ -770,6 +770,27 @@ void reset_sta_byte_counts(void) {
     sta_bytes_received = 0;
 }
 
+// Uptime functions
+uint32_t get_uptime_seconds(void) {
+    return (uint32_t)(esp_timer_get_time() / 1000000ULL);
+}
+
+void format_uptime(uint32_t seconds, char *buf, size_t buf_len) {
+    uint32_t days = seconds / 86400;
+    uint32_t hours = (seconds % 86400) / 3600;
+    uint32_t mins = (seconds % 3600) / 60;
+    uint32_t secs = seconds % 60;
+
+    if (days > 0) {
+        snprintf(buf, buf_len, "%lud %02lu:%02lu:%02lu",
+                 (unsigned long)days, (unsigned long)hours,
+                 (unsigned long)mins, (unsigned long)secs);
+    } else {
+        snprintf(buf, buf_len, "%02lu:%02lu:%02lu",
+                 (unsigned long)hours, (unsigned long)mins, (unsigned long)secs);
+    }
+}
+
 // AP netif hook functions (for PCAP capture and ACL)
 static err_t ap_netif_input_hook(struct pbuf *p, struct netif *netif) {
     bool is_acl_monitored = false;

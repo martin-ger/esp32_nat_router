@@ -149,6 +149,10 @@ uint64_t get_sta_bytes_sent(void);
 uint64_t get_sta_bytes_received(void);
 void reset_sta_byte_counts(void);
 
+// Uptime functions
+uint32_t get_uptime_seconds(void);
+void format_uptime(uint32_t seconds, char *buf, size_t buf_len);
+
 // AP netif hook functions (for future use)
 void init_ap_netif_hooks(void);
 

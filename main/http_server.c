@@ -362,6 +362,10 @@ static esp_err_t index_get_handler(httpd_req_t *req)
     end_addr.addr = end_ip;
     sprintf(dhcp_pool_str, IPSTR " - " IPSTR, IP2STR(&start_addr), IP2STR(&end_addr));
 
+    // Get uptime
+    char uptime_str[32];
+    format_uptime(get_uptime_seconds(), uptime_str, sizeof(uptime_str));
+
     // Get byte counts and convert to MB
     uint64_t bytes_sent = get_sta_bytes_sent();
     uint64_t bytes_received = get_sta_bytes_received();
@@ -446,7 +450,7 @@ static esp_err_t index_get_handler(httpd_req_t *req)
 
     /* Build the page */
     const char* index_page_template = INDEX_PAGE;
-    int page_len = strlen(index_page_template) + strlen(header_ui) + strlen(auth_ui) + strlen(pcap_status_str) + 512;
+    int page_len = strlen(index_page_template) + strlen(header_ui) + strlen(auth_ui) + strlen(pcap_status_str) + strlen(uptime_str) + 512;
     char* index_page = malloc(page_len);
 
     if (index_page == NULL) {
@@ -456,7 +460,7 @@ static esp_err_t index_get_handler(httpd_req_t *req)
     }
 
     snprintf(index_page, page_len, index_page_template,
-        header_ui, conn_status, sta_ip_str, ap_ip_str, dhcp_pool_str, connect_count, sent_mb, received_mb, pcap_status_str, auth_ui);
+        header_ui, uptime_str, conn_status, sta_ip_str, ap_ip_str, dhcp_pool_str, connect_count, sent_mb, received_mb, pcap_status_str, auth_ui);
 
     httpd_resp_send(req, index_page, strlen(index_page));
     free(index_page);

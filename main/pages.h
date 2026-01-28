@@ -168,6 +168,10 @@ font-size: 0.8rem;\
 <div class='status-table'>\
 <table>\
 <tr>\
+<td>Uptime:</td>\
+<td>%s</td>\
+</tr>\
+<tr>\
 <td>Connection:</td>\
 <td><strong>%s</strong></td>\
 </tr>\

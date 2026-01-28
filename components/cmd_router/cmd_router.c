@@ -797,7 +797,12 @@ static int show(int argc, char **argv)
         // Show status
         printf("Router Status:\n");
         printf("==============\n");
-        
+
+        // Uptime
+        char uptime_str[32];
+        format_uptime(get_uptime_seconds(), uptime_str, sizeof(uptime_str));
+        printf("Uptime: %s\n", uptime_str);
+
         // Connection status
         printf("Uplink AP: %sconnected\n", ap_connect ? "" : "not ");
         if (ap_connect) {
