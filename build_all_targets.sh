@@ -141,7 +141,7 @@ check_idf_env() {
 # Main script execution
 main() {
     print_status "ESP32 NAT Router Multi-Target Build Script"
-    print_status "========================================"
+    print_status "=========================================="
     
     # Check if ESP-IDF environment is set up
     check_idf_env
@@ -164,7 +164,7 @@ main() {
     FAILED_TARGETS=()
     
     # Build for each target
-    for target in "esp32" "esp32c2" "esp32s3"; do
+    for target in "esp32" "esp32c2" "esp32c3" "esp32s3"; do
         description="${TARGETS[$target]}"
         echo ""
         print_status "=========================================="
@@ -184,14 +184,14 @@ main() {
     if [ ${#FAILED_TARGETS[@]} -eq 0 ]; then
         print_success "All targets built successfully!"
         print_status "Binary artifacts are preserved in firmware directories:"
-        for target in "esp32" "esp32c2" "esp32s3"; do
+        for target in "esp32" "esp32c2" "esp32c3" "esp32s3"; do
             artifacts_dir="firmware_$target"
             if [ -d "$artifacts_dir" ]; then
                 print_status "  - $artifacts_dir/ (preserved)"
             fi
         done
         print_status "Build directories (will be cleaned on next build):"
-        for target in "esp32" "esp32c2" "esp32s3"; do
+        for target in "esp32" "esp32c2" "esp32c3" "esp32s3"; do
             if [ -d "build/$target" ]; then
                 print_status "  - build/$target/"
             fi
@@ -208,7 +208,7 @@ main() {
     echo ""
     print_status "Preserved Binary Sizes:"
     print_status "======================="
-    for target in "esp32" "esp32c2" "esp32s3"; do
+    for target in "esp32" "esp32c2" "esp32c3" "esp32s3"; do
         artifacts_dir="firmware_$target"
         if [ -f "$artifacts_dir/esp32_nat_router.bin" ]; then
             size=$(stat -f%z "$artifacts_dir/esp32_nat_router.bin" 2>/dev/null || stat -c%s "$artifacts_dir/esp32_nat_router.bin" 2>/dev/null || echo "unknown")
