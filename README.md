@@ -31,7 +31,7 @@ After first boot the ESP32 NAT Router will offer a WiFi network with an open AP 
 ## Web Config Interface
 The web interface allows for the configuration of all parameters. Connect your PC or smartphone to the WiFi SSID "ESP32_NAT_Router" and point your browser to "http://192.168.4.1" (or later the configured AP IP address).
 
-The web interface consists of four pages:
+The web interface consists of five pages:
 
 ### System Status Page (/)
 The main dashboard displays:
@@ -43,6 +43,9 @@ The main dashboard displays:
 - PCAP capture status (when enabled: captured/dropped packet counts)
 
 <img src="https://raw.githubusercontent.com/martin-ger/esp32_nat_router/master/UI_Index.png">
+
+### WiFi Scan Page (/scan)
+Shows a WiFi network scan and allows for direct connection via the config page.
 
 ### Configuration Page (/config)
 Configure all router settings:
@@ -473,23 +476,26 @@ Use the "set_sta" and the "set_ap" command to configure the WiFi settings. Chang
 
 Enter the `help` command get a full list of all available commands:
 ```
-help 
-  Print the list of registered commands
+help  [<string>] [-v <0|1>]
+  Print the summary of all registered commands if no arguments are given,
+  otherwise print summary of given command.
+      <string>  Name of command
+  -v, --verbose=<0|1>  If specified, list console commands with given verbose level
 
 free 
   Get the current size of free heap memory
 
 heap 
-  Get minimum size of free heap memory that was available during program execu
-  tion
+  Get minimum size of free heap memory that was available during program
+  execution
 
 version 
   Get version of chip and SDK
 
-restart
+restart 
   Software reset of the chip
 
-factory_reset
+factory_reset 
   Erase all settings (NVS namespace 'esp32_nat') and restart
 
 deep_sleep  [-t <t>] [--io=<n>] [--io_level=<0|1>]
@@ -500,9 +506,9 @@ deep_sleep  [-t <t>] [--io=<n>] [--io_level=<0|1>]
   --io_level=<0|1>  GPIO level to trigger wakeup
 
 light_sleep  [-t <t>] [--io=<n>]... [--io_level=<0|1>]...
-  Enter light sleep mode. Two wakeup modes are supported: timer and GPIO. Mult
-  iple GPIO pins can be specified using pairs of 'io' and 'io_level' arguments
-  . Will also wake up on UART input.
+  Enter light sleep mode. Two wakeup modes are supported: timer and GPIO.
+  Multiple GPIO pins can be specified using pairs of 'io' and 'io_level'
+  arguments. Will also wake up on UART input.
   -t, --time=<t>  Wake up time, ms
       --io=<n>  If specified, wakeup using GPIO with given number
   --io_level=<0|1>  GPIO level to trigger wakeup
@@ -510,7 +516,11 @@ light_sleep  [-t <t>] [--io=<n>]... [--io_level=<0|1>]...
 tasks 
   Get information about running tasks
 
-set_sta  <ssid> <passwd>
+show  [status|config|mappings|acl]
+  Show router status, config, mappings or ACL rules
+  [status|config|mappings|acl]  Type of information
+
+set_sta  <ssid> <passwd> [-- <ent_username>] [-- <ent_identity>]
   Set SSID and password of the STA interface
         <ssid>  SSID
       <passwd>  Password
@@ -523,6 +533,27 @@ set_sta_static  <ip> <subnet> <gw>
       <subnet>  Subnet Mask
           <gw>  Gateway Address
 
+set_sta_mac  <octet> <octet> <octet> <octet> <octet> <octet>
+  Set MAC address of the STA interface
+       <octet>  First octet
+       <octet>  Second octet
+       <octet>  Third octet
+       <octet>  Fourth octet
+       <octet>  Fifth octet
+       <octet>  Sixth octet
+
+set_ap_mac  <octet> <octet> <octet> <octet> <octet> <octet>
+  Set MAC address of the AP interface
+       <octet>  First octet
+       <octet>  Second octet
+       <octet>  Third octet
+       <octet>  Fourth octet
+       <octet>  Fifth octet
+       <octet>  Sixth octet
+
+scan 
+  Scan for available WiFi networks
+
 set_ap  <ssid> <passwd>
   Set SSID and password of the SoftAP
         <ssid>  SSID of AP
@@ -532,36 +563,35 @@ set_ap_ip  <ip>
   Set IP for the AP interface
           <ip>  IP
 
+dhcp_reserve  [add|del] <mac> [<ip>] [-- <name>]
+  Add or delete a DHCP reservation
+     [add|del]  add or delete reservation
+         <mac>  MAC address (AA:BB:CC:DD:EE:FF)
+          <ip>  IP address (required for add)
+  --, -n, ----name=<name>  optional device name
+
 portmap  [add|del] [TCP|UDP] <ext_portno> <int_ip> <int_portno>
   Add or delete a portmapping to the router
      [add|del]  add or delete portmapping
      [TCP|UDP]  TCP or UDP port
   <ext_portno>  external port number
-      <int_ip>  internal IP
+      <int_ip>  internal IP or device name
   <int_portno>  internal port number
 
-dhcp_reserve  [add|del] <mac> <ip> [-n <name>]
-  Add or delete a DHCP reservation (fixed IP for a MAC address)
-     [add|del]  add or delete reservation
-         <mac>  MAC address (format: AA:BB:CC:DD:EE:FF)
-          <ip>  IP address to reserve
-  -n, --name=<name>  Optional device name
-
-web_ui  <enable|disable>
-  Enable or disable the web interface
-  web_ui              - Show current status
-  web_ui enable       - Enable web interface (after reboot)
-  web_ui disable      - Disable web interface (after reboot)
-
-set_web_password  <password>
-  Set web interface password (empty string ("") to disable)
-      <password>  Password for web interface login
-
-show  [status|config|mappings]
-  Show router status, config or mappings
+acl   <list> <proto> <src> [<s_port>] <dst> [<d_port>] <action>
+  Manage firewall ACL rules
+  acl <list> <proto> <src> [<s_port>] <dst> [<d_port>] <action>  - Add rule
+  
+  acl <list> del <index>       - Delete rule at index
+  acl <list> clear             - Clear all rules from list
+  acl <list> clear_stats       - Clear statistics for list
+  Lists: to_sta, from_sta, to_ap, from_ap
+  Protocols: IP, TCP, UDP, ICMP
+  Actions: allow, deny, allow_monitor, deny_monitor
 
 bytes  [[reset]]
   Show or reset STA interface byte counts
+       [reset]  reset byte counts or show current counts
 
 pcap  <action> [<mode>] [<bytes>]
   Control PCAP packet capture (TCP port 19000)
@@ -569,29 +599,30 @@ pcap  <action> [<mode>] [<bytes>]
         <mode>  off|acl|promisc
        <bytes>  snaplen value (64-1600)
 
-acl  <list> <proto> <src> [<s_port>] <dst> [<d_port>] <action>
-  Manage firewall ACL rules
-       <list>  to_sta|from_sta|to_ap|from_ap
-      <proto>  IP|TCP|UDP|ICMP
-   <src/dst>  IP/mask, 'any', or device name from DHCP reservations
-      <port>  port number, '*' for any (TCP/UDP only)
-     <action>  allow|deny|allow_monitor|deny_monitor
-  Other actions:
-    acl <list> del <index>       - Delete rule at index
-    acl <list> clear             - Clear all rules from list
-    acl <list> clear_stats       - Clear statistics for list
+web_ui   <enable|disable>
+  Enable or disable the web interface
+  web_ui              - Show current status
+  web_ui enable       - Enable web interface (after reboot)
+  web_ui disable      - Disable web interface (after reboot)
 
-set_led_gpio  [<gpio>|none]
-  Set GPIO for status LED blinking
-       <gpio>  GPIO pin number (0-48), or 'none' to disable
-               Without arguments, shows current setting
+set_web_password 
+  Set web interface password (empty string "" to disable)
 
-remote_console  <action> [<args>]
+set_led_gpio 
+  Set GPIO for status LED blinking (use 'none' to disable)
+
+remote_console   <action> [<args>]
   Manage remote console (network CLI access)
-      <action>  status|enable|disable|port|bind|timeout|kick
-        <port>  TCP port number (default: 2323)
-        <bind>  both|ap|sta - interface binding
-     <timeout>  idle timeout in seconds (0 = no timeout)
+  remote_console status               - Show status and connection info
+  
+  remote_console enable               - Enable remote console
+  remote_console disable              - Disable remote console
+
+  remote_console port <port>          - Set TCP port (default: 2323)
+  remote_console bind <both|ap|sta>   - Set interface binding
+  remote_console timeout <seconds>    - Set idle timeout (0=none)
+
+  remote_console kick                 - Disconnect current session
 
 ```
 

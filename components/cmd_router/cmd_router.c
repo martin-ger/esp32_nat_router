@@ -57,6 +57,7 @@ static void register_pcap(void);
 static void register_set_led_gpio(void);
 static void register_acl(void);
 static void register_remote_console_cmd(void);
+static void register_scan(void);
 
 /* ACL helper functions (forward declarations) */
 static char* acl_format_ip_with_name(uint32_t ip, uint32_t mask, char* buf, size_t buf_len);
@@ -179,20 +180,21 @@ esp_err_t get_config_param_blob(char* name, uint8_t** blob, size_t blob_len)
 
 void register_router(void)
 {
+    register_show();
     register_set_sta();
     register_set_sta_static();
     register_set_mac();
+    register_scan();
     register_set_ap();
     register_set_ap_ip();
-    register_portmap();
     register_dhcp_reserve();
-    register_show();
-    register_web_ui();
-    register_set_web_password();
+    register_portmap();
+    register_acl();
     register_bytes();
     register_pcap();
+    register_web_ui();
+    register_set_web_password();
     register_set_led_gpio();
-    register_acl();
     register_remote_console_cmd();
 }
 
@@ -1769,6 +1771,81 @@ static void register_remote_console_cmd(void)
                 "  remote_console kick                 - Disconnect current session",
         .hint = " <action> [<args>]",
         .func = &remote_console_cmd,
+    };
+    ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
+}
+
+/* Helper function to convert auth mode to string */
+static const char* auth_mode_to_str(wifi_auth_mode_t authmode)
+{
+    switch (authmode) {
+        case WIFI_AUTH_OPEN:            return "Open";
+        case WIFI_AUTH_WEP:             return "WEP";
+        case WIFI_AUTH_WPA_PSK:         return "WPA";
+        case WIFI_AUTH_WPA2_PSK:        return "WPA2";
+        case WIFI_AUTH_WPA_WPA2_PSK:    return "WPA/WPA2";
+        case WIFI_AUTH_WPA3_PSK:        return "WPA3";
+        case WIFI_AUTH_WPA2_WPA3_PSK:   return "WPA2/WPA3";
+        case WIFI_AUTH_WPA2_ENTERPRISE: return "WPA2-Ent";
+        default:                        return "Unknown";
+    }
+}
+
+/* 'scan' command implementation */
+static int scan_cmd(int argc, char **argv)
+{
+    wifi_scan_config_t scan_config = {
+        .ssid = NULL,
+        .bssid = NULL,
+        .channel = 0,
+        .show_hidden = true,
+        .scan_type = WIFI_SCAN_TYPE_ACTIVE,
+    };
+
+    printf("Scanning for WiFi networks...\n");
+    esp_err_t err = esp_wifi_scan_start(&scan_config, true);  /* Blocking scan */
+    if (err != ESP_OK) {
+        printf("Scan failed: %s\n", esp_err_to_name(err));
+        return 1;
+    }
+
+    uint16_t ap_count = 0;
+    esp_wifi_scan_get_ap_num(&ap_count);
+
+    if (ap_count == 0) {
+        printf("No networks found.\n");
+        return 0;
+    }
+
+    wifi_ap_record_t *ap_list = malloc(sizeof(wifi_ap_record_t) * ap_count);
+    if (ap_list == NULL) {
+        printf("Failed to allocate memory for scan results\n");
+        return 1;
+    }
+
+    esp_wifi_scan_get_ap_records(&ap_count, ap_list);
+
+    /* Print header */
+    printf("\nFound %d networks:\n", ap_count);
+    printf("%-32s  %4s  %-12s\n", "SSID", "RSSI", "Security");
+    printf("--------------------------------  ----  ------------\n");
+
+    for (int i = 0; i < ap_count; i++) {
+        const char *auth = auth_mode_to_str(ap_list[i].authmode);
+        printf("%-32s  %4d  %s\n", ap_list[i].ssid, ap_list[i].rssi, auth);
+    }
+
+    free(ap_list);
+    return 0;
+}
+
+static void register_scan(void)
+{
+    const esp_console_cmd_t cmd = {
+        .command = "scan",
+        .help = "Scan for available WiFi networks",
+        .hint = NULL,
+        .func = &scan_cmd,
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }

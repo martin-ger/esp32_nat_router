@@ -706,13 +706,29 @@ static esp_err_t config_get_handler(httpd_req_t *req)
                  "<a href='/?logout=1' style='padding: 0.4rem 1rem; background: rgba(255,82,82,0.15); color: #ff5252; border: 1px solid #ff5252; border-radius: 6px; text-decoration: none; font-size: 0.85rem; font-weight: 500;'>Logout</a>");
     }
 
+    /* Check for SSID pre-fill from scan page */
+    char prefill_ssid[64] = "";
+    buf_len = httpd_req_get_url_query_len(req) + 1;
+    if (buf_len > 1) {
+        buf = malloc(buf_len);
+        if (buf != NULL && httpd_req_get_url_query_str(req, buf, buf_len) == ESP_OK) {
+            if (httpd_query_key_value(buf, "ssid", prefill_ssid, sizeof(prefill_ssid)) == ESP_OK) {
+                preprocess_string(prefill_ssid);
+                ESP_LOGI(TAG, "Pre-filling SSID from scan: %s", prefill_ssid);
+            }
+        }
+        if (buf) free(buf);
+    }
+
     /* Build config page with escaped values */
     const char* config_page_template = ROUTER_CONFIG_PAGE;
 
     char* safe_ap_ssid = html_escape(ap_ssid);
     char* safe_ap_passwd = html_escape(ap_passwd);
-    char* safe_ssid = html_escape(ssid);
-    char* safe_passwd = html_escape(passwd);
+    /* Use prefill_ssid if provided, otherwise use configured ssid */
+    char* safe_ssid = html_escape(prefill_ssid[0] ? prefill_ssid : ssid);
+    /* Clear password field when pre-filling from scan */
+    char* safe_passwd = html_escape(prefill_ssid[0] ? "" : passwd);
     char* safe_ent_username = html_escape(ent_username);
     char* safe_ent_identity = html_escape(ent_identity);
 
@@ -1519,6 +1535,221 @@ static httpd_uri_t firewallp = {
     .handler   = firewall_get_handler,
 };
 
+/* Helper function to convert auth mode to string for web UI */
+static const char* web_auth_mode_to_str(wifi_auth_mode_t authmode)
+{
+    switch (authmode) {
+        case WIFI_AUTH_OPEN:            return "Open";
+        case WIFI_AUTH_WEP:             return "WEP";
+        case WIFI_AUTH_WPA_PSK:         return "WPA";
+        case WIFI_AUTH_WPA2_PSK:        return "WPA2";
+        case WIFI_AUTH_WPA_WPA2_PSK:    return "WPA/WPA2";
+        case WIFI_AUTH_WPA3_PSK:        return "WPA3";
+        case WIFI_AUTH_WPA2_WPA3_PSK:   return "WPA2/WPA3";
+        case WIFI_AUTH_WPA2_ENTERPRISE: return "WPA2-Ent";
+        default:                        return "Unknown";
+    }
+}
+
+/* URL encode a string for use in query parameters */
+static void url_encode(const char *src, char *dst, size_t dst_len)
+{
+    const char *hex = "0123456789ABCDEF";
+    size_t i = 0;
+
+    while (*src && i < dst_len - 1) {
+        if ((*src >= 'A' && *src <= 'Z') ||
+            (*src >= 'a' && *src <= 'z') ||
+            (*src >= '0' && *src <= '9') ||
+            *src == '-' || *src == '_' || *src == '.' || *src == '~') {
+            dst[i++] = *src;
+        } else if (i + 3 < dst_len) {
+            dst[i++] = '%';
+            dst[i++] = hex[(*src >> 4) & 0x0F];
+            dst[i++] = hex[*src & 0x0F];
+        } else {
+            break;
+        }
+        src++;
+    }
+    dst[i] = '\0';
+}
+
+/* WiFi Scan page GET handler - NOT password protected */
+static esp_err_t scan_get_handler(httpd_req_t *req)
+{
+    /* Check if user can connect (authenticated or no password set) */
+    char password[64];
+    bool password_protection_enabled = get_web_password(password, sizeof(password));
+    bool can_connect = !password_protection_enabled || is_authenticated(req);
+
+    uint16_t ap_count = 0;
+    wifi_ap_record_t *ap_list = NULL;
+    bool scan_in_progress = false;
+    int refresh_time = 15;  /* Default refresh interval */
+
+    /* Try to get existing scan results first */
+    esp_err_t err = esp_wifi_scan_get_ap_num(&ap_count);
+
+    if (err == ESP_OK && ap_count > 0) {
+        /* We have results from a previous scan */
+        if (ap_count > 20) ap_count = 20;
+        ap_list = malloc(sizeof(wifi_ap_record_t) * ap_count);
+        if (ap_list != NULL) {
+            esp_wifi_scan_get_ap_records(&ap_count, ap_list);
+        } else {
+            ap_count = 0;
+        }
+
+        /* Start a new scan in the background for the next refresh */
+        wifi_scan_config_t scan_config = {
+            .ssid = NULL,
+            .bssid = NULL,
+            .channel = 0,
+            .show_hidden = true,
+            .scan_type = WIFI_SCAN_TYPE_ACTIVE,
+        };
+        esp_wifi_scan_start(&scan_config, false);  /* Non-blocking */
+    } else {
+        /* No results available, start a scan */
+        wifi_scan_config_t scan_config = {
+            .ssid = NULL,
+            .bssid = NULL,
+            .channel = 0,
+            .show_hidden = true,
+            .scan_type = WIFI_SCAN_TYPE_ACTIVE,
+        };
+        err = esp_wifi_scan_start(&scan_config, false);  /* Non-blocking */
+
+        if (err == ESP_OK || err == ESP_ERR_WIFI_STATE) {
+            /* Scan started or already in progress */
+            scan_in_progress = true;
+            refresh_time = 2;  /* Quick refresh to get results */
+        }
+    }
+
+    /* Build the table header with optional Connect column */
+    char header_extra[64] = "";
+    if (can_connect) {
+        strcpy(header_extra, "<th>Action</th>");
+    }
+
+    /* Build scan results HTML */
+    char scan_html[4096] = "";
+    int html_offset = 0;
+
+    if (ap_count == 0) {
+        if (scan_in_progress) {
+            snprintf(scan_html, sizeof(scan_html),
+                "<tr><td colspan='%d' style='text-align:center; color:#00d9ff;'>"
+                "<span style='display:inline-block; animation: pulse 1s infinite;'>📡 Scanning...</span>"
+                "</td></tr>",
+                can_connect ? 4 : 3);
+        } else {
+            snprintf(scan_html, sizeof(scan_html),
+                "<tr><td colspan='%d' style='text-align:center; color:#888;'>No networks found</td></tr>",
+                can_connect ? 4 : 3);
+        }
+    } else {
+        for (int i = 0; i < ap_count && html_offset < (int)(sizeof(scan_html) - 512); i++) {
+            /* Determine signal strength and build visual bars */
+            const char *signal_class;
+            int rssi = ap_list[i].rssi;
+            int bars;  /* Number of active bars (1-4) */
+
+            if (rssi >= -50) {
+                signal_class = "signal-excellent";
+                bars = 4;
+            } else if (rssi >= -60) {
+                signal_class = "signal-good";
+                bars = 3;
+            } else if (rssi >= -70) {
+                signal_class = "signal-fair";
+                bars = 2;
+            } else if (rssi >= -80) {
+                signal_class = "signal-weak";
+                bars = 1;
+            } else {
+                signal_class = "signal-poor";
+                bars = 1;
+            }
+
+            /* HTML-escape SSID for display */
+            char *safe_ssid = html_escape((const char *)ap_list[i].ssid);
+            if (safe_ssid == NULL) {
+                safe_ssid = strdup("(unknown)");
+            }
+
+            /* Build connect button if allowed */
+            char connect_cell[256] = "";
+            if (can_connect) {
+                char encoded_ssid[128];
+                url_encode((const char *)ap_list[i].ssid, encoded_ssid, sizeof(encoded_ssid));
+                snprintf(connect_cell, sizeof(connect_cell),
+                    "<td><a href='/config?ssid=%s' class='connect-button'>Connect</a></td>",
+                    encoded_ssid);
+            }
+
+            /* Build signal bars HTML with active/inactive styling */
+            char signal_bars_html[128];
+            const char *bar_chars[] = {"▂", "▄", "▆", "█"};
+            int sb_offset = 0;
+            for (int b = 0; b < 4; b++) {
+                if (b < bars) {
+                    sb_offset += snprintf(signal_bars_html + sb_offset, sizeof(signal_bars_html) - sb_offset,
+                        "<span class='%s'>%s</span>", signal_class, bar_chars[b]);
+                } else {
+                    sb_offset += snprintf(signal_bars_html + sb_offset, sizeof(signal_bars_html) - sb_offset,
+                        "<span style='color:#444;'>%s</span>", bar_chars[b]);
+                }
+            }
+
+            html_offset += snprintf(scan_html + html_offset, sizeof(scan_html) - html_offset,
+                "<tr>"
+                "<td>%s</td>"
+                "<td>%s <span style='color:#888;font-size:0.8rem;'>%d dBm</span></td>"
+                "<td>%s</td>"
+                "%s"
+                "</tr>",
+                safe_ssid,
+                signal_bars_html, rssi,
+                web_auth_mode_to_str(ap_list[i].authmode),
+                connect_cell
+            );
+
+            free(safe_ssid);
+        }
+    }
+
+    if (ap_list != NULL) {
+        free(ap_list);
+    }
+
+    /* Build the page */
+    const char* scan_page_template = SCAN_PAGE;
+    int page_len = strlen(scan_page_template) + strlen(header_extra) + strlen(scan_html) + 128;
+    char* scan_page = malloc(page_len);
+
+    if (scan_page == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate memory for scan page");
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+        return ESP_ERR_NO_MEM;
+    }
+
+    snprintf(scan_page, page_len, scan_page_template, refresh_time, ap_count, header_extra, scan_html);
+
+    httpd_resp_send(req, scan_page, strlen(scan_page));
+    free(scan_page);
+
+    return ESP_OK;
+}
+
+static httpd_uri_t scanp = {
+    .uri       = "/scan",
+    .method    = HTTP_GET,
+    .handler   = scan_get_handler,
+};
+
 httpd_handle_t start_webserver(void)
 {
     httpd_handle_t server = NULL;
@@ -1536,6 +1767,7 @@ httpd_handle_t start_webserver(void)
         httpd_register_uri_handler(server, &configp);
         httpd_register_uri_handler(server, &mappingsp);
         httpd_register_uri_handler(server, &firewallp);
+        httpd_register_uri_handler(server, &scanp);
         httpd_register_uri_handler(server, &favicon_uri);
         return server;
     }
