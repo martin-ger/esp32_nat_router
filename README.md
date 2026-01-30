@@ -21,8 +21,6 @@ This is a firmware to use the ESP32 as WiFi NAT router. It can be used as:
 - **Static IP Support**: Configure static IP for the STA (upstream) interface
 - **LED Status Indicator**: Visual feedback for connection status and connected clients
 
-It can achieve a bandwidth of more than 15mbps.
-
 The code is originally based on the [Console Component](https://docs.espressif.com/projects/esp-idf/en/latest/api-guides/console.html#console) and the [esp-idf-nat-example](https://github.com/jonask1337/esp-idf-nat-example). 
 
 ## First Boot
@@ -46,6 +44,8 @@ The main dashboard displays:
 
 ### WiFi Scan Page (/scan)
 Shows a WiFi network scan and allows for direct connection via the config page.
+
+<img src="https://raw.githubusercontent.com/martin-ger/esp32_nat_router/master/UI_Scan.png">
 
 ### Configuration Page (/config)
 Configure all router settings:
@@ -614,14 +614,11 @@ set_led_gpio
 remote_console   <action> [<args>]
   Manage remote console (network CLI access)
   remote_console status               - Show status and connection info
-  
   remote_console enable               - Enable remote console
   remote_console disable              - Disable remote console
-
   remote_console port <port>          - Set TCP port (default: 2323)
   remote_console bind <both|ap|sta>   - Set interface binding
   remote_console timeout <seconds>    - Set idle timeout (0=none)
-
   remote_console kick                 - Disconnect current session
 
 ```
