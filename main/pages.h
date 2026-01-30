@@ -168,12 +168,16 @@ font-size: 0.8rem;\
 <div class='status-table'>\
 <table>\
 <tr>\
-<td>Uptime:</td>\
-<td>%s</td>\
+<td>SSID:</td>\
+<td><strong>%s</strong></td>\
 </tr>\
 <tr>\
 <td>Connection:</td>\
 <td><strong>%s</strong></td>\
+</tr>\
+<tr>\
+<td>Uptime:</td>\
+<td>%s</td>\
 </tr>\
 <tr>\
 <td>STA IP:</td>\
@@ -512,6 +516,58 @@ setTimeout(\"location.href = '/'\", 10000);\
 <small>Leave empty for DHCP</small>\
 </form>\
 \
+<h2>Remote Console</h2>\
+<form action='' method='GET'>\
+<table>\
+<tr>\
+<td>Service</td>\
+<td>\
+<label style='margin-right: 1rem;'><input type='radio' name='rc_enabled' value='1' %s> Enabled</label>\
+<label><input type='radio' name='rc_enabled' value='0' %s> Disabled</label>\
+<input type='submit' value='Apply' class='ok-button' style='margin-left: 0.5rem; width: auto; padding: 0.4rem 1rem;'/>\
+</td>\
+</tr>\
+<tr>\
+<td>Status</td>\
+<td><strong style='color: %s;'>%s</strong>%s</td>\
+</tr>\
+</table>\
+</form>\
+<form action='' method='GET'>\
+<table>\
+<tr>\
+<td>Port</td>\
+<td><input type='number' name='rc_port' value='%d' min='1' max='65535' style='width: 100px;'/>\
+<input type='submit' value='Set' class='ok-button' style='margin-left: 0.5rem; width: auto; padding: 0.4rem 1rem;'/></td>\
+</tr>\
+</table>\
+</form>\
+<form action='' method='GET'>\
+<table>\
+<tr>\
+<td>Bind Interface</td>\
+<td>\
+<select name='rc_bind'>\
+<option value='0' %s>Both (AP + STA)</option>\
+<option value='1' %s>AP Only</option>\
+<option value='2' %s>STA Only</option>\
+</select>\
+<input type='submit' value='Set' class='ok-button' style='margin-left: 0.5rem; width: auto; padding: 0.4rem 1rem;'/>\
+</td>\
+</tr>\
+</table>\
+</form>\
+<form action='' method='GET'>\
+<table>\
+<tr>\
+<td>Idle Timeout</td>\
+<td><input type='number' name='rc_timeout' value='%d' min='0' max='86400' style='width: 100px;'/> sec\
+<input type='submit' value='Set' class='ok-button' style='margin-left: 0.5rem; width: auto; padding: 0.4rem 1rem;'/></td>\
+</tr>\
+</table>\
+<small>0 = no timeout. Requires web password to be set.</small>\
+</form>\
+\
 <h2>PCAP Packet Capture</h2>\
 <form action='' method='GET'>\
 <table>\
@@ -562,12 +618,12 @@ setTimeout(\"location.href = '/'\", 10000);\
 \
 <div style='margin-top: 2rem; padding: 1rem; background: #fff3cd; border: 2px solid #ff9800; border-radius: 8px;'>\
 <h2 style='color: #ff6b00; margin-bottom: 0.5rem;'>⚠ Danger Zone</h2>\
-<p style='margin-bottom: 1rem; color: #666; font-size: 0.9rem;'>This will disable the web interface completely. You can only re-enable it via the serial console using the 'enable' command.</p>\
+<p style='margin-bottom: 1rem; color: #666; font-size: 0.9rem;'>This will disable the web interface completely. You can only re-enable it via the console using the 'web_ui enable' command.</p>\
 <form action='' method='GET'>\
 <table>\
 <tr>\
 <td style='color: #d32f2f; font-weight: bold;'>Disable Interface</td>\
-<td><input type='submit' name='disable_interface' value='Disable' class='red-button' onclick='return confirm(\"Are you sure? The web interface will be disabled and can only be enabled via serial console with the enable command.\");'/></td>\
+<td><input type='submit' name='disable_interface' value='Disable' class='red-button' onclick='return confirm(\"Are you sure? The web interface will be disabled and can only be re-enabled via the console.\");'/></td>\
 </tr>\
 </table>\
 </form>\
@@ -815,7 +871,17 @@ padding: 0.65rem;\
 .modal-box h3 { color: #f5576c; margin-bottom: 1rem; }\
 .modal-box p { color: #e0e0e0; margin-bottom: 1.5rem; }\
 .modal-box button { background: linear-gradient(135deg, #667eea 0%%, #764ba2 100%%); color: #fff; border: none; border-radius: 8px; padding: 0.75rem 2rem; font-size: 1rem; cursor: pointer; }\
+.green-button { background: linear-gradient(135deg, #4caf50 0%%, #2e7d32 100%%); color: #fff; border: none; border-radius: 6px; padding: 0.4rem 0.8rem; font-size: 0.8rem; font-weight: 600; cursor: pointer; transition: all 0.3s; box-shadow: 0 2px 8px rgba(76, 175, 80, 0.4); text-decoration: none; display: inline-block; }\
+.green-button:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(76, 175, 80, 0.6); }\
 </style>\
+<script>\
+function fillDhcpForm(mac, ip, name) {\
+document.getElementById('dhcp_mac').value = mac;\
+document.getElementById('dhcp_ip').value = ip;\
+document.getElementById('dhcp_name').value = name;\
+document.getElementById('dhcp_mac').scrollIntoView({behavior: 'smooth', block: 'center'});\
+}\
+</script>\
 <body>\
 %s\
 <div id='container'>\
@@ -835,6 +901,7 @@ padding: 0.65rem;\
 <th>MAC Address</th>\
 <th>IP Address</th>\
 <th>Device Name</th>\
+<th>Action</th>\
 </tr>\
 </thead>\
 <tbody>\
@@ -864,15 +931,15 @@ padding: 0.65rem;\
 <table>\
 <tr>\
 <td>MAC Address</td>\
-<td><input type='text' name='dhcp_mac' placeholder='AA:BB:CC:DD:EE:FF'/></td>\
+<td><input type='text' name='dhcp_mac' id='dhcp_mac' placeholder='AA:BB:CC:DD:EE:FF'/></td>\
 </tr>\
 <tr>\
 <td>IP Address</td>\
-<td><input type='text' name='dhcp_ip' placeholder='192.168.4.100'/></td>\
+<td><input type='text' name='dhcp_ip' id='dhcp_ip' placeholder='192.168.4.100'/></td>\
 </tr>\
 <tr>\
 <td>Name (optional)</td>\
-<td><input type='text' name='dhcp_name' placeholder='My Device'/></td>\
+<td><input type='text' name='dhcp_name' id='dhcp_name' placeholder='My Device'/></td>\
 </tr>\
 <tr>\
 <td></td>\

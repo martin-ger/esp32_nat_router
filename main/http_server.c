@@ -27,6 +27,7 @@
 #include "router_globals.h"
 #include "pcap_capture.h"
 #include "acl.h"
+#include "remote_console.h"
 
 static const char *TAG = "HTTPServer";
 
@@ -450,17 +451,23 @@ static esp_err_t index_get_handler(httpd_req_t *req)
 
     /* Build the page */
     const char* index_page_template = INDEX_PAGE;
-    int page_len = strlen(index_page_template) + strlen(header_ui) + strlen(auth_ui) + strlen(pcap_status_str) + strlen(uptime_str) + 512;
+    char* safe_ap_ssid = html_escape(ap_ssid);
+    if (safe_ap_ssid == NULL) {
+        safe_ap_ssid = strdup("(unknown)");
+    }
+    int page_len = strlen(index_page_template) + strlen(header_ui) + strlen(safe_ap_ssid) + strlen(auth_ui) + strlen(pcap_status_str) + strlen(uptime_str) + 512;
     char* index_page = malloc(page_len);
 
     if (index_page == NULL) {
         ESP_LOGE(TAG, "Failed to allocate memory for index page");
+        free(safe_ap_ssid);
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
         return ESP_ERR_NO_MEM;
     }
 
     snprintf(index_page, page_len, index_page_template,
-        header_ui, uptime_str, conn_status, sta_ip_str, ap_ip_str, dhcp_pool_str, connect_count, sent_mb, received_mb, pcap_status_str, auth_ui);
+        header_ui, safe_ap_ssid, conn_status, uptime_str, sta_ip_str, ap_ip_str, dhcp_pool_str, connect_count, sent_mb, received_mb, pcap_status_str, auth_ui);
+    free(safe_ap_ssid);
 
     httpd_resp_send(req, index_page, strlen(index_page));
     free(index_page);
@@ -503,7 +510,8 @@ static esp_err_t config_get_handler(httpd_req_t *req)
         }
         if (httpd_req_get_url_query_str(req, buf, buf_len) == ESP_OK) {
             ESP_LOGI(TAG, "Found URL query => %s", buf);
-            if (strcmp(buf, "reset=Reboot") == 0) {
+            char reset_param[16];
+            if (httpd_query_key_value(buf, "reset", reset_param, sizeof(reset_param)) == ESP_OK) {
                 esp_timer_start_once(restart_timer, 500000);
             }
 
@@ -660,6 +668,79 @@ static esp_err_t config_get_handler(httpd_req_t *req)
                 }
             }
 
+            /* Handle Remote Console enable/disable */
+            if (httpd_query_key_value(buf, "rc_enabled", param1, sizeof(param1)) == ESP_OK) {
+                preprocess_string(param1);
+                if (strcmp(param1, "1") == 0) {
+                    remote_console_enable();
+                    ESP_LOGI(TAG, "Remote console enabled via web");
+                } else {
+                    remote_console_disable();
+                    ESP_LOGI(TAG, "Remote console disabled via web");
+                }
+                free(buf);
+                httpd_resp_set_status(req, "303 See Other");
+                httpd_resp_set_hdr(req, "Location", "/config");
+                httpd_resp_send(req, NULL, 0);
+                return ESP_OK;
+            }
+
+            /* Handle Remote Console port */
+            if (httpd_query_key_value(buf, "rc_port", param1, sizeof(param1)) == ESP_OK) {
+                preprocess_string(param1);
+                int port = atoi(param1);
+                if (port >= 1 && port <= 65535) {
+                    remote_console_set_port((uint16_t)port);
+                    ESP_LOGI(TAG, "Remote console port set to %d via web", port);
+                }
+                free(buf);
+                httpd_resp_set_status(req, "303 See Other");
+                httpd_resp_set_hdr(req, "Location", "/config");
+                httpd_resp_send(req, NULL, 0);
+                return ESP_OK;
+            }
+
+            /* Handle Remote Console bind */
+            if (httpd_query_key_value(buf, "rc_bind", param1, sizeof(param1)) == ESP_OK) {
+                preprocess_string(param1);
+                int bind = atoi(param1);
+                if (bind >= 0 && bind <= 2) {
+                    remote_console_set_bind((remote_console_bind_t)bind);
+                    ESP_LOGI(TAG, "Remote console bind set to %d via web", bind);
+                }
+                free(buf);
+                httpd_resp_set_status(req, "303 See Other");
+                httpd_resp_set_hdr(req, "Location", "/config");
+                httpd_resp_send(req, NULL, 0);
+                return ESP_OK;
+            }
+
+            /* Handle Remote Console timeout */
+            if (httpd_query_key_value(buf, "rc_timeout", param1, sizeof(param1)) == ESP_OK) {
+                preprocess_string(param1);
+                int timeout = atoi(param1);
+                if (timeout >= 0) {
+                    remote_console_set_timeout((uint32_t)timeout);
+                    ESP_LOGI(TAG, "Remote console timeout set to %d via web", timeout);
+                }
+                free(buf);
+                httpd_resp_set_status(req, "303 See Other");
+                httpd_resp_set_hdr(req, "Location", "/config");
+                httpd_resp_send(req, NULL, 0);
+                return ESP_OK;
+            }
+
+            /* Handle Remote Console kick */
+            if (httpd_query_key_value(buf, "rc_kick", param1, sizeof(param1)) == ESP_OK) {
+                remote_console_kick();
+                ESP_LOGI(TAG, "Remote console session kicked via web");
+                free(buf);
+                httpd_resp_set_status(req, "303 See Other");
+                httpd_resp_set_hdr(req, "Location", "/config");
+                httpd_resp_send(req, NULL, 0);
+                return ESP_OK;
+            }
+
             /* Handle PCAP mode selection */
             if (httpd_query_key_value(buf, "pcap_mode", param1, sizeof(param1)) == ESP_OK) {
                 preprocess_string(param1);
@@ -772,6 +853,48 @@ static esp_err_t config_get_handler(httpd_req_t *req)
         return ESP_ERR_NO_MEM;
     }
 
+    // Remote Console state for template
+    remote_console_config_t rc_config;
+    remote_console_status_t rc_status;
+    remote_console_get_config(&rc_config);
+    remote_console_get_status(&rc_status);
+
+    const char* rc_enabled_checked = rc_config.enabled ? "checked" : "";
+    const char* rc_disabled_checked = rc_config.enabled ? "" : "checked";
+
+    const char* rc_status_color;
+    const char* rc_status_text;
+    char rc_kick_section[256] = "";
+
+    switch (rc_status.state) {
+        case RC_STATE_DISABLED:
+            rc_status_color = "#888";
+            rc_status_text = "Disabled";
+            break;
+        case RC_STATE_LISTENING:
+            rc_status_color = "#4caf50";
+            rc_status_text = "Listening";
+            break;
+        case RC_STATE_AUTH_WAIT:
+            rc_status_color = "#ffc107";
+            rc_status_text = "Authenticating...";
+            break;
+        case RC_STATE_ACTIVE:
+            rc_status_color = "#00d9ff";
+            rc_status_text = rc_status.client_ip;
+            snprintf(rc_kick_section, sizeof(rc_kick_section),
+                " <a href='/config?rc_kick=1' style='margin-left: 0.5rem; padding: 0.2rem 0.6rem; background: #f44336; color: #fff; border-radius: 4px; text-decoration: none; font-size: 0.8rem;'>Kick</a>");
+            break;
+        default:
+            rc_status_color = "#888";
+            rc_status_text = "Unknown";
+            break;
+    }
+
+    const char* rc_bind_both_sel = (rc_config.bind == RC_BIND_BOTH) ? "selected" : "";
+    const char* rc_bind_ap_sel = (rc_config.bind == RC_BIND_AP_ONLY) ? "selected" : "";
+    const char* rc_bind_sta_sel = (rc_config.bind == RC_BIND_STA_ONLY) ? "selected" : "";
+
     // PCAP state for template
     pcap_capture_mode_t pcap_mode = pcap_get_mode();
     const char* pcap_mode_off_sel = (pcap_mode == PCAP_MODE_OFF) ? "selected" : "";
@@ -798,7 +921,8 @@ static esp_err_t config_get_handler(httpd_req_t *req)
         strlen(static_ip) +
         strlen(subnet_mask) +
         strlen(gateway_addr) +
-        512;
+        strlen(rc_kick_section) +
+        768;
     char* config_page = malloc(sizeof(char) * page_len);
     if (config_page == NULL) {
         ESP_LOGE(TAG, "Failed to allocate memory for config page");
@@ -819,6 +943,11 @@ static esp_err_t config_get_handler(httpd_req_t *req)
         safe_ap_ssid, safe_ap_passwd, ap_ip_str, ap_mac_str,
         safe_ssid, safe_passwd, safe_ent_username, safe_ent_identity, sta_mac_str,
         static_ip, subnet_mask, gateway_addr,
+        rc_enabled_checked, rc_disabled_checked,
+        rc_status_color, rc_status_text, rc_kick_section,
+        rc_config.port,
+        rc_bind_both_sel, rc_bind_ap_sel, rc_bind_sta_sel,
+        rc_config.idle_timeout_sec,
         pcap_mode_off_sel, pcap_mode_acl_sel, pcap_mode_promisc_sel,
         pcap_client_color, pcap_client_text,
         (unsigned long)pcap_captured, (unsigned long)pcap_dropped,
@@ -1049,7 +1178,7 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
     }
 
     /* Build connected clients table HTML */
-    char clients_html[2048] = "";
+    char clients_html[3072] = "";
     int clients_offset = 0;
     #define MAX_DISPLAYED_CLIENTS 8  // ESP32 AP supports max 8 stations
     connected_client_t clients[MAX_DISPLAYED_CLIENTS];
@@ -1064,22 +1193,42 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
                 snprintf(ip_str, sizeof(ip_str), IPSTR, IP2STR(&addr));
             }
 
-            clients_offset += snprintf(clients_html + clients_offset, sizeof(clients_html) - clients_offset,
-                "<tr>"
-                "<td>%02X:%02X:%02X:%02X:%02X:%02X</td>"
-                "<td>%s</td>"
-                "<td>%s</td>"
-                "</tr>",
+            char mac_str[18];
+            snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
                 clients[i].mac[0], clients[i].mac[1],
                 clients[i].mac[2], clients[i].mac[3],
-                clients[i].mac[4], clients[i].mac[5],
+                clients[i].mac[4], clients[i].mac[5]);
+
+            /* Escape single quotes in name for JavaScript */
+            char js_name[DHCP_RESERVATION_NAME_LEN * 2];
+            const char *src_name = clients[i].name[0] ? clients[i].name : "";
+            int j = 0;
+            for (int k = 0; src_name[k] && j < (int)sizeof(js_name) - 2; k++) {
+                if (src_name[k] == '\'') {
+                    js_name[j++] = '\\';
+                }
+                js_name[j++] = src_name[k];
+            }
+            js_name[j] = '\0';
+
+            clients_offset += snprintf(clients_html + clients_offset, sizeof(clients_html) - clients_offset,
+                "<tr>"
+                "<td>%s</td>"
+                "<td>%s</td>"
+                "<td>%s</td>"
+                "<td><button type='button' class='green-button' onclick=\"fillDhcpForm('%s','%s','%s')\">Reserve</button></td>"
+                "</tr>",
+                mac_str,
                 ip_str,
-                clients[i].name[0] ? clients[i].name : "-"
+                clients[i].name[0] ? clients[i].name : "-",
+                mac_str,
+                clients[i].has_ip ? ip_str : "",
+                js_name
             );
         }
     } else {
         snprintf(clients_html, sizeof(clients_html),
-            "<tr><td colspan='3' style='text-align:center; color:#888;'>No clients connected</td></tr>");
+            "<tr><td colspan='4' style='text-align:center; color:#888;'>No clients connected</td></tr>");
     }
 
     /* Build DHCP reservations table HTML */
