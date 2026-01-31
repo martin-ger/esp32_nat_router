@@ -51,10 +51,15 @@
 #include "pcap_capture.h"
 #include "acl.h"
 #include "remote_console.h"
+#include "lwip/prot/ip4.h"
+#include "lwip/inet_chksum.h"
 
 // Byte counting variables
 uint64_t sta_bytes_sent = 0;
 uint64_t sta_bytes_received = 0;
+
+// TTL override for STA upstream (0 = disabled/no change)
+uint8_t sta_ttl_override = 0;
 
 // Original netif input and linkoutput function pointers
 static netif_input_fn original_netif_input = NULL;
@@ -663,10 +668,14 @@ static err_t netif_input_hook(struct pbuf *p, struct netif *netif) {
         uint8_t result = acl_check_packet(ACL_TO_STA, p);
 
         // Check if packet has monitor flag
-        is_acl_monitored = (result & ACL_MONITOR) != 0;
+        is_acl_monitored = (result != ACL_NO_MATCH) && (result & ACL_MONITOR) != 0;
 
         // Handle deny action (logging done in acl_check_packet)
         if ((result & 0x01) == ACL_DENY && result != ACL_NO_MATCH) {
+            // Capture denied packet if monitoring is enabled before dropping
+            if (is_acl_monitored && pcap_should_capture(true, false)) {
+                pcap_capture_packet(p);
+            }
             pbuf_free(p);
             return ERR_OK;
         }
@@ -700,11 +709,45 @@ static err_t netif_linkoutput_hook(struct netif *netif, struct pbuf *p) {
         uint8_t result = acl_check_packet(ACL_FROM_STA, p);
 
         // Check if packet has monitor flag
-        is_acl_monitored = (result & ACL_MONITOR) != 0;
+        is_acl_monitored = (result != ACL_NO_MATCH) && (result & ACL_MONITOR) != 0;
 
         // Handle deny action (logging done in acl_check_packet)
         if ((result & 0x01) == ACL_DENY && result != ACL_NO_MATCH) {
+            // Capture denied packet if monitoring is enabled before dropping
+            if (is_acl_monitored && pcap_should_capture(true, false)) {
+                pcap_capture_packet(p);
+            }
             return ERR_OK;
+        }
+    }
+
+    // TTL override for upstream packets (must be before PCAP capture)
+    // Ethernet header: 14 bytes (6 dst + 6 src + 2 ethertype)
+    // Use p->len (first segment) to ensure header is accessible in this pbuf
+    if (sta_ttl_override > 0 && p != NULL && p->len >= 14 + sizeof(struct ip_hdr)) {
+        uint8_t *payload = (uint8_t *)p->payload;
+        // Check ethertype for IPv4 (0x0800)
+        if (payload[12] == 0x08 && payload[13] == 0x00) {
+            struct ip_hdr *iphdr = (struct ip_hdr *)(payload + 14);
+            // Verify it's IPv4
+            if (IPH_V(iphdr) == 4) {
+                // Read 16-bit word containing TTL and protocol
+                uint16_t old_ttl_proto = *(uint16_t *)&iphdr->_ttl;
+                iphdr->_ttl = sta_ttl_override;
+                uint16_t new_ttl_proto = *(uint16_t *)&iphdr->_ttl;
+
+                // RFC 1624: Incremental checksum update
+                // HC' = ~(~HC + ~m + m')
+                // where HC = old checksum, m = old value, m' = new value
+                uint32_t sum = (uint16_t)~iphdr->_chksum;
+                sum += (uint16_t)~old_ttl_proto;
+                sum += new_ttl_proto;
+                // Fold 32-bit sum to 16 bits
+                while (sum >> 16) {
+                    sum = (sum & 0xFFFF) + (sum >> 16);
+                }
+                iphdr->_chksum = (uint16_t)~sum;
+            }
         }
     }
 
@@ -793,10 +836,14 @@ static err_t ap_netif_input_hook(struct pbuf *p, struct netif *netif) {
         uint8_t result = acl_check_packet(ACL_TO_AP, p);
 
         // Check if packet has monitor flag
-        is_acl_monitored = (result & ACL_MONITOR) != 0;
+        is_acl_monitored = (result != ACL_NO_MATCH) && (result & ACL_MONITOR) != 0;
 
         // Handle deny action (logging done in acl_check_packet)
         if ((result & 0x01) == ACL_DENY && result != ACL_NO_MATCH) {
+            // Capture denied packet if monitoring is enabled before dropping
+            if (is_acl_monitored && pcap_should_capture(true, true)) {
+                pcap_capture_packet(p);
+            }
             pbuf_free(p);
             return ERR_OK;
         }
@@ -823,10 +870,14 @@ static err_t ap_netif_linkoutput_hook(struct netif *netif, struct pbuf *p) {
         uint8_t result = acl_check_packet(ACL_FROM_AP, p);
 
         // Check if packet has monitor flag
-        is_acl_monitored = (result & ACL_MONITOR) != 0;
+        is_acl_monitored = (result != ACL_NO_MATCH) && (result & ACL_MONITOR) != 0;
 
         // Handle deny action (logging done in acl_check_packet)
         if ((result & 0x01) == ACL_DENY && result != ACL_NO_MATCH) {
+            // Capture denied packet if monitoring is enabled before dropping
+            if (is_acl_monitored && pcap_should_capture(true, true)) {
+                pcap_capture_packet(p);
+            }
             return ERR_OK;
         }
     }
@@ -1288,6 +1339,17 @@ void app_main(void)
         led_gpio = led_gpio_setting;
     }
     // led_gpio remains -1 (disabled) if not set in NVS
+
+    // Load TTL override setting from NVS (default 0 = disabled)
+    int ttl_setting = 0;
+    if (get_config_param_int("sta_ttl", &ttl_setting) == ESP_OK) {
+        if (ttl_setting >= 0 && ttl_setting <= 255) {
+            sta_ttl_override = (uint8_t)ttl_setting;
+        }
+    }
+    if (sta_ttl_override > 0) {
+        ESP_LOGI(TAG, "TTL override enabled: %d", sta_ttl_override);
+    }
 
     // Setup WIFI
     wifi_init(mac, ssid, ent_username, ent_identity, passwd, static_ip, subnet_mask, gateway_addr, ap_mac, ap_ssid, ap_passwd, ap_ip);

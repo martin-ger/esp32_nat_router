@@ -74,6 +74,9 @@ extern uint64_t sta_bytes_received;
 // LED GPIO configuration (-1 means disabled/none)
 extern int led_gpio;
 
+// TTL override for STA upstream (0 = disabled/no change, 1-255 = fixed TTL)
+extern uint8_t sta_ttl_override;
+
 void preprocess_string(char* str);
 int set_sta(int argc, char **argv);
 int set_sta_static(int argc, char **argv);

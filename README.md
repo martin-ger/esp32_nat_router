@@ -20,6 +20,7 @@ This is a firmware to use the ESP32 as WiFi NAT router. It can be used as:
 - **Connected Clients Display**: View all connected devices with MAC, IP, and device names
 - **Static IP Support**: Configure static IP for the STA (upstream) interface
 - **LED Status Indicator**: Visual feedback for connection status and connected clients
+- **TTL Override**: Set a fixed TTL for upstream packets (useful for hiding NAT from ISPs)
 
 The code is originally based on the [Console Component](https://docs.espressif.com/projects/esp-idf/en/latest/api-guides/console.html#console) and the [esp-idf-nat-example](https://github.com/jonask1337/esp-idf-nat-example). 
 
@@ -397,6 +398,24 @@ Changes take effect after restart.
 
 **Note**: Some boards have active-low LEDs. ESP32-S3 often uses GPIO 48 for an addressable RGB LED (WS2812) which may require different handling.
 
+## TTL Override
+
+The router can override the TTL (Time To Live) value in the IP header for all packets sent upstream via the STA interface. This can be useful to:
+- Hide the presence of a NAT router from ISPs that detect multiple devices via TTL variations
+- Ensure consistent TTL values for all outgoing traffic
+
+### Configuration
+
+```
+set_ttl 64          # Set TTL to 64 for all upstream packets
+set_ttl 0           # Disable TTL override (default, no change)
+set_ttl             # Show current setting
+```
+
+The setting is stored in NVS and takes effect immediately (no restart required).
+
+**Note**: TTL override only affects packets going to the upstream network (via STA interface). It does not affect traffic between the ESP32 and its connected clients.
+
 ## Remote Console
 
 The router provides a network-accessible CLI via TCP, allowing remote configuration without physical serial access.
@@ -513,6 +532,11 @@ light_sleep  [-t <t>] [--io=<n>]... [--io_level=<0|1>]...
       --io=<n>  If specified, wakeup using GPIO with given number
   --io_level=<0|1>  GPIO level to trigger wakeup
 
+log_level  [<level>] [-t <tag>]
+  Get/set logging level. Without arguments shows usage. Use -t to set level for a specific tag.
+       <level>  Log level: none/error/warn/info/debug/verbose (or 0-5)
+  -t, --tag=<tag>  Set level for specific tag only
+
 tasks 
   Get information about running tasks
 
@@ -608,8 +632,11 @@ web_ui   <enable|disable>
 set_web_password 
   Set web interface password (empty string "" to disable)
 
-set_led_gpio 
+set_led_gpio
   Set GPIO for status LED blinking (use 'none' to disable)
+
+set_ttl
+  Set TTL override for upstream STA packets (0 = disabled)
 
 remote_console   <action> [<args>]
   Manage remote console (network CLI access)

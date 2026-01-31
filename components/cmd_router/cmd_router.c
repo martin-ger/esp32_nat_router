@@ -55,6 +55,7 @@ static void register_web_ui(void);
 static void register_bytes(void);
 static void register_pcap(void);
 static void register_set_led_gpio(void);
+static void register_set_ttl(void);
 static void register_acl(void);
 static void register_remote_console_cmd(void);
 static void register_scan(void);
@@ -195,6 +196,7 @@ void register_router(void)
     register_web_ui();
     register_set_web_password();
     register_set_led_gpio();
+    register_set_ttl();
     register_remote_console_cmd();
 }
 
@@ -1311,6 +1313,69 @@ static void register_set_led_gpio(void)
         .help = "Set GPIO for status LED blinking (use 'none' to disable)",
         .hint = NULL,
         .func = &set_led_gpio_cmd,
+    };
+    ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
+}
+
+/* 'set_ttl' command - set TTL override for upstream packets */
+static int set_ttl_cmd(int argc, char **argv)
+{
+    if (argc < 2) {
+        printf("Usage: set_ttl <value>\n");
+        printf("  value: 0-255 (0 = disabled, no TTL change)\n");
+        printf("\nCurrent setting: %d", sta_ttl_override);
+        if (sta_ttl_override == 0) {
+            printf(" (disabled)\n");
+        } else {
+            printf("\n");
+        }
+        return 0;
+    }
+
+    esp_err_t err;
+    nvs_handle_t nvs;
+
+    // Parse argument
+    char *endptr;
+    long ttl_val = strtol(argv[1], &endptr, 10);
+    if (*endptr != '\0' || ttl_val < 0 || ttl_val > 255) {
+        printf("Invalid TTL value. Use 0-255 (0 = disabled).\n");
+        return 1;
+    }
+
+    err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err != ESP_OK) {
+        printf("Failed to open NVS\n");
+        return err;
+    }
+
+    err = nvs_set_i32(nvs, "sta_ttl", (int32_t)ttl_val);
+    if (err == ESP_OK) {
+        err = nvs_commit(nvs);
+        if (err == ESP_OK) {
+            sta_ttl_override = (uint8_t)ttl_val;
+            if (ttl_val == 0) {
+                ESP_LOGI(TAG, "TTL override disabled.");
+                printf("TTL override disabled (no change to packets).\n");
+            } else {
+                ESP_LOGI(TAG, "TTL override set to %ld.", ttl_val);
+                printf("TTL override set to %ld for upstream packets.\n", ttl_val);
+            }
+        }
+    } else {
+        printf("Failed to save setting\n");
+    }
+    nvs_close(nvs);
+    return err;
+}
+
+static void register_set_ttl(void)
+{
+    const esp_console_cmd_t cmd = {
+        .command = "set_ttl",
+        .help = "Set TTL override for upstream STA packets (0 = disabled)",
+        .hint = NULL,
+        .func = &set_ttl_cmd,
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }
