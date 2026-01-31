@@ -493,6 +493,17 @@ const char* lookup_device_name_by_ip(uint32_t ip) {
     return NULL;
 }
 
+const char* lookup_device_name_by_mac(const uint8_t *mac) {
+    for (int i = 0; i < MAX_DHCP_RESERVATIONS; i++) {
+        if (dhcp_reservations[i].valid &&
+            memcmp(dhcp_reservations[i].mac, mac, 6) == 0 &&
+            dhcp_reservations[i].name[0] != '\0') {
+            return dhcp_reservations[i].name;
+        }
+    }
+    return NULL;
+}
+
 bool resolve_device_name_to_ip(const char *name, uint32_t *ip) {
     if (name == NULL || ip == NULL) {
         return false;
@@ -643,24 +654,6 @@ int get_connected_clients(connected_client_t *clients, int max_clients) {
     return count;
 }
 
-// Helper to log denied packet info
-static void log_acl_deny(const char *acl_name, struct pbuf *p) {
-    if (p == NULL || p->payload == NULL || p->len < 14) {
-        ESP_LOGW("ACL", "%s DENY: len=%d", acl_name, p ? p->len : 0);
-        return;
-    }
-    uint8_t *data = (uint8_t *)p->payload;
-    uint16_t ethertype = (data[12] << 8) | data[13];
-    if (ethertype == 0x0800 && p->len >= 34) {
-        ESP_LOGW("ACL", "%s DENY: %d.%d.%d.%d -> %d.%d.%d.%d proto=%d",
-                 acl_name,
-                 data[26], data[27], data[28], data[29],
-                 data[30], data[31], data[32], data[33], data[23]);
-    } else {
-        ESP_LOGW("ACL", "%s DENY: ethertype=0x%04x len=%d", acl_name, ethertype, p->len);
-    }
-}
-
 // Hook function to count received bytes via netif input and ACL check
 static err_t netif_input_hook(struct pbuf *p, struct netif *netif) {
     bool is_acl_monitored = false;
@@ -672,9 +665,8 @@ static err_t netif_input_hook(struct pbuf *p, struct netif *netif) {
         // Check if packet has monitor flag
         is_acl_monitored = (result & ACL_MONITOR) != 0;
 
-        // Handle deny action
+        // Handle deny action (logging done in acl_check_packet)
         if ((result & 0x01) == ACL_DENY && result != ACL_NO_MATCH) {
-            log_acl_deny("to_sta", p);
             pbuf_free(p);
             return ERR_OK;
         }
@@ -710,9 +702,8 @@ static err_t netif_linkoutput_hook(struct netif *netif, struct pbuf *p) {
         // Check if packet has monitor flag
         is_acl_monitored = (result & ACL_MONITOR) != 0;
 
-        // Handle deny action
+        // Handle deny action (logging done in acl_check_packet)
         if ((result & 0x01) == ACL_DENY && result != ACL_NO_MATCH) {
-            log_acl_deny("from_sta", p);
             return ERR_OK;
         }
     }
@@ -804,9 +795,8 @@ static err_t ap_netif_input_hook(struct pbuf *p, struct netif *netif) {
         // Check if packet has monitor flag
         is_acl_monitored = (result & ACL_MONITOR) != 0;
 
-        // Handle deny action
+        // Handle deny action (logging done in acl_check_packet)
         if ((result & 0x01) == ACL_DENY && result != ACL_NO_MATCH) {
-            log_acl_deny("to_ap", p);
             pbuf_free(p);
             return ERR_OK;
         }
@@ -835,9 +825,8 @@ static err_t ap_netif_linkoutput_hook(struct netif *netif, struct pbuf *p) {
         // Check if packet has monitor flag
         is_acl_monitored = (result & ACL_MONITOR) != 0;
 
-        // Handle deny action
+        // Handle deny action (logging done in acl_check_packet)
         if ((result & 0x01) == ACL_DENY && result != ACL_NO_MATCH) {
-            log_acl_deny("from_ap", p);
             return ERR_OK;
         }
     }
@@ -1040,13 +1029,41 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
     }
     else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_AP_STACONNECTED)
     {
+        wifi_event_ap_staconnected_t* event = (wifi_event_ap_staconnected_t*) event_data;
         connect_count++;
-        ESP_LOGI(TAG,"%d. station connected", connect_count);
+
+        /* Look up device name from DHCP reservations */
+        const char* name = lookup_device_name_by_mac(event->mac);
+        if (name) {
+            ESP_LOGI(TAG, "Client connected: %02X:%02X:%02X:%02X:%02X:%02X (%s) - %d total",
+                     event->mac[0], event->mac[1], event->mac[2],
+                     event->mac[3], event->mac[4], event->mac[5],
+                     name, connect_count);
+        } else {
+            ESP_LOGI(TAG, "Client connected: %02X:%02X:%02X:%02X:%02X:%02X - %d total",
+                     event->mac[0], event->mac[1], event->mac[2],
+                     event->mac[3], event->mac[4], event->mac[5],
+                     connect_count);
+        }
     }
     else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_AP_STADISCONNECTED)
     {
+        wifi_event_ap_stadisconnected_t* event = (wifi_event_ap_stadisconnected_t*) event_data;
         connect_count--;
-        ESP_LOGI(TAG,"station disconnected - %d remain", connect_count);
+
+        /* Look up device name from DHCP reservations */
+        const char* name = lookup_device_name_by_mac(event->mac);
+        if (name) {
+            ESP_LOGI(TAG, "Client disconnected: %02X:%02X:%02X:%02X:%02X:%02X (%s) - %d remain",
+                     event->mac[0], event->mac[1], event->mac[2],
+                     event->mac[3], event->mac[4], event->mac[5],
+                     name, connect_count);
+        } else {
+            ESP_LOGI(TAG, "Client disconnected: %02X:%02X:%02X:%02X:%02X:%02X - %d remain",
+                     event->mac[0], event->mac[1], event->mac[2],
+                     event->mac[3], event->mac[4], event->mac[5],
+                     connect_count);
+        }
     }
 }
 
@@ -1209,6 +1226,7 @@ char* param_set_default(const char* def_val) {
 void app_main(void)
 {
     initialize_nvs();
+    load_log_level();  // Apply saved log level early
 
 #if CONFIG_STORE_HISTORY
     initialize_filesystem();

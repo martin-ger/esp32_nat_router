@@ -106,6 +106,13 @@ uint32_t lookup_dhcp_reservation(const uint8_t *mac);
 const char* lookup_device_name_by_ip(uint32_t ip);
 
 /**
+ * @brief Look up device name by MAC address from DHCP reservations
+ * @param mac MAC address to look up (6 bytes)
+ * @return Device name if found, NULL if no reservation with that MAC
+ */
+const char* lookup_device_name_by_mac(const uint8_t *mac);
+
+/**
  * @brief Resolve a device name to an IP address from DHCP reservations
  * @param name Device name to look up (case-insensitive)
  * @param ip Output IP address (network byte order)

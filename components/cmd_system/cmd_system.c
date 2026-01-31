@@ -33,6 +33,22 @@
 
 static const char *TAG = "cmd_system";
 
+void load_log_level(void)
+{
+    nvs_handle_t nvs;
+    esp_err_t err = nvs_open(PARAM_NAMESPACE, NVS_READONLY, &nvs);
+    if (err == ESP_OK) {
+        uint8_t level = ESP_LOG_INFO;  // Default
+        if (nvs_get_u8(nvs, "log_level", &level) == ESP_OK) {
+            if (level <= ESP_LOG_VERBOSE) {
+                esp_log_level_set("*", (esp_log_level_t)level);
+                ESP_LOGI(TAG, "Log level loaded from NVS: %d", level);
+            }
+        }
+        nvs_close(nvs);
+    }
+}
+
 static void register_free(void);
 static void register_heap(void);
 static void register_version(void);
@@ -40,6 +56,7 @@ static void register_restart(void);
 static void register_factory_reset(void);
 static void register_deep_sleep(void);
 static void register_light_sleep(void);
+static void register_log_level(void);
 #if WITH_TASKS_INFO
 static void register_tasks(void);
 #endif
@@ -53,6 +70,7 @@ void register_system(void)
     register_factory_reset();
     register_deep_sleep();
     register_light_sleep();
+    register_log_level();
 #if WITH_TASKS_INFO
     register_tasks();
 #endif
@@ -379,6 +397,120 @@ static void register_light_sleep(void)
         .hint = NULL,
         .func = &light_sleep,
         .argtable = &light_sleep_args
+    };
+    ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
+}
+
+/** 'log_level' command sets the logging level */
+
+static struct {
+    struct arg_str *level;
+    struct arg_str *tag;
+    struct arg_end *end;
+} log_level_args;
+
+static esp_log_level_t parse_log_level(const char *level_str)
+{
+    if (strcasecmp(level_str, "none") == 0 || strcmp(level_str, "0") == 0) {
+        return ESP_LOG_NONE;
+    } else if (strcasecmp(level_str, "error") == 0 || strcmp(level_str, "1") == 0) {
+        return ESP_LOG_ERROR;
+    } else if (strcasecmp(level_str, "warn") == 0 || strcmp(level_str, "2") == 0) {
+        return ESP_LOG_WARN;
+    } else if (strcasecmp(level_str, "info") == 0 || strcmp(level_str, "3") == 0) {
+        return ESP_LOG_INFO;
+    } else if (strcasecmp(level_str, "debug") == 0 || strcmp(level_str, "4") == 0) {
+        return ESP_LOG_DEBUG;
+    } else if (strcasecmp(level_str, "verbose") == 0 || strcmp(level_str, "5") == 0) {
+        return ESP_LOG_VERBOSE;
+    }
+    return (esp_log_level_t)-1;  // Invalid
+}
+
+static const char* log_level_to_str(esp_log_level_t level)
+{
+    switch (level) {
+        case ESP_LOG_NONE:    return "NONE";
+        case ESP_LOG_ERROR:   return "ERROR";
+        case ESP_LOG_WARN:    return "WARN";
+        case ESP_LOG_INFO:    return "INFO";
+        case ESP_LOG_DEBUG:   return "DEBUG";
+        case ESP_LOG_VERBOSE: return "VERBOSE";
+        default:              return "UNKNOWN";
+    }
+}
+
+static int log_level_cmd(int argc, char **argv)
+{
+    int nerrors = arg_parse(argc, argv, (void **) &log_level_args);
+    if (nerrors != 0) {
+        arg_print_errors(stderr, log_level_args.end, argv[0]);
+        return 1;
+    }
+
+    if (log_level_args.level->count == 0) {
+        // No level specified, show current level and usage
+        nvs_handle_t nvs;
+        uint8_t saved_level = ESP_LOG_INFO;
+        if (nvs_open(PARAM_NAMESPACE, NVS_READONLY, &nvs) == ESP_OK) {
+            nvs_get_u8(nvs, "log_level", &saved_level);
+            nvs_close(nvs);
+        }
+        printf("Current default log level: %s (%d)\n", log_level_to_str(saved_level), saved_level);
+        printf("Log levels: none(0), error(1), warn(2), info(3), debug(4), verbose(5)\n");
+        printf("Usage: log_level <level> [-t <tag>]\n");
+        printf("  Without -t: sets and saves default level for all tags\n");
+        printf("  With -t: sets level for specific tag only (not saved)\n");
+        return 0;
+    }
+
+    const char *level_str = log_level_args.level->sval[0];
+    esp_log_level_t level = parse_log_level(level_str);
+
+    if ((int)level == -1) {
+        printf("Invalid log level: %s\n", level_str);
+        printf("Valid levels: none, error, warn, info, debug, verbose (or 0-5)\n");
+        return 1;
+    }
+
+    if (log_level_args.tag->count > 0) {
+        // Set level for specific tag (not persisted)
+        const char *tag = log_level_args.tag->sval[0];
+        esp_log_level_set(tag, level);
+        printf("Log level for '%s' set to %s (%d) (not saved)\n", tag, log_level_to_str(level), level);
+    } else {
+        // Set default level for all tags and save to NVS
+        esp_log_level_set("*", level);
+
+        nvs_handle_t nvs;
+        esp_err_t err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
+        if (err == ESP_OK) {
+            nvs_set_u8(nvs, "log_level", (uint8_t)level);
+            nvs_commit(nvs);
+            nvs_close(nvs);
+            printf("Default log level set to %s (%d) and saved\n", log_level_to_str(level), level);
+        } else {
+            printf("Default log level set to %s (%d) (failed to save: %s)\n",
+                   log_level_to_str(level), level, esp_err_to_name(err));
+        }
+    }
+
+    return 0;
+}
+
+static void register_log_level(void)
+{
+    log_level_args.level = arg_str0(NULL, NULL, "<level>", "Log level: none/error/warn/info/debug/verbose (or 0-5)");
+    log_level_args.tag = arg_str0("t", "tag", "<tag>", "Set level for specific tag only");
+    log_level_args.end = arg_end(2);
+
+    const esp_console_cmd_t cmd = {
+        .command = "log_level",
+        .help = "Get/set logging level. Without arguments shows usage. "
+                "Use -t to set level for a specific tag.",
+        .hint = NULL,
+        .func = &log_level_cmd,
+        .argtable = &log_level_args
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }

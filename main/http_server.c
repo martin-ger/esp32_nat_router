@@ -280,6 +280,7 @@ static esp_err_t index_get_handler(httpd_req_t *req)
                 preprocess_string(param);
                 if (password_protection_enabled && strcmp(param, password) == 0) {
                     create_session(req);
+                    ESP_LOGI(TAG, "Web UI login successful");
                     free(buf);
                     /* Redirect to reload page with session cookie */
                     httpd_resp_set_status(req, "303 See Other");
@@ -287,6 +288,7 @@ static esp_err_t index_get_handler(httpd_req_t *req)
                     httpd_resp_send(req, NULL, 0);
                     return ESP_OK;
                 } else {
+                    ESP_LOGW(TAG, "Web UI login failed: incorrect password");
                     strcpy(login_message, "ERROR: Incorrect password.");
                 }
             }
@@ -320,6 +322,7 @@ static esp_err_t index_get_handler(httpd_req_t *req)
                         strcpy(login_message, "ERROR: Passwords do not match.");
                     }
                 } else {
+                    ESP_LOGW(TAG, "Unauthorized attempt to change web password");
                     strcpy(login_message, "ERROR: Not authorized to change password.");
                 }
             }
@@ -489,6 +492,7 @@ static esp_err_t config_get_handler(httpd_req_t *req)
     bool password_protection_enabled = get_web_password(password, sizeof(password));
 
     if (password_protection_enabled && !is_authenticated(req)) {
+        ESP_LOGW(TAG, "Unauthenticated access attempt to /config");
         /* Redirect to index page with auth_required flag */
         httpd_resp_set_status(req, "303 See Other");
         httpd_resp_set_hdr(req, "Location", "/?auth_required=1");
@@ -981,6 +985,7 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
     bool password_protection_enabled = get_web_password(password, sizeof(password));
 
     if (password_protection_enabled && !is_authenticated(req)) {
+        ESP_LOGW(TAG, "Unauthenticated access attempt to /mappings");
         /* Redirect to index page with auth_required flag */
         httpd_resp_set_status(req, "303 See Other");
         httpd_resp_set_hdr(req, "Location", "/?auth_required=1");
@@ -1364,6 +1369,7 @@ static esp_err_t firewall_get_handler(httpd_req_t *req)
     bool password_protection_enabled = get_web_password(password, sizeof(password));
 
     if (password_protection_enabled && !is_authenticated(req)) {
+        ESP_LOGW(TAG, "Unauthenticated access attempt to /firewall");
         /* Redirect to index page with auth_required flag */
         httpd_resp_set_status(req, "303 See Other");
         httpd_resp_set_hdr(req, "Location", "/?auth_required=1");

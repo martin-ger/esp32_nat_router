@@ -616,11 +616,14 @@ static bool authenticate_client(int client_fd) {
 
         if (diff == 0) {
             send_string(client_fd, RC_AUTH_OK);
+            ESP_LOGI(TAG, "Remote console login successful from %s", rc_state.client_ip);
             return true;
         }
 
         send_string(client_fd, RC_AUTH_FAIL);
         rc_state.failed_auths++;
+        ESP_LOGW(TAG, "Remote console login failed from %s (attempt %d/%d)",
+                 rc_state.client_ip, attempt + 1, RC_MAX_AUTH_ATTEMPTS);
 
         if (attempt < RC_MAX_AUTH_ATTEMPTS - 1) {
             send_string(client_fd, "\r\n");
@@ -628,8 +631,8 @@ static bool authenticate_client(int client_fd) {
     }
 
     /* Max attempts reached */
-    ESP_LOGW(TAG, "Authentication failed from %s after %d attempts",
-             rc_state.client_ip, RC_MAX_AUTH_ATTEMPTS);
+    ESP_LOGW(TAG, "Remote console: max auth attempts reached from %s, disconnecting",
+             rc_state.client_ip);
 
     /* Delay before allowing reconnection */
     vTaskDelay(pdMS_TO_TICKS(RC_AUTH_DELAY_MS));

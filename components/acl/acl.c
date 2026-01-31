@@ -17,13 +17,20 @@
 #include "lwip/prot/udp.h"
 
 #include "acl.h"
+#include "esp_timer.h"
 
 /* Protocol numbers (from IANA) */
 #define IPPROTO_ICMP 1
 #define IPPROTO_TCP  6
 #define IPPROTO_UDP  17
 
+/* Rate limiting for deny logs (microseconds) */
+#define ACL_LOG_INTERVAL_US  500000  /* 0.5 seconds */
+
 static const char *TAG = "ACL";
+
+/* Last time we logged a denied packet (per ACL list) */
+static int64_t last_deny_log_time[MAX_ACL_LISTS] = {0};
 
 /* ACL list names for display/parsing */
 static const char* acl_names[MAX_ACL_LISTS] = {
@@ -292,6 +299,38 @@ uint8_t acl_check_packet(uint8_t acl_no, struct pbuf *p)
             acl_stats[acl_no].packets_allowed++;
         } else {
             acl_stats[acl_no].packets_denied++;
+
+            /* Rate-limited logging for denied packets */
+            int64_t now = esp_timer_get_time();
+            if (now - last_deny_log_time[acl_no] >= ACL_LOG_INTERVAL_US) {
+                last_deny_log_time[acl_no] = now;
+
+                /* Format source and destination for logging */
+                char src_str[24], dst_str[24];
+                ip4_addr_t saddr, daddr;
+                saddr.addr = src_ip;
+                daddr.addr = dest_ip;
+                snprintf(src_str, sizeof(src_str), IPSTR, IP2STR(&saddr));
+                snprintf(dst_str, sizeof(dst_str), IPSTR, IP2STR(&daddr));
+
+                const char *proto_name;
+                switch (proto) {
+                    case IPPROTO_ICMP: proto_name = "ICMP"; break;
+                    case IPPROTO_TCP:  proto_name = "TCP"; break;
+                    case IPPROTO_UDP:  proto_name = "UDP"; break;
+                    default:           proto_name = "IP"; break;
+                }
+
+                if (proto == IPPROTO_TCP || proto == IPPROTO_UDP) {
+                    ESP_LOGW(TAG, "DENY [%s] %s %s:%d -> %s:%d (rule %d)",
+                             acl_names[acl_no], proto_name,
+                             src_str, src_port, dst_str, dst_port, i);
+                } else {
+                    ESP_LOGW(TAG, "DENY [%s] %s %s -> %s (rule %d)",
+                             acl_names[acl_no], proto_name,
+                             src_str, dst_str, i);
+                }
+            }
         }
 
         return action | monitor;

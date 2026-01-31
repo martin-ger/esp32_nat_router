@@ -15,6 +15,9 @@ extern "C" {
 // Register system functions
 void register_system(void);
 
+// Load and apply saved log level from NVS
+void load_log_level(void);
+
 #ifdef __cplusplus
 }
 #endif

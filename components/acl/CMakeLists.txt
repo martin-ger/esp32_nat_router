@@ -5,5 +5,5 @@
 idf_component_register(
     SRCS "acl.c"
     INCLUDE_DIRS "include"
-    REQUIRES lwip esp_netif
+    REQUIRES lwip esp_netif esp_timer
 )
