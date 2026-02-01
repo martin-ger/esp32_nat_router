@@ -55,6 +55,7 @@ static void register_web_ui(void);
 static void register_bytes(void);
 static void register_pcap(void);
 static void register_set_led_gpio(void);
+static void register_set_led_lowactive(void);
 static void register_set_ttl(void);
 static void register_set_ap_hidden(void);
 static void register_acl(void);
@@ -81,6 +82,24 @@ static inline uint8_t hex_digit_value(char c)
         return c - '0';
     else
         return toupper((unsigned char)c) - 'A' + 10;
+}
+
+/* Check if string represents a boolean true value */
+static inline bool parse_bool_true(const char *str)
+{
+    return (strcasecmp(str, "true") == 0 ||
+            strcasecmp(str, "yes") == 0 ||
+            strcasecmp(str, "on") == 0 ||
+            strcmp(str, "1") == 0);
+}
+
+/* Check if string represents a boolean false value */
+static inline bool parse_bool_false(const char *str)
+{
+    return (strcasecmp(str, "false") == 0 ||
+            strcasecmp(str, "no") == 0 ||
+            strcasecmp(str, "off") == 0 ||
+            strcmp(str, "0") == 0);
 }
 
 void preprocess_string(char* str)
@@ -197,6 +216,7 @@ void register_router(void)
     register_web_ui();
     register_set_web_password();
     register_set_led_gpio();
+    register_set_led_lowactive();
     register_set_ttl();
     register_set_ap_hidden();
     register_remote_console_cmd();
@@ -1319,6 +1339,69 @@ static void register_set_led_gpio(void)
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }
 
+/* 'set_led_lowactive' command - set LED low-active (inverted) mode */
+static int set_led_lowactive_cmd(int argc, char **argv)
+{
+    if (argc < 2) {
+        printf("Usage: set_led_lowactive <true|false>\n");
+        printf("  true: LED is active-low (inverted, common for onboard LEDs)\n");
+        printf("  false: LED is active-high (default)\n");
+        printf("\nCurrent setting: %s\n", led_lowactive ? "true (low-active)" : "false (active-high)");
+        return 0;
+    }
+
+    esp_err_t err;
+    nvs_handle_t nvs;
+    int value;
+
+    // Parse boolean argument
+    if (parse_bool_true(argv[1])) {
+        value = 1;
+    } else if (parse_bool_false(argv[1])) {
+        value = 0;
+    } else {
+        printf("Invalid value. Use true/false.\n");
+        return 1;
+    }
+
+    err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err != ESP_OK) {
+        printf("Failed to open NVS\n");
+        return err;
+    }
+
+    err = nvs_set_i32(nvs, "led_low", value);
+    if (err == ESP_OK) {
+        err = nvs_commit(nvs);
+        if (err == ESP_OK) {
+            led_lowactive = value;
+            if (value) {
+                ESP_LOGI(TAG, "LED set to low-active (inverted) mode.");
+                printf("LED set to low-active (inverted) mode.\n");
+            } else {
+                ESP_LOGI(TAG, "LED set to active-high (normal) mode.");
+                printf("LED set to active-high (normal) mode.\n");
+            }
+            printf("Change takes effect immediately.\n");
+        }
+    } else {
+        printf("Failed to save setting\n");
+    }
+    nvs_close(nvs);
+    return err;
+}
+
+static void register_set_led_lowactive(void)
+{
+    const esp_console_cmd_t cmd = {
+        .command = "set_led_lowactive",
+        .help = "Set LED to low-active (inverted) mode for active-low LEDs",
+        .hint = NULL,
+        .func = &set_led_lowactive_cmd,
+    };
+    ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
+}
+
 /* 'set_ttl' command - set TTL override for upstream packets */
 static int set_ttl_cmd(int argc, char **argv)
 {
@@ -1395,14 +1478,12 @@ static int set_ap_hidden_cmd(int argc, char **argv)
     int hidden_val;
 
     // Parse argument
-    if (strcasecmp(argv[1], "on") == 0 || strcasecmp(argv[1], "yes") == 0 ||
-        strcasecmp(argv[1], "true") == 0 || strcmp(argv[1], "1") == 0) {
+    if (parse_bool_true(argv[1])) {
         hidden_val = 1;
-    } else if (strcasecmp(argv[1], "off") == 0 || strcasecmp(argv[1], "no") == 0 ||
-               strcasecmp(argv[1], "false") == 0 || strcmp(argv[1], "0") == 0) {
+    } else if (parse_bool_false(argv[1])) {
         hidden_val = 0;
     } else {
-        printf("Invalid value. Use: on/off, yes/no, true/false, 1/0\n");
+        printf("Invalid value. Use true/false.\n");
         return 1;
     }
 

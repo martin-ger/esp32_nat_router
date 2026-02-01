@@ -89,6 +89,7 @@ uint16_t connect_count = 0;
 bool ap_connect = false;
 bool has_static_ip = false;
 int led_gpio = -1;  // -1 means LED disabled (none)
+uint8_t led_lowactive = 0;  // 0 = active-high (default), 1 = active-low (inverted)
 
 uint32_t my_ip;
 uint32_t my_ap_ip;
@@ -1019,19 +1020,20 @@ void * led_status_thread(void * p)
         return NULL;
     }
 
-    ESP_LOGI(TAG, "LED status on GPIO %d", led_gpio);
+    ESP_LOGI(TAG, "LED status on GPIO %d%s", led_gpio, led_lowactive ? " (low-active)" : "");
     gpio_reset_pin(led_gpio);
     gpio_set_direction(led_gpio, GPIO_MODE_OUTPUT);
 
     while (true)
     {
-        gpio_set_level(led_gpio, ap_connect);
+        // XOR with led_lowactive to invert output when in low-active mode
+        gpio_set_level(led_gpio, ap_connect ^ led_lowactive);
 
         for (int i = 0; i < connect_count; i++)
         {
-            gpio_set_level(led_gpio, 1 - ap_connect);
+            gpio_set_level(led_gpio, (1 - ap_connect) ^ led_lowactive);
             vTaskDelay(50 / portTICK_PERIOD_MS);
-            gpio_set_level(led_gpio, ap_connect);
+            gpio_set_level(led_gpio, ap_connect ^ led_lowactive);
             vTaskDelay(50 / portTICK_PERIOD_MS);
         }
 
@@ -1342,6 +1344,15 @@ void app_main(void)
         led_gpio = led_gpio_setting;
     }
     // led_gpio remains -1 (disabled) if not set in NVS
+
+    // Load LED low-active setting from NVS (default 0 = active-high)
+    int led_lowactive_setting = 0;
+    if (get_config_param_int("led_low", &led_lowactive_setting) == ESP_OK) {
+        led_lowactive = (led_lowactive_setting != 0) ? 1 : 0;
+    }
+    if (led_lowactive) {
+        ESP_LOGI(TAG, "LED low-active mode enabled");
+    }
 
     // Load TTL override setting from NVS (default 0 = disabled)
     int ttl_setting = 0;

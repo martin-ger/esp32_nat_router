@@ -654,6 +654,9 @@ set_web_password
 set_led_gpio
   Set GPIO for status LED blinking (use 'none' to disable)
 
+set_led_lowactive 
+  Set LED to low-active (inverted) mode for active-low LEDs
+
 set_ttl
   Set TTL override for upstream STA packets (0 = disabled)
 

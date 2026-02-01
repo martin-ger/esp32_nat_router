@@ -15,7 +15,7 @@ extern "C" {
 
 #define PARAM_NAMESPACE "esp32_nat"
 
-#define ROUTER_VERSION "2.1.1"
+#define ROUTER_VERSION "2.1.2"
 
 #define PROTO_TCP 6
 #define PROTO_UDP 17
@@ -73,6 +73,9 @@ extern uint64_t sta_bytes_received;
 
 // LED GPIO configuration (-1 means disabled/none)
 extern int led_gpio;
+
+// LED low-active mode (0 = active-high, 1 = active-low/inverted)
+extern uint8_t led_lowactive;
 
 // TTL override for STA upstream (0 = disabled/no change, 1-255 = fixed TTL)
 extern uint8_t sta_ttl_override;
