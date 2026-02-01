@@ -61,6 +61,9 @@ uint64_t sta_bytes_received = 0;
 // TTL override for STA upstream (0 = disabled/no change)
 uint8_t sta_ttl_override = 0;
 
+// AP SSID hidden (0 = visible, 1 = hidden)
+uint8_t ap_ssid_hidden = 0;
+
 // Original netif input and linkoutput function pointers
 static netif_input_fn original_netif_input = NULL;
 static netif_linkoutput_fn original_netif_linkoutput = NULL;
@@ -1177,7 +1180,7 @@ void wifi_init(const uint8_t* mac, const char* ssid, const char* ent_username, c
         .ap = {
             .channel = 0,
             .authmode = WIFI_AUTH_WPA2_WPA3_PSK,
-            .ssid_hidden = 0,
+            .ssid_hidden = ap_ssid_hidden,
             .max_connection = 8,
             .beacon_interval = 100,
         }
@@ -1349,6 +1352,15 @@ void app_main(void)
     }
     if (sta_ttl_override > 0) {
         ESP_LOGI(TAG, "TTL override enabled: %d", sta_ttl_override);
+    }
+
+    // Load AP SSID hidden setting from NVS (default 0 = visible)
+    int hidden_setting = 0;
+    if (get_config_param_int("ap_hidden", &hidden_setting) == ESP_OK) {
+        ap_ssid_hidden = (hidden_setting != 0) ? 1 : 0;
+    }
+    if (ap_ssid_hidden) {
+        ESP_LOGI(TAG, "AP SSID hidden enabled");
     }
 
     // Setup WIFI

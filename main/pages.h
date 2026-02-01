@@ -453,6 +453,10 @@ setTimeout(\"location.href = '/'\", 10000);\
 <td><input type='text' name='ap_mac' value='%s' placeholder='AA:BB:CC:DD:EE:FF'/></td>\
 </tr>\
 <tr>\
+<td>Hidden SSID</td>\
+<td><input type='checkbox' name='ap_hidden' value='1' %s> <span style='color:#888;font-size:0.85rem;'>Hide from scans</span></td>\
+</tr>\
+<tr>\
 <td></td>\
 <td><input type='submit' value='Apply' class='ok-button'/></td>\
 </tr>\

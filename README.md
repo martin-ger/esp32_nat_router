@@ -416,6 +416,22 @@ The setting is stored in NVS and takes effect immediately (no restart required).
 
 **Note**: TTL override only affects packets going to the upstream network (via STA interface). It does not affect traffic between the ESP32 and its connected clients.
 
+## Hidden SSID
+
+The AP can be configured to hide its SSID from network scans. When enabled, clients must know the exact SSID to connect.
+
+### Configuration
+
+```
+set_ap_hidden on        # Hide the AP SSID
+set_ap_hidden off       # Show the AP SSID (default)
+set_ap_hidden           # Show current setting
+```
+
+Changes require a restart to take effect.
+
+**Note**: Hiding the SSID provides minimal security benefit. The SSID is still transmitted in probe responses and association frames. Use strong WPA2 passwords for actual security.
+
 ## Remote Console
 
 The router provides a network-accessible CLI via TCP, allowing remote configuration without physical serial access.
@@ -566,15 +582,6 @@ set_sta_mac  <octet> <octet> <octet> <octet> <octet> <octet>
        <octet>  Fifth octet
        <octet>  Sixth octet
 
-set_ap_mac  <octet> <octet> <octet> <octet> <octet> <octet>
-  Set MAC address of the AP interface
-       <octet>  First octet
-       <octet>  Second octet
-       <octet>  Third octet
-       <octet>  Fourth octet
-       <octet>  Fifth octet
-       <octet>  Sixth octet
-
 scan 
   Scan for available WiFi networks
 
@@ -587,6 +594,18 @@ set_ap_ip  <ip>
   Set IP for the AP interface
           <ip>  IP
 
+set_ap_hidden
+  Hide or show the AP SSID (on/off, requires restart)
+
+set_ap_mac  <octet> <octet> <octet> <octet> <octet> <octet>
+  Set MAC address of the AP interface
+       <octet>  First octet
+       <octet>  Second octet
+       <octet>  Third octet
+       <octet>  Fourth octet
+       <octet>  Fifth octet
+       <octet>  Sixth octet
+       
 dhcp_reserve  [add|del] <mac> [<ip>] [-- <name>]
   Add or delete a DHCP reservation
      [add|del]  add or delete reservation

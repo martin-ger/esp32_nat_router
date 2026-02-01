@@ -585,6 +585,25 @@ static esp_err_t config_get_handler(httpd_req_t *req)
                             set_ap_mac(7, mac_argv);
                         }
                     }
+
+                    // Handle AP hidden SSID setting
+                    // Checkbox sends value only when checked, so absence means "off"
+                    {
+                        nvs_handle_t nvs;
+                        if (nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs) == ESP_OK) {
+                            int hidden_val = 0;
+                            if (httpd_query_key_value(buf, "ap_hidden", param5, sizeof(param5)) == ESP_OK) {
+                                hidden_val = 1;
+                                ESP_LOGI(TAG, "Found URL query parameter => ap_hidden=%s", param5);
+                            }
+                            nvs_set_i32(nvs, "ap_hidden", hidden_val);
+                            nvs_commit(nvs);
+                            nvs_close(nvs);
+                            ap_ssid_hidden = (uint8_t)hidden_val;
+                            ESP_LOGI(TAG, "AP hidden SSID set to: %d", hidden_val);
+                        }
+                    }
+
                     esp_timer_start_once(restart_timer, 500000);
                 }
             }
@@ -863,6 +882,9 @@ static esp_err_t config_get_handler(httpd_req_t *req)
     remote_console_get_config(&rc_config);
     remote_console_get_status(&rc_status);
 
+    // AP hidden SSID checkbox
+    const char* ap_hidden_checked = ap_ssid_hidden ? "checked" : "";
+
     const char* rc_enabled_checked = rc_config.enabled ? "checked" : "";
     const char* rc_disabled_checked = rc_config.enabled ? "" : "checked";
 
@@ -944,7 +966,7 @@ static esp_err_t config_get_handler(httpd_req_t *req)
     snprintf(
         config_page, page_len, config_page_template,
         logout_section,
-        safe_ap_ssid, safe_ap_passwd, ap_ip_str, ap_mac_str,
+        safe_ap_ssid, safe_ap_passwd, ap_ip_str, ap_mac_str, ap_hidden_checked,
         safe_ssid, safe_passwd, safe_ent_username, safe_ent_identity, sta_mac_str,
         static_ip, subnet_mask, gateway_addr,
         rc_enabled_checked, rc_disabled_checked,

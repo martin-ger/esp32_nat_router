@@ -77,6 +77,9 @@ extern int led_gpio;
 // TTL override for STA upstream (0 = disabled/no change, 1-255 = fixed TTL)
 extern uint8_t sta_ttl_override;
 
+// AP SSID hidden (0 = visible, 1 = hidden)
+extern uint8_t ap_ssid_hidden;
+
 void preprocess_string(char* str);
 int set_sta(int argc, char **argv);
 int set_sta_static(int argc, char **argv);

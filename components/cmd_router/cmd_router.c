@@ -56,6 +56,7 @@ static void register_bytes(void);
 static void register_pcap(void);
 static void register_set_led_gpio(void);
 static void register_set_ttl(void);
+static void register_set_ap_hidden(void);
 static void register_acl(void);
 static void register_remote_console_cmd(void);
 static void register_scan(void);
@@ -197,6 +198,7 @@ void register_router(void)
     register_set_web_password();
     register_set_led_gpio();
     register_set_ttl();
+    register_set_ap_hidden();
     register_remote_console_cmd();
 }
 
@@ -1376,6 +1378,63 @@ static void register_set_ttl(void)
         .help = "Set TTL override for upstream STA packets (0 = disabled)",
         .hint = NULL,
         .func = &set_ttl_cmd,
+    };
+    ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
+}
+
+/* 'set_ap_hidden' command - hide or show AP SSID */
+static int set_ap_hidden_cmd(int argc, char **argv)
+{
+    if (argc < 2) {
+        printf("AP SSID hidden: %s\n", ap_ssid_hidden ? "yes" : "no");
+        return 0;
+    }
+
+    esp_err_t err;
+    nvs_handle_t nvs;
+    int hidden_val;
+
+    // Parse argument
+    if (strcasecmp(argv[1], "on") == 0 || strcasecmp(argv[1], "yes") == 0 ||
+        strcasecmp(argv[1], "true") == 0 || strcmp(argv[1], "1") == 0) {
+        hidden_val = 1;
+    } else if (strcasecmp(argv[1], "off") == 0 || strcasecmp(argv[1], "no") == 0 ||
+               strcasecmp(argv[1], "false") == 0 || strcmp(argv[1], "0") == 0) {
+        hidden_val = 0;
+    } else {
+        printf("Invalid value. Use: on/off, yes/no, true/false, 1/0\n");
+        return 1;
+    }
+
+    err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err != ESP_OK) {
+        printf("Failed to open NVS\n");
+        return err;
+    }
+
+    err = nvs_set_i32(nvs, "ap_hidden", hidden_val);
+    if (err == ESP_OK) {
+        err = nvs_commit(nvs);
+        if (err == ESP_OK) {
+            ap_ssid_hidden = (uint8_t)hidden_val;
+            ESP_LOGI(TAG, "AP SSID hidden set to: %s", hidden_val ? "yes" : "no");
+            printf("AP SSID hidden set to: %s\n", hidden_val ? "yes" : "no");
+            printf("Restart the device for changes to take effect.\n");
+        }
+    } else {
+        printf("Failed to save setting\n");
+    }
+    nvs_close(nvs);
+    return err;
+}
+
+static void register_set_ap_hidden(void)
+{
+    const esp_console_cmd_t cmd = {
+        .command = "set_ap_hidden",
+        .help = "Hide or show the AP SSID (on/off, requires restart)",
+        .hint = NULL,
+        .func = &set_ap_hidden_cmd,
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }
