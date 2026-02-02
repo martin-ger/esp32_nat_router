@@ -20,7 +20,15 @@ extern "C" {
 #define PROTO_TCP 6
 #define PROTO_UDP 17
 
-#define MAX_DHCP_RESERVATIONS 16
+// One active connection uses about 5kB RAM
+#if CONFIG_IDF_TARGET_ESP32C3
+// ESP32c3 has less RAM
+#define AP_MAX_CONNECTIONS 5
+#else
+#define AP_MAX_CONNECTIONS 8
+#endif
+
+#define MAX_DHCP_RESERVATIONS (AP_MAX_CONNECTIONS +2)
 #define DHCP_RESERVATION_NAME_LEN 32
 
 struct dhcp_reservation_entry {

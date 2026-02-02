@@ -23,10 +23,15 @@ static const char *TAG = "pcap_capture";
 
 // Configuration
 #define PCAP_TCP_PORT           19000
-#define PCAP_TASK_STACK         4096
+#define PCAP_TASK_STACK         3072
 #define PCAP_TASK_PRIORITY      5
+#if CONFIG_IDF_TARGET_ESP32C3
+#define PCAP_RINGBUF_SIZE       (16 * 1024)  // 16KB ring buffer for ESP32-C3
+#define PCAP_SNAPLEN_DEFAULT    64           // Default max packet capture size for ESP32-C3
+#else
 #define PCAP_RINGBUF_SIZE       (32 * 1024)  // 32KB ring buffer
-#define PCAP_SNAPLEN_DEFAULT    512          // Default max packet capture size
+#define PCAP_SNAPLEN_DEFAULT    96           // Default max packet capture size
+#endif
 #define PCAP_SNAPLEN_MAX        1600         // Maximum allowed snaplen (full Ethernet frame)
 #define PCAP_SEND_BUF_SIZE      1024         // TCP send buffer size
 
@@ -212,6 +217,8 @@ void pcap_init(void)
         ESP_LOGE(TAG, "Failed to initialize ring buffer");
         return;
     }
+
+    ESP_LOGI(TAG, "Capture ring buffer size: %d", PCAP_RINGBUF_SIZE);
 
     // Create TCP server task
     BaseType_t ret = xTaskCreate(

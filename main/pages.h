@@ -1,8 +1,8 @@
 //#include "esp_idf_version.h"
 #include "router_globals.h"
 
-/* Index Page - System Status with navigation buttons */
-#define INDEX_PAGE "<html>\
+/* Index Page - Chunked for streaming */
+#define INDEX_CHUNK_HEAD "<html>\
 <head>\
 <meta name='viewport' content='width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0'>\
 <meta charset='UTF-8'>\
@@ -18,7 +18,7 @@ padding: 0;\
 \
 body {\
 font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;\
-background: linear-gradient(135deg, #1a1a2e 0%%, #16213e 100%%);\
+background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);\
 color: #e0e0e0;\
 padding: 1rem;\
 min-height: 100vh;\
@@ -60,7 +60,7 @@ border: 1px solid rgba(0, 217, 255, 0.1);\
 }\
 \
 .status-table table {\
-width: 100%%;\
+width: 100%;\
 border-collapse: collapse;\
 }\
 \
@@ -78,7 +78,7 @@ border-bottom: none;\
 color: #888;\
 text-align: right;\
 padding-right: 1rem;\
-width: 45%%;\
+width: 45%;\
 font-size: 0.9rem;\
 }\
 \
@@ -95,7 +95,7 @@ margin: 2rem 0 1rem 0;\
 }\
 \
 .nav-button {\
-background: linear-gradient(135deg, #667eea 0%%, #764ba2 100%%);\
+background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);\
 color: #fff;\
 border: none;\
 border-radius: 12px;\
@@ -150,7 +150,7 @@ font-size: 0.85rem;\
 }\
 \
 .status-table td:first-child {\
-width: 50%%;\
+width: 50%;\
 font-size: 0.8rem;\
 }\
 }\
@@ -161,61 +161,30 @@ font-size: 0.8rem;\
 <div style='display: flex; align-items: center;'>\
 <a href='/' style='display: inline-block; margin-right: 1rem;'><img src='/favicon.png' alt='Home' style='width: 64px; height: 64px; border: none;'></a>\
 <h1 style='margin: 0;'>ESP32 NAT Router</h1>\
-</div>\
-%s\
+</div>"
+/* Logout button streamed here */
+
+#define INDEX_CHUNK_STATUS_OPEN "\
 </div>\
 <h2>System Status</h2>\
 <div class='status-table'>\
-<table>\
-<tr>\
-<td>SSID:</td>\
-<td><strong>%s</strong></td>\
-</tr>\
-<tr>\
-<td>Connection:</td>\
-<td><strong>%s</strong></td>\
-</tr>\
-<tr>\
-<td>Uptime:</td>\
-<td>%s</td>\
-</tr>\
-<tr>\
-<td>STA IP:</td>\
-<td>%s</td>\
-</tr>\
-<tr>\
-<td>AP IP:</td>\
-<td>%s</td>\
-</tr>\
-<tr>\
-<td>DHCP Pool:</td>\
-<td>%s</td>\
-</tr>\
-<tr>\
-<td>Clients:</td>\
-<td>%d</td>\
-</tr>\
-<tr>\
-<td>Bytes Sent:</td>\
-<td>%.1f MB</td>\
-</tr>\
-<tr>\
-<td>Bytes Received:</td>\
-<td>%.1f MB</td>\
-</tr>\
-<tr>\
-<td>PCAP Capture:</td>\
-<td>%s</td>\
-</tr>\
+<table>"
+/* Status rows streamed here */
+
+#define INDEX_CHUNK_STATUS_CLOSE "\
 </table>\
-</div>\
+</div>"
+
+#define INDEX_CHUNK_BUTTONS "\
 <div class='button-container'>\
 <a href='/config' class='nav-button'>⚙️ Configuration</a>\
 <a href='/scan' class='nav-button'>📡 WiFi Scan</a>\
 <a href='/mappings' class='nav-button'>🔀 Mappings</a>\
 <a href='/firewall' class='nav-button'>🛡️ Firewall</a>\
-</div>\
-%s\
+</div>"
+/* Auth UI streamed here */
+
+#define INDEX_CHUNK_TAIL "\
 <div style='margin-top: 2rem; padding-top: 1rem; border-top: 1px solid rgba(255, 255, 255, 0.1); text-align: center;'>\
 <span style='color: #666; font-size: 0.75rem; font-family: monospace;'>v"\
 ROUTER_VERSION\
@@ -227,11 +196,11 @@ IDF_VER\
 </div>\
 </div>\
 </body>\
-</html>\
-"
+</html>"
 
 /* Configuration Page - WiFi settings and MAC addresses */
-#define ROUTER_CONFIG_PAGE "<html>\
+/* Config Page - Chunked for streaming */
+#define CONFIG_CHUNK_HEAD "<html>\
 <head>\
 <meta name='viewport' content='width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0'>\
 <meta charset='UTF-8'>\
@@ -239,181 +208,23 @@ IDF_VER\
 <link rel='icon' href='favicon.png'>\
 </head>\
 <style>\
-* {\
-box-sizing: border-box;\
-margin: 0;\
-padding: 0;\
-}\
-\
-body {\
-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;\
-background: linear-gradient(135deg, #1a1a2e 0%%, #16213e 100%%);\
-color: #e0e0e0;\
-padding: 1rem;\
-min-height: 100vh;\
-line-height: 1.6;\
-}\
-\
-h1 {\
-font-size: 1.5rem;\
-font-weight: 600;\
-color: #00d9ff;\
-margin-bottom: 1rem;\
-text-shadow: 0 0 20px rgba(0, 217, 255, 0.3);\
-}\
-\
-h2 {\
-font-size: 1.15rem;\
-font-weight: 500;\
-color: #00d9ff;\
-margin: 1.5rem 0 0.75rem 0;\
-padding-bottom: 0.5rem;\
-border-bottom: 1px solid rgba(0, 217, 255, 0.2);\
-}\
-\
-#container {\
-max-width: 500px;\
-margin: 0 auto;\
-padding: 1.5rem;\
-background: rgba(30, 30, 46, 0.9);\
-border-radius: 16px;\
-box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);\
-backdrop-filter: blur(10px);\
-}\
-\
-.nav-link {\
-color: #00d9ff;\
-text-decoration: none;\
-font-size: 0.9rem;\
-display: inline-block;\
-margin-bottom: 1rem;\
-transition: all 0.2s;\
-}\
-\
-.nav-link:hover {\
-color: #33e0ff;\
-transform: translateX(-3px);\
-}\
-\
-form {\
-margin-bottom: 1.5rem;\
-}\
-\
-table {\
-width: 100%%;\
-border-collapse: collapse;\
-}\
-\
-td {\
-padding: 0.5rem 0;\
-vertical-align: top;\
-}\
-\
-td:first-child {\
-color: #888;\
-font-size: 0.9rem;\
-padding-right: 0.75rem;\
-width: 35%%;\
-text-align: right;\
-}\
-\
-input[type='text'], input[type='password'] {\
-width: 100%%;\
-background: rgba(22, 33, 62, 0.6);\
-border: 1px solid rgba(0, 217, 255, 0.2);\
-border-radius: 8px;\
-color: #e0e0e0;\
-padding: 0.75rem;\
-font-size: 0.95rem;\
-transition: all 0.3s;\
-}\
-\
-input:focus {\
-outline: none;\
-border-color: #00d9ff;\
-box-shadow: 0 0 0 3px rgba(0, 217, 255, 0.1);\
-background: rgba(22, 33, 62, 0.8);\
-}\
-\
-input::placeholder {\
-color: #666;\
-}\
-\
-.ok-button, .red-button {\
-border: none;\
-border-radius: 8px;\
-padding: 0.75rem 1.5rem;\
-font-size: 0.95rem;\
-font-weight: 600;\
-cursor: pointer;\
-transition: all 0.3s;\
-width: 100%%;\
-margin-top: 0.5rem;\
-}\
-\
-.ok-button {\
-background: linear-gradient(135deg, #667eea 0%%, #764ba2 100%%);\
-color: #fff;\
-box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);\
-}\
-\
-.ok-button:hover {\
-transform: translateY(-2px);\
-box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);\
-}\
-\
-.red-button {\
-background: linear-gradient(135deg, #f093fb 0%%, #f5576c 100%%);\
-color: #fff;\
-box-shadow: 0 4px 15px rgba(245, 87, 108, 0.4);\
-}\
-\
-.red-button:hover {\
-transform: translateY(-2px);\
-box-shadow: 0 6px 20px rgba(245, 87, 108, 0.6);\
-}\
-\
-small {\
-display: block;\
-color: #888;\
-font-size: 0.85rem;\
-margin-top: 0.5rem;\
-line-height: 1.4;\
-}\
-\
-@media (max-width: 600px) {\
-body {\
-padding: 0.5rem;\
-}\
-\
-#container {\
-padding: 1rem;\
-border-radius: 12px;\
-}\
-\
-h1 {\
-font-size: 1.25rem;\
-}\
-\
-h2 {\
-font-size: 1rem;\
-}\
-\
-td:first-child {\
-font-size: 0.8rem;\
-width: 40%%;\
-}\
-\
-input[type='text'], input[type='password'] {\
-font-size: 0.9rem;\
-padding: 0.65rem;\
-}\
-\
-.ok-button, .red-button {\
-font-size: 0.9rem;\
-padding: 0.65rem 1.25rem;\
-}\
-}\
+* { box-sizing: border-box; margin: 0; padding: 0; }\
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); color: #e0e0e0; padding: 1rem; min-height: 100vh; line-height: 1.6; }\
+h1 { font-size: 1.5rem; font-weight: 600; color: #00d9ff; margin-bottom: 1rem; text-shadow: 0 0 20px rgba(0, 217, 255, 0.3); }\
+h2 { font-size: 1.15rem; font-weight: 500; color: #00d9ff; margin: 1.5rem 0 0.75rem 0; padding-bottom: 0.5rem; border-bottom: 1px solid rgba(0, 217, 255, 0.2); }\
+#container { max-width: 500px; margin: 0 auto; padding: 1.5rem; background: rgba(30, 30, 46, 0.9); border-radius: 16px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4); backdrop-filter: blur(10px); }\
+form { margin-bottom: 1.5rem; }\
+table { width: 100%; border-collapse: collapse; }\
+td { padding: 0.5rem 0; vertical-align: top; }\
+td:first-child { color: #888; font-size: 0.9rem; padding-right: 0.75rem; width: 35%; text-align: right; }\
+input[type='text'], input[type='password'] { width: 100%; background: rgba(22, 33, 62, 0.6); border: 1px solid rgba(0, 217, 255, 0.2); border-radius: 8px; color: #e0e0e0; padding: 0.75rem; font-size: 0.95rem; }\
+input:focus { outline: none; border-color: #00d9ff; box-shadow: 0 0 0 3px rgba(0, 217, 255, 0.1); background: rgba(22, 33, 62, 0.8); }\
+input::placeholder { color: #666; }\
+.ok-button, .red-button { border: none; border-radius: 8px; padding: 0.75rem 1.5rem; font-size: 0.95rem; font-weight: 600; cursor: pointer; width: 100%; margin-top: 0.5rem; }\
+.ok-button { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #fff; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4); }\
+.red-button { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: #fff; box-shadow: 0 4px 15px rgba(245, 87, 108, 0.4); }\
+small { display: block; color: #888; font-size: 0.85rem; margin-top: 0.5rem; line-height: 1.4; }\
+@media (max-width: 600px) { body { padding: 0.5rem; } #container { padding: 1rem; } h1 { font-size: 1.25rem; } h2 { font-size: 1rem; } td:first-child { font-size: 0.8rem; width: 40%; } input[type='text'], input[type='password'] { font-size: 0.9rem; padding: 0.65rem; } .ok-button, .red-button { font-size: 0.9rem; padding: 0.65rem 1.25rem; } }\
 </style>\
 <body>\
 <div id='container'>\
@@ -421,8 +232,10 @@ padding: 0.65rem 1.25rem;\
 <div style='display: flex; align-items: center;'>\
 <a href='/' style='display: inline-block; margin-right: 1rem;'><img src='/favicon.png' alt='Home' style='width: 64px; height: 64px; border: none;'></a>\
 <h1 style='margin: 0;'>Configuration</h1>\
-</div>\
-%s\
+</div>"
+
+/* After logout section */
+#define CONFIG_CHUNK_SCRIPT "\
 </div>\
 <script>\
 var qs = window.location.search.substr(1);\
@@ -432,216 +245,143 @@ document.getElementById('container').style.display = 'none';\
 document.body.innerHTML ='<div id=\"container\"><h1>Configuration</h1><p style=\"text-align:center; margin: 2rem 0; color: #00d9ff;\">Settings saved! Rebooting...</p></div>';\
 setTimeout(\"location.href = '/'\", 10000);\
 }\
-</script>\
+</script>"
+
+/* AP Settings section - uses %s for: ap_ssid, ap_passwd, ap_ip, ap_mac, hidden_checked */
+#define CONFIG_CHUNK_AP "\
 <h2>Access Point Settings</h2>\
 <form action='' method='GET'>\
 <table>\
-<tr>\
-<td>SSID</td>\
-<td><input type='text' name='ap_ssid' value='%s' placeholder='Network name'/></td>\
-</tr>\
-<tr>\
-<td>Password</td>\
-<td><input type='text' name='ap_password' value='%s' placeholder='Min 8 chars or empty'/></td>\
-</tr>\
-<tr>\
-<td>AP IP Address</td>\
-<td><input type='text' name='ap_ip_addr' value='%s' placeholder='192.168.4.1'/></td>\
-</tr>\
-<tr>\
-<td>MAC Address</td>\
-<td><input type='text' name='ap_mac' value='%s' placeholder='AA:BB:CC:DD:EE:FF'/></td>\
-</tr>\
-<tr>\
-<td>Hidden SSID</td>\
-<td><input type='checkbox' name='ap_hidden' value='1' %s> <span style='color:#888;font-size:0.85rem;'>Hide from scans</span></td>\
-</tr>\
-<tr>\
-<td></td>\
-<td><input type='submit' value='Apply' class='ok-button'/></td>\
-</tr>\
+<tr><td>SSID</td><td><input type='text' name='ap_ssid' value='%s' placeholder='Network name'/></td></tr>\
+<tr><td>Password</td><td><input type='text' name='ap_password' value='%s' placeholder='Min 8 chars or empty'/></td></tr>\
+<tr><td>AP IP Address</td><td><input type='text' name='ap_ip_addr' value='%s' placeholder='192.168.4.1'/></td></tr>\
+<tr><td>MAC Address</td><td><input type='text' name='ap_mac' value='%s' placeholder='AA:BB:CC:DD:EE:FF'/></td></tr>\
+<tr><td>Hidden SSID</td><td><input type='checkbox' name='ap_hidden' value='1' %s> <span style='color:#888;font-size:0.85rem;'>Hide from scans</span></td></tr>\
+<tr><td></td><td><input type='submit' value='Apply' class='ok-button'/></td></tr>\
 </table>\
 <small>Leave password empty for open network</small>\
-</form>\
-\
+</form>"
+
+/* STA Settings section - uses %s for: ssid, passwd, ent_username, ent_identity, sta_mac */
+#define CONFIG_CHUNK_STA "\
 <h2>Station Settings (Uplink)</h2>\
 <form action='' method='GET'>\
 <table>\
-<tr>\
-<td>SSID</td>\
-<td><input type='text' name='ssid' value='%s' placeholder='Uplink network'/></td>\
-</tr>\
-<tr>\
-<td>Password</td>\
-<td><input type='text' name='password' value='%s' placeholder='Network password'/></td>\
-</tr>\
-<tr>\
-<td colspan='2' style='padding-top: 1rem; color: #888; font-size: 0.85rem;'>WPA2 Enterprise (optional)</td>\
-</tr>\
-<tr>\
-<td>Username</td>\
-<td><input type='text' name='ent_username' value='%s' placeholder='Enterprise username'/></td>\
-</tr>\
-<tr>\
-<td>Identity</td>\
-<td><input type='text' name='ent_identity' value='%s' placeholder='Enterprise identity'/></td>\
-</tr>\
-<tr>\
-<td>MAC Address</td>\
-<td><input type='text' name='sta_mac' value='%s' placeholder='AA:BB:CC:DD:EE:FF'/></td>\
-</tr>\
-<tr>\
-<td></td>\
-<td><input type='submit' value='Connect' class='ok-button'/></td>\
-</tr>\
+<tr><td>SSID</td><td><input type='text' name='ssid' value='%s' placeholder='Uplink network'/></td></tr>\
+<tr><td>Password</td><td><input type='text' name='password' value='%s' placeholder='Network password'/></td></tr>\
+<tr><td colspan='2' style='padding-top: 1rem; color: #888; font-size: 0.85rem;'>WPA2 Enterprise (optional)</td></tr>\
+<tr><td>Username</td><td><input type='text' name='ent_username' value='%s' placeholder='Enterprise username'/></td></tr>\
+<tr><td>Identity</td><td><input type='text' name='ent_identity' value='%s' placeholder='Enterprise identity'/></td></tr>\
+<tr><td>MAC Address</td><td><input type='text' name='sta_mac' value='%s' placeholder='AA:BB:CC:DD:EE:FF'/></td></tr>\
+<tr><td></td><td><input type='submit' value='Connect' class='ok-button'/></td></tr>\
 </table>\
-</form>\
-\
+</form>"
+
+/* Static IP section - uses %s for: static_ip, subnet_mask, gateway */
+#define CONFIG_CHUNK_STATIC "\
 <h2>Static IP Settings</h2>\
 <form action='' method='GET'>\
 <table>\
-<tr>\
-<td>Static IP</td>\
-<td><input type='text' name='staticip' value='%s' placeholder='192.168.1.100'/></td>\
-</tr>\
-<tr>\
-<td>Subnet Mask</td>\
-<td><input type='text' name='subnetmask' value='%s' placeholder='255.255.255.0'/></td>\
-</tr>\
-<tr>\
-<td>Gateway</td>\
-<td><input type='text' name='gateway' value='%s' placeholder='192.168.1.1'/></td>\
-</tr>\
-<tr>\
-<td></td>\
-<td><input type='submit' value='Set Static IP' class='ok-button'/></td>\
-</tr>\
+<tr><td>Static IP</td><td><input type='text' name='staticip' value='%s' placeholder='192.168.1.100'/></td></tr>\
+<tr><td>Subnet Mask</td><td><input type='text' name='subnetmask' value='%s' placeholder='255.255.255.0'/></td></tr>\
+<tr><td>Gateway</td><td><input type='text' name='gateway' value='%s' placeholder='192.168.1.1'/></td></tr>\
+<tr><td></td><td><input type='submit' value='Set Static IP' class='ok-button'/></td></tr>\
 </table>\
 <small>Leave empty for DHCP</small>\
-</form>\
-\
+</form>"
+
+/* Remote Console section - uses: rc_en_chk, rc_dis_chk, rc_color, rc_status, rc_kick, rc_port, rc_bind_both/ap/sta, rc_timeout */
+#define CONFIG_CHUNK_RC "\
 <h2>Remote Console</h2>\
 <form action='' method='GET'>\
 <table>\
-<tr>\
-<td>Service</td>\
-<td>\
+<tr><td>Service</td><td>\
 <label style='margin-right: 1rem;'><input type='radio' name='rc_enabled' value='1' %s> Enabled</label>\
 <label><input type='radio' name='rc_enabled' value='0' %s> Disabled</label>\
 <input type='submit' value='Apply' class='ok-button' style='margin-left: 0.5rem; width: auto; padding: 0.4rem 1rem;'/>\
-</td>\
-</tr>\
-<tr>\
-<td>Status</td>\
-<td><strong style='color: %s;'>%s</strong>%s</td>\
-</tr>\
+</td></tr>\
+<tr><td>Status</td><td><strong style='color: %s;'>%s</strong>%s</td></tr>\
 </table>\
 </form>\
 <form action='' method='GET'>\
 <table>\
-<tr>\
-<td>Port</td>\
-<td><input type='number' name='rc_port' value='%d' min='1' max='65535' style='width: 100px;'/>\
-<input type='submit' value='Set' class='ok-button' style='margin-left: 0.5rem; width: auto; padding: 0.4rem 1rem;'/></td>\
-</tr>\
+<tr><td>Port</td><td><input type='number' name='rc_port' value='%d' min='1' max='65535' style='width: 100px;'/>\
+<input type='submit' value='Set' class='ok-button' style='margin-left: 0.5rem; width: auto; padding: 0.4rem 1rem;'/></td></tr>\
 </table>\
 </form>\
 <form action='' method='GET'>\
 <table>\
-<tr>\
-<td>Bind Interface</td>\
-<td>\
+<tr><td>Bind Interface</td><td>\
 <select name='rc_bind'>\
 <option value='0' %s>Both (AP + STA)</option>\
 <option value='1' %s>AP Only</option>\
 <option value='2' %s>STA Only</option>\
 </select>\
 <input type='submit' value='Set' class='ok-button' style='margin-left: 0.5rem; width: auto; padding: 0.4rem 1rem;'/>\
-</td>\
-</tr>\
+</td></tr>\
 </table>\
 </form>\
 <form action='' method='GET'>\
 <table>\
-<tr>\
-<td>Idle Timeout</td>\
-<td><input type='number' name='rc_timeout' value='%d' min='0' max='86400' style='width: 100px;'/> sec\
-<input type='submit' value='Set' class='ok-button' style='margin-left: 0.5rem; width: auto; padding: 0.4rem 1rem;'/></td>\
-</tr>\
+<tr><td>Idle Timeout</td><td><input type='number' name='rc_timeout' value='%lu' min='0' max='86400' style='width: 100px;'/> sec\
+<input type='submit' value='Set' class='ok-button' style='margin-left: 0.5rem; width: auto; padding: 0.4rem 1rem;'/></td></tr>\
 </table>\
 <small>0 = no timeout. Requires web password to be set.</small>\
-</form>\
-\
+</form>"
+
+/* PCAP section - uses: pcap_off/acl/promisc_sel, pcap_color, pcap_status, captured, dropped, snaplen */
+#define CONFIG_CHUNK_PCAP "\
 <h2>PCAP Packet Capture</h2>\
 <form action='' method='GET'>\
 <table>\
-<tr>\
-<td>Mode</td>\
-<td>\
+<tr><td>Mode</td><td>\
 <select name='pcap_mode' style='padding: 0.4rem; border-radius: 4px; border: 1px solid #ccc;'>\
 <option value='off' %s>Off</option>\
 <option value='acl' %s>ACL Monitor</option>\
 <option value='promisc' %s>Promiscuous</option>\
 </select>\
 <input type='submit' value='Set' class='ok-button' style='margin-left: 0.5rem;'/>\
-</td>\
-</tr>\
-<tr>\
-<td>Client</td>\
-<td><strong style='color: %s;'>%s</strong></td>\
-</tr>\
-<tr>\
-<td>Stats</td>\
-<td>%lu captured, %lu dropped</td>\
-</tr>\
+</td></tr>\
+<tr><td>Client</td><td><strong style='color: %s;'>%s</strong></td></tr>\
+<tr><td>Stats</td><td>%lu captured, %lu dropped</td></tr>\
 </table>\
 </form>\
 <form action='' method='GET'>\
 <table>\
-<tr>\
-<td>Snaplen</td>\
-<td><input type='text' name='pcap_snaplen' value='%d' placeholder='64-1600'/></td>\
-</tr>\
-<tr>\
-<td></td>\
-<td><input type='submit' value='Set Snaplen' class='ok-button'/></td>\
-</tr>\
+<tr><td>Snaplen</td><td><input type='text' name='pcap_snaplen' value='%d' placeholder='64-1600'/></td></tr>\
+<tr><td></td><td><input type='submit' value='Set Snaplen' class='ok-button'/></td></tr>\
 </table>\
 <small>Max bytes to capture per packet (64-1600). Lower values save buffer space.</small>\
-</form>\
-\
+</form>"
+
+/* Device management and footer */
+#define CONFIG_CHUNK_TAIL "\
 <h2>Device Management</h2>\
 <form action='' method='GET'>\
 <table>\
-<tr>\
-<td>Device</td>\
-<td><input type='submit' name='reset' value='Reboot Now' class='red-button'/></td>\
-</tr>\
+<tr><td>Device</td><td><input type='submit' name='reset' value='Reboot Now' class='red-button'/></td></tr>\
 </table>\
 </form>\
-\
 <div style='margin-top: 2rem; padding: 1rem; background: #fff3cd; border: 2px solid #ff9800; border-radius: 8px;'>\
 <h2 style='color: #ff6b00; margin-bottom: 0.5rem;'>⚠ Danger Zone</h2>\
 <p style='margin-bottom: 1rem; color: #666; font-size: 0.9rem;'>This will disable the web interface completely. You can only re-enable it via the console using the 'web_ui enable' command.</p>\
 <form action='' method='GET'>\
 <table>\
-<tr>\
-<td style='color: #d32f2f; font-weight: bold;'>Disable Interface</td>\
-<td><input type='submit' name='disable_interface' value='Disable' class='red-button' onclick='return confirm(\"Are you sure? The web interface will be disabled and can only be re-enabled via the console.\");'/></td>\
-</tr>\
+<tr><td style='color: #d32f2f; font-weight: bold;'>Disable Interface</td>\
+<td><input type='submit' name='disable_interface' value='Disable' class='red-button' onclick='return confirm(\"Are you sure? The web interface will be disabled and can only be re-enabled via the console.\");'/></td></tr>\
 </table>\
 </form>\
 </div>\
 <div style='margin-top: 2rem; text-align: center;'>\
-<a href='/' style='padding: 0.75rem 2rem; background: linear-gradient(135deg, #667eea 0%%, #764ba2 100%%); color: #fff; border: none; border-radius: 8px; text-decoration: none; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: all 0.3s; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4); display: inline-block;'>🏠 Home</a>\
+<a href='/' style='padding: 0.75rem 2rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #fff; border: none; border-radius: 8px; text-decoration: none; font-size: 0.95rem; font-weight: 600;'>🏠 Home</a>\
 </div>\
 </div>\
 </body>\
-</html>\
-"
+</html>"
 
 /* Mappings Page (DHCP Reservations + Port Forwarding) */
-#define MAPPINGS_PAGE "<html>\
+/* Mappings Page - Chunked for streaming */
+#define MAPPINGS_CHUNK_HEAD "<html>\
 <head>\
 <meta name='viewport' content='width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0'>\
 <meta charset='UTF-8'>\
@@ -649,233 +389,39 @@ setTimeout(\"location.href = '/'\", 10000);\
 <link rel='icon' href='favicon.png'>\
 </head>\
 <style>\
-* {\
-box-sizing: border-box;\
-margin: 0;\
-padding: 0;\
-}\
-\
-body {\
-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;\
-background: linear-gradient(135deg, #1a1a2e 0%%, #16213e 100%%);\
-color: #e0e0e0;\
-padding: 1rem;\
-min-height: 100vh;\
-line-height: 1.6;\
-}\
-\
-h1 {\
-font-size: 1.5rem;\
-font-weight: 600;\
-color: #00d9ff;\
-margin-bottom: 1rem;\
-text-shadow: 0 0 20px rgba(0, 217, 255, 0.3);\
-}\
-\
-h2 {\
-font-size: 1.15rem;\
-font-weight: 500;\
-color: #00d9ff;\
-margin: 1.5rem 0 0.75rem 0;\
-padding-bottom: 0.5rem;\
-border-bottom: 1px solid rgba(0, 217, 255, 0.2);\
-}\
-\
-#container {\
-max-width: 800px;\
-margin: 0 auto;\
-padding: 1.5rem;\
-background: rgba(30, 30, 46, 0.9);\
-border-radius: 16px;\
-box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);\
-backdrop-filter: blur(10px);\
-}\
-\
-.nav-link {\
-color: #00d9ff;\
-text-decoration: none;\
-font-size: 0.9rem;\
-display: inline-block;\
-margin-bottom: 1rem;\
-transition: all 0.2s;\
-}\
-\
-.nav-link:hover {\
-color: #33e0ff;\
-transform: translateX(-3px);\
-}\
-\
-.data-table {\
-width: 100%%;\
-border-collapse: collapse;\
-margin: 1rem 0;\
-background: rgba(22, 33, 62, 0.6);\
-border-radius: 12px;\
-overflow: hidden;\
-border: 1px solid rgba(0, 217, 255, 0.1);\
-}\
-\
-.data-table thead {\
-background: rgba(0, 217, 255, 0.1);\
-}\
-\
-.data-table th {\
-padding: 0.75rem 0.5rem;\
-text-align: left;\
-font-weight: 600;\
-color: #00d9ff;\
-font-size: 0.9rem;\
-}\
-\
-.data-table td {\
-padding: 0.75rem 0.5rem;\
-border-bottom: 1px solid rgba(255, 255, 255, 0.05);\
-font-size: 0.9rem;\
-}\
-\
-.data-table tbody tr:last-child td {\
-border-bottom: none;\
-}\
-\
-.data-table tbody tr:hover {\
-background: rgba(0, 217, 255, 0.05);\
-}\
-\
-table {\
-width: 100%%;\
-border-collapse: collapse;\
-}\
-\
-td {\
-padding: 0.5rem 0;\
-vertical-align: top;\
-}\
-\
-td:first-child {\
-color: #888;\
-font-size: 0.9rem;\
-padding-right: 0.75rem;\
-width: 30%%;\
-text-align: right;\
-}\
-\
-input[type='text'], input[type='number'], select {\
-width: 100%%;\
-background: rgba(22, 33, 62, 0.6);\
-border: 1px solid rgba(0, 217, 255, 0.2);\
-border-radius: 8px;\
-color: #e0e0e0;\
-padding: 0.75rem;\
-font-size: 0.95rem;\
-transition: all 0.3s;\
-}\
-\
-input:focus, select:focus {\
-outline: none;\
-border-color: #00d9ff;\
-box-shadow: 0 0 0 3px rgba(0, 217, 255, 0.1);\
-background: rgba(22, 33, 62, 0.8);\
-}\
-\
-input::placeholder {\
-color: #666;\
-}\
-\
-select {\
-cursor: pointer;\
-}\
-\
-.ok-button {\
-background: linear-gradient(135deg, #667eea 0%%, #764ba2 100%%);\
-color: #fff;\
-border: none;\
-border-radius: 8px;\
-padding: 0.75rem 1.5rem;\
-font-size: 0.95rem;\
-font-weight: 600;\
-cursor: pointer;\
-transition: all 0.3s;\
-box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);\
-width: 100%%;\
-margin-top: 0.5rem;\
-}\
-\
-.ok-button:hover {\
-transform: translateY(-2px);\
-box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);\
-}\
-\
-.red-button {\
-background: linear-gradient(135deg, #f093fb 0%%, #f5576c 100%%);\
-color: #fff;\
-border: none;\
-border-radius: 6px;\
-padding: 0.4rem 0.8rem;\
-font-size: 0.8rem;\
-font-weight: 600;\
-cursor: pointer;\
-transition: all 0.3s;\
-box-shadow: 0 2px 8px rgba(245, 87, 108, 0.4);\
-text-decoration: none;\
-display: inline-block;\
-}\
-\
-.red-button:hover {\
-transform: translateY(-1px);\
-box-shadow: 0 4px 12px rgba(245, 87, 108, 0.6);\
-}\
-\
-.section {\
-margin-bottom: 2rem;\
-}\
-\
-@media (max-width: 768px) {\
-body {\
-padding: 0.5rem;\
-}\
-\
-#container {\
-padding: 1rem;\
-border-radius: 12px;\
-}\
-\
-h1 {\
-font-size: 1.25rem;\
-}\
-\
-h2 {\
-font-size: 1rem;\
-}\
-\
-.data-table {\
-font-size: 0.8rem;\
-display: block;\
-overflow-x: auto;\
-}\
-\
-.data-table th,\
-.data-table td {\
-padding: 0.5rem 0.25rem;\
-font-size: 0.8rem;\
-}\
-\
-td:first-child {\
-font-size: 0.8rem;\
-width: 35%%;\
-}\
-\
-input[type='text'], input[type='number'], select {\
-font-size: 0.9rem;\
-padding: 0.65rem;\
-}\
-}\
-.modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%%; height: 100%%; background: rgba(0,0,0,0.7); z-index: 1000; justify-content: center; align-items: center; }\
+* { box-sizing: border-box; margin: 0; padding: 0; }\
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); color: #e0e0e0; padding: 1rem; min-height: 100vh; line-height: 1.6; }\
+h1 { font-size: 1.5rem; font-weight: 600; color: #00d9ff; margin-bottom: 1rem; text-shadow: 0 0 20px rgba(0, 217, 255, 0.3); }\
+h2 { font-size: 1.15rem; font-weight: 500; color: #00d9ff; margin: 1.5rem 0 0.75rem 0; padding-bottom: 0.5rem; border-bottom: 1px solid rgba(0, 217, 255, 0.2); }\
+#container { max-width: 800px; margin: 0 auto; padding: 1.5rem; background: rgba(30, 30, 46, 0.9); border-radius: 16px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4); backdrop-filter: blur(10px); }\
+.nav-link { color: #00d9ff; text-decoration: none; font-size: 0.9rem; display: inline-block; margin-bottom: 1rem; transition: all 0.2s; }\
+.nav-link:hover { color: #33e0ff; transform: translateX(-3px); }\
+.data-table { width: 100%; border-collapse: collapse; margin: 1rem 0; background: rgba(22, 33, 62, 0.6); border-radius: 12px; overflow: hidden; border: 1px solid rgba(0, 217, 255, 0.1); }\
+.data-table thead { background: rgba(0, 217, 255, 0.1); }\
+.data-table th { padding: 0.75rem 0.5rem; text-align: left; font-weight: 600; color: #00d9ff; font-size: 0.9rem; }\
+.data-table td { padding: 0.75rem 0.5rem; border-bottom: 1px solid rgba(255, 255, 255, 0.05); font-size: 0.9rem; }\
+.data-table tbody tr:last-child td { border-bottom: none; }\
+.data-table tbody tr:hover { background: rgba(0, 217, 255, 0.05); }\
+table { width: 100%; border-collapse: collapse; }\
+td { padding: 0.5rem 0; vertical-align: top; }\
+td:first-child { color: #888; font-size: 0.9rem; padding-right: 0.75rem; width: 30%; text-align: right; }\
+input[type='text'], input[type='number'], select { width: 100%; background: rgba(22, 33, 62, 0.6); border: 1px solid rgba(0, 217, 255, 0.2); border-radius: 8px; color: #e0e0e0; padding: 0.75rem; font-size: 0.95rem; transition: all 0.3s; }\
+input:focus, select:focus { outline: none; border-color: #00d9ff; box-shadow: 0 0 0 3px rgba(0, 217, 255, 0.1); background: rgba(22, 33, 62, 0.8); }\
+input::placeholder { color: #666; }\
+select { cursor: pointer; }\
+.ok-button { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #fff; border: none; border-radius: 8px; padding: 0.75rem 1.5rem; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: all 0.3s; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4); width: 100%; margin-top: 0.5rem; }\
+.ok-button:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6); }\
+.red-button { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: #fff; border: none; border-radius: 6px; padding: 0.4rem 0.8rem; font-size: 0.8rem; font-weight: 600; cursor: pointer; transition: all 0.3s; box-shadow: 0 2px 8px rgba(245, 87, 108, 0.4); text-decoration: none; display: inline-block; }\
+.red-button:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(245, 87, 108, 0.6); }\
+.section { margin-bottom: 2rem; }\
+@media (max-width: 768px) { body { padding: 0.5rem; } #container { padding: 1rem; border-radius: 12px; } h1 { font-size: 1.25rem; } h2 { font-size: 1rem; } .data-table { font-size: 0.8rem; display: block; overflow-x: auto; } .data-table th, .data-table td { padding: 0.5rem 0.25rem; font-size: 0.8rem; } td:first-child { font-size: 0.8rem; width: 35%; } input[type='text'], input[type='number'], select { font-size: 0.9rem; padding: 0.65rem; } }\
+.modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 1000; justify-content: center; align-items: center; }\
 .modal-overlay.show { display: flex; }\
 .modal-box { background: rgba(30, 30, 46, 0.98); border: 2px solid #f5576c; border-radius: 12px; padding: 1.5rem; max-width: 400px; text-align: center; box-shadow: 0 8px 32px rgba(245, 87, 108, 0.3); }\
 .modal-box h3 { color: #f5576c; margin-bottom: 1rem; }\
 .modal-box p { color: #e0e0e0; margin-bottom: 1.5rem; }\
-.modal-box button { background: linear-gradient(135deg, #667eea 0%%, #764ba2 100%%); color: #fff; border: none; border-radius: 8px; padding: 0.75rem 2rem; font-size: 1rem; cursor: pointer; }\
-.green-button { background: linear-gradient(135deg, #4caf50 0%%, #2e7d32 100%%); color: #fff; border: none; border-radius: 6px; padding: 0.4rem 0.8rem; font-size: 0.8rem; font-weight: 600; cursor: pointer; transition: all 0.3s; box-shadow: 0 2px 8px rgba(76, 175, 80, 0.4); text-decoration: none; display: inline-block; }\
+.modal-box button { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #fff; border: none; border-radius: 8px; padding: 0.75rem 2rem; font-size: 1rem; cursor: pointer; }\
+.green-button { background: linear-gradient(135deg, #4caf50 0%, #2e7d32 100%); color: #fff; border: none; border-radius: 6px; padding: 0.4rem 0.8rem; font-size: 0.8rem; font-weight: 600; cursor: pointer; transition: all 0.3s; box-shadow: 0 2px 8px rgba(76, 175, 80, 0.4); text-decoration: none; display: inline-block; }\
 .green-button:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(76, 175, 80, 0.6); }\
 </style>\
 <script>\
@@ -886,17 +432,20 @@ document.getElementById('dhcp_name').value = name;\
 document.getElementById('dhcp_mac').scrollIntoView({behavior: 'smooth', block: 'center'});\
 }\
 </script>\
-<body>\
-%s\
+<body>"
+
+/* After error modal, before logout section */
+#define MAPPINGS_CHUNK_MID1 "\
 <div id='container'>\
 <div style='display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;'>\
 <div style='display: flex; align-items: center;'>\
 <a href='/' style='display: inline-block; margin-right: 1rem;'><img src='/favicon.png' alt='Home' style='width: 64px; height: 64px; border: none;'></a>\
 <h1 style='margin: 0;'>Mappings</h1>\
+</div>"
+
+/* After logout section, before clients tbody */
+#define MAPPINGS_CHUNK_MID2 "\
 </div>\
-%s\
-</div>\
-\
 <div class='section'>\
 <h2>Connected Clients</h2>\
 <table class='data-table'>\
@@ -908,12 +457,13 @@ document.getElementById('dhcp_mac').scrollIntoView({behavior: 'smooth', block: '
 <th>Action</th>\
 </tr>\
 </thead>\
-<tbody>\
-%s\
+<tbody>"
+
+/* After clients tbody, before dhcp tbody */
+#define MAPPINGS_CHUNK_MID3 "\
 </tbody>\
 </table>\
 </div>\
-\
 <div class='section'>\
 <h2>DHCP Reservations</h2>\
 <table class='data-table'>\
@@ -925,34 +475,22 @@ document.getElementById('dhcp_mac').scrollIntoView({behavior: 'smooth', block: '
 <th>Action</th>\
 </tr>\
 </thead>\
-<tbody>\
-%s\
+<tbody>"
+
+/* After dhcp tbody, before portmap tbody */
+#define MAPPINGS_CHUNK_MID4 "\
 </tbody>\
 </table>\
-\
 <h2>Add DHCP Reservation</h2>\
 <form action='/mappings' method='GET'>\
 <table>\
-<tr>\
-<td>MAC Address</td>\
-<td><input type='text' name='dhcp_mac' id='dhcp_mac' placeholder='AA:BB:CC:DD:EE:FF'/></td>\
-</tr>\
-<tr>\
-<td>IP Address</td>\
-<td><input type='text' name='dhcp_ip' id='dhcp_ip' placeholder='192.168.4.100'/></td>\
-</tr>\
-<tr>\
-<td>Name (optional)</td>\
-<td><input type='text' name='dhcp_name' id='dhcp_name' placeholder='My Device'/></td>\
-</tr>\
-<tr>\
-<td></td>\
-<td><input type='submit' name='dhcp_action' value='Add Reservation' class='ok-button'/></td>\
-</tr>\
+<tr><td>MAC Address</td><td><input type='text' name='dhcp_mac' id='dhcp_mac' placeholder='AA:BB:CC:DD:EE:FF'/></td></tr>\
+<tr><td>IP Address</td><td><input type='text' name='dhcp_ip' id='dhcp_ip' placeholder='192.168.4.100'/></td></tr>\
+<tr><td>Name (optional)</td><td><input type='text' name='dhcp_name' id='dhcp_name' placeholder='My Device'/></td></tr>\
+<tr><td></td><td><input type='submit' name='dhcp_action' value='Add Reservation' class='ok-button'/></td></tr>\
 </table>\
 </form>\
 </div>\
-\
 <div class='section'>\
 <h2>Port Forwarding</h2>\
 <table class='data-table'>\
@@ -965,52 +503,33 @@ document.getElementById('dhcp_mac').scrollIntoView({behavior: 'smooth', block: '
 <th>Action</th>\
 </tr>\
 </thead>\
-<tbody>\
-%s\
+<tbody>"
+
+/* After portmap tbody to end */
+#define MAPPINGS_CHUNK_TAIL "\
 </tbody>\
 </table>\
-\
 <h2>Add Port Forwards</h2>\
 <form action='/mappings' method='GET'>\
 <table>\
-<tr>\
-<td>Protocol</td>\
-<td>\
-<select name='proto'>\
-<option value='TCP'>TCP</option>\
-<option value='UDP'>UDP</option>\
-</select>\
-</td>\
-</tr>\
-<tr>\
-<td>External Port</td>\
-<td><input type='number' name='ext_port' min='1' max='65535' placeholder='8080'/></td>\
-</tr>\
-<tr>\
-<td>Internal IP</td>\
-<td><input type='text' name='int_ip' placeholder='IP or device name'/></td>\
-</tr>\
-<tr>\
-<td>Internal Port</td>\
-<td><input type='number' name='int_port' min='1' max='65535' placeholder='80'/></td>\
-</tr>\
-<tr>\
-<td></td>\
-<td><input type='submit' name='port_action' value='Add Forward' class='ok-button'/></td>\
-</tr>\
+<tr><td>Protocol</td><td><select name='proto'><option value='TCP'>TCP</option><option value='UDP'>UDP</option></select></td></tr>\
+<tr><td>External Port</td><td><input type='number' name='ext_port' min='1' max='65535' placeholder='8080'/></td></tr>\
+<tr><td>Internal IP</td><td><input type='text' name='int_ip' placeholder='IP or device name'/></td></tr>\
+<tr><td>Internal Port</td><td><input type='number' name='int_port' min='1' max='65535' placeholder='80'/></td></tr>\
+<tr><td></td><td><input type='submit' name='port_action' value='Add Forward' class='ok-button'/></td></tr>\
 </table>\
 </form>\
 </div>\
 <div style='margin-top: 2rem; text-align: center;'>\
-<a href='/' style='padding: 0.75rem 2rem; background: linear-gradient(135deg, #667eea 0%%, #764ba2 100%%); color: #fff; border: none; border-radius: 8px; text-decoration: none; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: all 0.3s; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4); display: inline-block;'>🏠 Home</a>\
+<a href='/' style='padding: 0.75rem 2rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #fff; border: none; border-radius: 8px; text-decoration: none; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: all 0.3s; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4); display: inline-block;'>🏠 Home</a>\
 </div>\
 </div>\
 </body>\
-</html>\
-"
+</html>"
 
 /* Firewall (ACL) Page */
-#define FIREWALL_PAGE "<html>\
+/* Firewall Page - Chunked for streaming */
+#define FIREWALL_CHUNK_HEAD "<html>\
 <head>\
 <meta name='viewport' content='width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0'>\
 <meta charset='UTF-8'>\
@@ -1019,61 +538,63 @@ document.getElementById('dhcp_mac').scrollIntoView({behavior: 'smooth', block: '
 </head>\
 <style>\
 * { box-sizing: border-box; margin: 0; padding: 0; }\
-body {\
-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;\
-background: linear-gradient(135deg, #1a1a2e 0%%, #16213e 100%%);\
-color: #e0e0e0; padding: 1rem; min-height: 100vh; line-height: 1.6;\
-}\
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); color: #e0e0e0; padding: 1rem; min-height: 100vh; line-height: 1.6; }\
 h1 { font-size: 1.5rem; font-weight: 600; color: #00d9ff; margin-bottom: 1rem; text-shadow: 0 0 20px rgba(0, 217, 255, 0.3); }\
 h2 { font-size: 1.1rem; font-weight: 500; color: #00d9ff; margin: 1.2rem 0 0.5rem 0; padding-bottom: 0.3rem; border-bottom: 1px solid rgba(0, 217, 255, 0.2); }\
 h3 { font-size: 0.95rem; font-weight: 500; color: #f093fb; margin: 0.8rem 0 0.3rem 0; }\
 #container { max-width: 900px; margin: 0 auto; padding: 1.5rem; background: rgba(30, 30, 46, 0.9); border-radius: 16px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4); }\
-.data-table { width: 100%%; border-collapse: collapse; margin: 0.5rem 0; background: rgba(22, 33, 62, 0.6); border-radius: 8px; overflow: hidden; border: 1px solid rgba(0, 217, 255, 0.1); font-size: 0.8rem; }\
+.data-table { width: 100%; border-collapse: collapse; margin: 0.5rem 0; background: rgba(22, 33, 62, 0.6); border-radius: 8px; overflow: hidden; border: 1px solid rgba(0, 217, 255, 0.1); font-size: 0.8rem; }\
 .data-table thead { background: rgba(0, 217, 255, 0.1); }\
 .data-table th { padding: 0.4rem 0.2rem; text-align: left; font-weight: 600; color: #00d9ff; font-size: 0.75rem; }\
 .data-table td { padding: 0.4rem 0.2rem; border-bottom: 1px solid rgba(255, 255, 255, 0.05); font-size: 0.75rem; }\
 .data-table tbody tr:last-child td { border-bottom: none; }\
 .data-table tbody tr:hover { background: rgba(0, 217, 255, 0.05); }\
-table.form-table { width: 100%%; border-collapse: collapse; }\
+table.form-table { width: 100%; border-collapse: collapse; }\
 table.form-table td { padding: 0.3rem 0; vertical-align: top; }\
-table.form-table td:first-child { color: #888; font-size: 0.8rem; padding-right: 0.5rem; width: 22%%; text-align: right; }\
-input[type='text'], input[type='number'], select { width: 100%%; background: rgba(22, 33, 62, 0.6); border: 1px solid rgba(0, 217, 255, 0.2); border-radius: 6px; color: #e0e0e0; padding: 0.4rem; font-size: 0.85rem; }\
+table.form-table td:first-child { color: #888; font-size: 0.8rem; padding-right: 0.5rem; width: 22%; text-align: right; }\
+input[type='text'], input[type='number'], select { width: 100%; background: rgba(22, 33, 62, 0.6); border: 1px solid rgba(0, 217, 255, 0.2); border-radius: 6px; color: #e0e0e0; padding: 0.4rem; font-size: 0.85rem; }\
 input:focus, select:focus { outline: none; border-color: #00d9ff; }\
-.ok-button { background: linear-gradient(135deg, #667eea 0%%, #764ba2 100%%); color: #fff; border: none; border-radius: 6px; padding: 0.5rem 1rem; font-size: 0.85rem; font-weight: 600; cursor: pointer; width: 100%%; margin-top: 0.25rem; }\
-.red-button { background: linear-gradient(135deg, #f093fb 0%%, #f5576c 100%%); color: #fff; border: none; border-radius: 4px; padding: 0.2rem 0.4rem; font-size: 0.7rem; font-weight: 600; cursor: pointer; text-decoration: none; display: inline-block; }\
-.orange-button { background: linear-gradient(135deg, #ff9a56 0%%, #ff6b35 100%%); color: #fff; border: none; border-radius: 4px; padding: 0.2rem 0.4rem; font-size: 0.7rem; font-weight: 600; cursor: pointer; text-decoration: none; display: inline-block; }\
+.ok-button { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #fff; border: none; border-radius: 6px; padding: 0.5rem 1rem; font-size: 0.85rem; font-weight: 600; cursor: pointer; width: 100%; margin-top: 0.25rem; }\
+.red-button { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: #fff; border: none; border-radius: 4px; padding: 0.2rem 0.4rem; font-size: 0.7rem; font-weight: 600; cursor: pointer; text-decoration: none; display: inline-block; }\
+.orange-button { background: linear-gradient(135deg, #ff9a56 0%, #ff6b35 100%); color: #fff; border: none; border-radius: 4px; padding: 0.2rem 0.4rem; font-size: 0.7rem; font-weight: 600; cursor: pointer; text-decoration: none; display: inline-block; }\
 .acl-section { margin-bottom: 1rem; padding: 0.8rem; background: rgba(22, 33, 62, 0.4); border-radius: 10px; border: 1px solid rgba(0, 217, 255, 0.1); }\
 .stats { font-size: 0.75rem; color: #888; margin-bottom: 0.3rem; }\
 .stats span { margin-right: 0.8rem; }\
 .stats .allowed { color: #4caf50; }\
 .stats .denied { color: #f44336; }\
 @media (max-width: 768px) { body { padding: 0.5rem; } #container { padding: 1rem; } .data-table { font-size: 0.65rem; display: block; overflow-x: auto; } .data-table th, .data-table td { padding: 0.2rem 0.1rem; font-size: 0.65rem; } }\
-.modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%%; height: 100%%; background: rgba(0,0,0,0.7); z-index: 1000; justify-content: center; align-items: center; }\
+.modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 1000; justify-content: center; align-items: center; }\
 .modal-overlay.show { display: flex; }\
 .modal-box { background: rgba(30, 30, 46, 0.98); border: 2px solid #f5576c; border-radius: 12px; padding: 1.5rem; max-width: 400px; text-align: center; box-shadow: 0 8px 32px rgba(245, 87, 108, 0.3); }\
 .modal-box h3 { color: #f5576c; margin-bottom: 1rem; }\
 .modal-box p { color: #e0e0e0; margin-bottom: 1.5rem; }\
-.modal-box button { background: linear-gradient(135deg, #667eea 0%%, #764ba2 100%%); color: #fff; border: none; border-radius: 6px; padding: 0.5rem 1.5rem; font-size: 0.9rem; font-weight: 600; cursor: pointer; }\
+.modal-box button { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #fff; border: none; border-radius: 6px; padding: 0.5rem 1.5rem; font-size: 0.9rem; font-weight: 600; cursor: pointer; }\
 </style>\
-<body>\
-%s\
+<body>"
+
+/* After error modal, before logout section */
+#define FIREWALL_CHUNK_MID1 "\
 <div id='container'>\
 <div style='display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;'>\
 <div style='display: flex; align-items: center;'>\
 <a href='/' style='display: inline-block; margin-right: 1rem;'><img src='/favicon.png' alt='Home' style='width: 64px; height: 64px; border: none;'></a>\
 <h1 style='margin: 0;'>Firewall</h1>\
+</div>"
+
+/* After logout section, before ACL sections */
+#define FIREWALL_CHUNK_MID2 "\
 </div>\
-%s\
-</div>\
-<p style='color: #888; font-size: 0.8rem; margin-bottom: 0.8rem;'>Rules processed top-down. First match wins. No match = allow (permissive).</p>\
-%s\
+<p style='color: #888; font-size: 0.8rem; margin-bottom: 0.8rem;'>Rules processed top-down. First match wins. No match = allow (permissive).</p>"
+
+/* After ACL sections (add form and footer) */
+#define FIREWALL_CHUNK_TAIL "\
 <h2>Add ACL Rule</h2>\
 <form action='/firewall' method='GET'>\
 <table class='form-table'>\
 <tr><td>Direction</td><td><select name='acl_list'>\
-<option value='0'>Internet to ESP (to_sta))</option>\
-<option value='1'>ESP to Internet (from_sta))</option>\
-<option value='2'>Cients to ESP (to_ap))</option>\
+<option value='0'>Internet to ESP (to_sta)</option>\
+<option value='1'>ESP to Internet (from_sta)</option>\
+<option value='2'>Clients to ESP (to_ap)</option>\
 <option value='3'>ESP to Clients (from_ap)</option>\
 </select></td></tr>\
 <tr><td>Protocol</td><td><select name='proto'>\
@@ -1096,12 +617,11 @@ input:focus, select:focus { outline: none; border-color: #00d9ff; }\
 </table>\
 </form>\
 <div style='margin-top: 1.5rem; text-align: center;'>\
-<a href='/' style='padding: 0.6rem 1.5rem; background: linear-gradient(135deg, #667eea 0%%, #764ba2 100%%); color: #fff; border: none; border-radius: 8px; text-decoration: none; font-size: 0.9rem; font-weight: 600;'>🏠 Home</a>\
+<a href='/' style='padding: 0.6rem 1.5rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #fff; border: none; border-radius: 8px; text-decoration: none; font-size: 0.9rem; font-weight: 600;'>🏠 Home</a>\
 </div>\
 </div>\
 </body>\
-</html>\
-"
+</html>"
 
 /* WiFi Scan Page */
 #define SCAN_PAGE "<html>\

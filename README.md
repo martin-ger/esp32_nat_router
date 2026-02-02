@@ -22,6 +22,8 @@ This is a firmware to use the ESP32 as WiFi NAT router. It can be used as:
 - **LED Status Indicator**: Visual feedback for connection status and connected clients
 - **TTL Override**: Set a fixed TTL for upstream packets (useful for hiding NAT from ISPs)
 
+The maximum number of simultaniously connected WiFi clients is 8 (5 on the ESP32c3) due to RAM limitations.
+
 The code is originally based on the [Console Component](https://docs.espressif.com/projects/esp-idf/en/latest/api-guides/console.html#console) and the [esp-idf-nat-example](https://github.com/jonask1337/esp-idf-nat-example). 
 
 ## First Boot
@@ -340,8 +342,8 @@ pcap stop            # Legacy: disable capture
 ### Technical Details
 
 - **TCP Port**: 19000
-- **Buffer Size**: 32KB ring buffer
-- **Default Snaplen**: 512 bytes (configurable 64-1600)
+- **Buffer Size**: 32KB ring buffer (16 KB on the ESP32c3)
+- **Default Snaplen**: 96 bytes (64 bytes on the ESP32c3, configurable 64-1600)
 - **Format**: Standard PCAP with DLT_EN10MB (Ethernet)
 - **Single Client**: One Wireshark connection at a time
 
@@ -517,12 +519,9 @@ help  [<string>] [-v <0|1>]
       <string>  Name of command
   -v, --verbose=<0|1>  If specified, list console commands with given verbose level
 
-free 
-  Get the current size of free heap memory
-
 heap 
-  Get minimum size of free heap memory that was available during program
-  execution
+  Get current and size of free heap memory and the minimum that was available
+  during program execution
 
 version 
   Get version of chip and SDK

@@ -1183,7 +1183,7 @@ void wifi_init(const uint8_t* mac, const char* ssid, const char* ent_username, c
             .channel = 0,
             .authmode = WIFI_AUTH_WPA2_WPA3_PSK,
             .ssid_hidden = ap_ssid_hidden,
-            .max_connection = 8,
+            .max_connection = AP_MAX_CONNECTIONS,
             .beacon_interval = 100,
         }
     };

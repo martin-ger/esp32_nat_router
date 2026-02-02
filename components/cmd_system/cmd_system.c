@@ -49,7 +49,6 @@ void load_log_level(void)
     }
 }
 
-static void register_free(void);
 static void register_heap(void);
 static void register_version(void);
 static void register_restart(void);
@@ -63,7 +62,6 @@ static void register_tasks(void);
 
 void register_system(void)
 {
-    register_free();
     register_heap();
     register_version();
     register_restart();
@@ -77,6 +75,20 @@ void register_system(void)
 }
 
 /* 'version' command */
+static const char* get_chip_model_name(esp_chip_model_t model)
+{
+    switch (model) {
+        case CHIP_ESP32:   return "ESP32";
+        case CHIP_ESP32S2: return "ESP32-S2";
+        case CHIP_ESP32S3: return "ESP32-S3";
+        case CHIP_ESP32C3: return "ESP32-C3";
+        case CHIP_ESP32C2: return "ESP32-C2";
+        case CHIP_ESP32C6: return "ESP32-C6";
+        case CHIP_ESP32H2: return "ESP32-H2";
+        default:           return "Unknown";
+    }
+}
+
 static int get_version(int argc, char **argv)
 {
     esp_chip_info_t info;
@@ -85,7 +97,7 @@ static int get_version(int argc, char **argv)
     esp_flash_get_size(NULL, &size_flash_chip);
     printf("IDF Version:%s\r\n", esp_get_idf_version());
     printf("Chip info:\r\n");
-    printf("\tmodel:%s\r\n", info.model == CHIP_ESP32 ? "ESP32" : "Unknow");
+    printf("\tmodel:%s\r\n", get_chip_model_name(info.model));
     printf("\tcores:%d\r\n", info.cores);
     printf("\tfeature:%s%s%s%s%lu%s\r\n",
            info.features & CHIP_FEATURE_WIFI_BGN ? "/802.11bgn" : "",
@@ -160,43 +172,24 @@ static void register_factory_reset(void)
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }
 
-/** 'free' command prints available heap memory */
+/** 'heap' command prints available heap memory */
 
-static int free_mem(int argc, char **argv)
+static int heap_mem(int argc, char **argv)
 {
-    printf("%lu\n", esp_get_free_heap_size());
-    return 0;
-}
-
-static void register_free(void)
-{
-    const esp_console_cmd_t cmd = {
-        .command = "free",
-        .help = "Get the current size of free heap memory",
-        .hint = NULL,
-        .func = &free_mem,
-    };
-    ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
-}
-
-/* 'heap' command prints minumum heap size */
-static int heap_size(int argc, char **argv)
-{
-    uint32_t heap_size = heap_caps_get_minimum_free_size(MALLOC_CAP_DEFAULT);
-    ESP_LOGI(TAG, "min heap size: %lu", heap_size);
+    printf("Current heap size: %lu (minimal: %u)\n", esp_get_free_heap_size(), 
+        heap_caps_get_minimum_free_size(MALLOC_CAP_DEFAULT));
     return 0;
 }
 
 static void register_heap(void)
 {
-    const esp_console_cmd_t heap_cmd = {
+    const esp_console_cmd_t cmd = {
         .command = "heap",
-        .help = "Get minimum size of free heap memory that was available during program execution",
+        .help = "Get the current amd min size of free heap memory",
         .hint = NULL,
-        .func = &heap_size,
+        .func = &heap_mem,
     };
-    ESP_ERROR_CHECK( esp_console_cmd_register(&heap_cmd) );
-
+    ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }
 
 /** 'tasks' command prints the list of tasks and related information */

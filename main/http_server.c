@@ -338,69 +338,106 @@ static esp_err_t index_get_handler(httpd_req_t *req)
     /* Check current authentication status */
     authenticated = is_authenticated(req);
 
-    /* Build status information */
-    char conn_status[32];
-    char sta_ip_str[32];
-    char ap_ip_str[32];
-    char dhcp_pool_str[64];
+    /* Reusable buffer for building dynamic content */
+    char row[512];
 
-    if (ap_connect) {
-        strcpy(conn_status, "Connected");
-        esp_ip4_addr_t addr;
-        addr.addr = my_ip;
-        sprintf(sta_ip_str, IPSTR, IP2STR(&addr));
-    } else {
-        strcpy(conn_status, "Disconnected");
-        strcpy(sta_ip_str, "N/A");
+    /* --- Begin chunked response --- */
+    httpd_resp_send_chunk(req, INDEX_CHUNK_HEAD, HTTPD_RESP_USE_STRLEN);
+
+    /* Stream logout button if authenticated */
+    if (authenticated) {
+        httpd_resp_send_chunk(req,
+            "<div style='text-align: right; margin-bottom: 0.5rem;'>"
+            "<a href='/?logout=1' style='padding: 0.4rem 1rem; background: rgba(255,82,82,0.15); color: #ff5252; border: 1px solid #ff5252; border-radius: 6px; text-decoration: none; font-size: 0.85rem; font-weight: 500;'>Logout</a>"
+            "</div>", HTTPD_RESP_USE_STRLEN);
     }
 
+    /* Open status table */
+    httpd_resp_send_chunk(req, INDEX_CHUNK_STATUS_OPEN, HTTPD_RESP_USE_STRLEN);
+
+    /* Stream SSID row */
+    char* safe_ap_ssid = html_escape(ap_ssid);
+    if (safe_ap_ssid == NULL) safe_ap_ssid = strdup("(unknown)");
+    snprintf(row, sizeof(row), "<tr><td>SSID:</td><td><strong>%s</strong></td></tr>", safe_ap_ssid);
+    httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
+    free(safe_ap_ssid);
+
+    /* Stream connection status row */
+    if (ap_connect) {
+        httpd_resp_send_chunk(req, "<tr><td>Connection:</td><td><strong>Connected</strong></td></tr>", HTTPD_RESP_USE_STRLEN);
+    } else {
+        httpd_resp_send_chunk(req, "<tr><td>Connection:</td><td><strong>Disconnected</strong></td></tr>", HTTPD_RESP_USE_STRLEN);
+    }
+
+    /* Stream uptime row */
+    char uptime_str[32];
+    format_uptime(get_uptime_seconds(), uptime_str, sizeof(uptime_str));
+    snprintf(row, sizeof(row), "<tr><td>Uptime:</td><td>%s</td></tr>", uptime_str);
+    httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
+
+    /* Stream STA IP row */
+    if (ap_connect) {
+        esp_ip4_addr_t addr;
+        addr.addr = my_ip;
+        snprintf(row, sizeof(row), "<tr><td>STA IP:</td><td>" IPSTR "</td></tr>", IP2STR(&addr));
+    } else {
+        snprintf(row, sizeof(row), "<tr><td>STA IP:</td><td>N/A</td></tr>");
+    }
+    httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
+
+    /* Stream AP IP row */
     esp_ip4_addr_t ap_addr;
     ap_addr.addr = my_ap_ip;
-    sprintf(ap_ip_str, IPSTR, IP2STR(&ap_addr));
+    snprintf(row, sizeof(row), "<tr><td>AP IP:</td><td>" IPSTR "</td></tr>", IP2STR(&ap_addr));
+    httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
 
-    // Get DHCP pool range
+    /* Stream DHCP Pool row */
     uint32_t start_ip, end_ip;
     get_dhcp_pool_range(my_ap_ip, &start_ip, &end_ip);
     esp_ip4_addr_t start_addr, end_addr;
     start_addr.addr = start_ip;
     end_addr.addr = end_ip;
-    sprintf(dhcp_pool_str, IPSTR " - " IPSTR, IP2STR(&start_addr), IP2STR(&end_addr));
+    snprintf(row, sizeof(row), "<tr><td>DHCP Pool:</td><td>" IPSTR " - " IPSTR "</td></tr>",
+             IP2STR(&start_addr), IP2STR(&end_addr));
+    httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
 
-    // Get uptime
-    char uptime_str[32];
-    format_uptime(get_uptime_seconds(), uptime_str, sizeof(uptime_str));
+    /* Stream Clients row */
+    snprintf(row, sizeof(row), "<tr><td>Clients:</td><td>%d</td></tr>", connect_count);
+    httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
 
-    // Get byte counts and convert to MB
+    /* Stream Bytes Sent row */
     uint64_t bytes_sent = get_sta_bytes_sent();
-    uint64_t bytes_received = get_sta_bytes_received();
     float sent_mb = bytes_sent / (1024.0 * 1024.0);
-    float received_mb = bytes_received / (1024.0 * 1024.0);
+    snprintf(row, sizeof(row), "<tr><td>Bytes Sent:</td><td>%.1f MB</td></tr>", sent_mb);
+    httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
 
-    // Build PCAP status string
-    char pcap_status_str[160];
+    /* Stream Bytes Received row */
+    uint64_t bytes_received = get_sta_bytes_received();
+    float received_mb = bytes_received / (1024.0 * 1024.0);
+    snprintf(row, sizeof(row), "<tr><td>Bytes Received:</td><td>%.1f MB</td></tr>", received_mb);
+    httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
+
+    /* Stream PCAP status row */
     pcap_capture_mode_t mode = pcap_get_mode();
     if (mode != PCAP_MODE_OFF) {
         const char* mode_name = (mode == PCAP_MODE_ACL_MONITOR) ? "ACL Monitor" : "Promiscuous";
-        snprintf(pcap_status_str, sizeof(pcap_status_str),
-                 "<span style='color: #4caf50;'>%s</span> <br>captured: %lu, dropped: %lu",
+        snprintf(row, sizeof(row),
+                 "<tr><td>PCAP Capture:</td><td><span style='color: #4caf50;'>%s</span> <br>captured: %lu, dropped: %lu</td></tr>",
                  mode_name,
                  (unsigned long)pcap_get_captured_count(),
                  (unsigned long)pcap_get_dropped_count());
     } else {
-        strcpy(pcap_status_str, "<span style='color: #888;'>Off</span>");
+        snprintf(row, sizeof(row), "<tr><td>PCAP Capture:</td><td><span style='color: #888;'>Off</span></td></tr>");
     }
+    httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
 
-    /* Build header section with logout button */
-    char header_ui[320] = "";
-    if (authenticated) {
-        snprintf(header_ui, sizeof(header_ui),
-                 "<div style='text-align: right; margin-bottom: 0.5rem;'>"
-                 "<a href='/?logout=1' style='padding: 0.4rem 1rem; background: rgba(255,82,82,0.15); color: #ff5252; border: 1px solid #ff5252; border-radius: 6px; text-decoration: none; font-size: 0.85rem; font-weight: 500;'>Logout</a>"
-                 "</div>");
-    }
+    /* Close status table */
+    httpd_resp_send_chunk(req, INDEX_CHUNK_STATUS_CLOSE, HTTPD_RESP_USE_STRLEN);
 
-    /* Build authentication UI section */
-    char auth_ui[2048] = "";
+    /* Navigation buttons */
+    httpd_resp_send_chunk(req, INDEX_CHUNK_BUTTONS, HTTPD_RESP_USE_STRLEN);
+
+    /* --- Auth UI Section (streamed directly) --- */
 
     /* Show message if any */
     if (login_message[0] != '\0') {
@@ -410,70 +447,59 @@ static esp_err_t index_get_handler(httpd_req_t *req)
         } else {
             msg_style = "background: #e8f5e9; color: #2e7d32; border: 2px solid #66bb6a";
         }
-        snprintf(auth_ui + strlen(auth_ui), sizeof(auth_ui) - strlen(auth_ui),
+        snprintf(row, sizeof(row),
                  "<div style='margin-top: 1.5rem; padding: 1rem; %s; border-radius: 8px; font-size: 0.95rem;'>%s</div>",
                  msg_style, login_message);
+        httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
     }
 
     /* Show warning if no password protection */
     if (!password_protection_enabled) {
-        snprintf(auth_ui + strlen(auth_ui), sizeof(auth_ui) - strlen(auth_ui),
-                 "<div style='margin-top: 1.5rem; padding: 1rem; background: #fff3cd; border: 2px solid #ffa726; border-radius: 8px;'>"
-                 "<strong style='color: #f57c00;'>⚠ No Password Protection</strong>"
-                 "<p style='margin-top: 0.5rem; color: #666; font-size: 0.9rem;'>Anyone on this network can access router settings. Set a password below.</p>"
-                 "</div>");
+        httpd_resp_send_chunk(req,
+            "<div style='margin-top: 1.5rem; padding: 1rem; background: #fff3cd; border: 2px solid #ffa726; border-radius: 8px;'>"
+            "<strong style='color: #f57c00;'>⚠ No Password Protection</strong>"
+            "<p style='margin-top: 0.5rem; color: #666; font-size: 0.9rem;'>Anyone on this network can access router settings. Set a password below.</p>"
+            "</div>", HTTPD_RESP_USE_STRLEN);
     }
 
     /* Show login form if password is set and not authenticated */
     if (password_protection_enabled && !authenticated) {
-        snprintf(auth_ui + strlen(auth_ui), sizeof(auth_ui) - strlen(auth_ui),
-                 "<div style='margin-top: 1.5rem; padding: 1.5rem; background: rgba(22, 33, 62, 0.6); border: 1px solid rgba(0, 217, 255, 0.2); border-radius: 12px;'>"
-                 "<h2 style='margin-top: 0; margin-bottom: 1rem; color: #00d9ff; font-size: 1.1rem;'>🔒 Login Required</h2>"
-                 "<form action='' method='GET'>"
-                 "<input type='password' name='login_password' placeholder='Enter password' style='width: 100%%; padding: 0.75rem; margin-bottom: 0.75rem; background: rgba(255,255,255,0.1); border: 1px solid rgba(0,217,255,0.3); border-radius: 8px; color: #e0e0e0; font-size: 1rem;'/>"
-                 "<input type='submit' value='Login' style='width: 100%%; padding: 0.75rem; background: linear-gradient(135deg, #667eea 0%%, #764ba2 100%%); color: #fff; border: none; border-radius: 8px; font-size: 1rem; font-weight: 600; cursor: pointer;'/>"
-                 "</form>"
-                 "</div>");
+        httpd_resp_send_chunk(req,
+            "<div style='margin-top: 1.5rem; padding: 1.5rem; background: rgba(22, 33, 62, 0.6); border: 1px solid rgba(0, 217, 255, 0.2); border-radius: 12px;'>"
+            "<h2 style='margin-top: 0; margin-bottom: 1rem; color: #00d9ff; font-size: 1.1rem;'>🔒 Login Required</h2>"
+            "<form action='' method='GET'>"
+            "<input type='password' name='login_password' placeholder='Enter password' style='width: 100%; padding: 0.75rem; margin-bottom: 0.75rem; background: rgba(255,255,255,0.1); border: 1px solid rgba(0,217,255,0.3); border-radius: 8px; color: #e0e0e0; font-size: 1rem;'/>"
+            "<input type='submit' value='Login' style='width: 100%; padding: 0.75rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #fff; border: none; border-radius: 8px; font-size: 1rem; font-weight: 600; cursor: pointer;'/>"
+            "</form>"
+            "</div>", HTTPD_RESP_USE_STRLEN);
     }
 
     /* Show password management form if authenticated or no password set */
     if (authenticated || !password_protection_enabled) {
         const char* form_title = password_protection_enabled ? "Change Password" : "Set Password";
-        snprintf(auth_ui + strlen(auth_ui), sizeof(auth_ui) - strlen(auth_ui),
-                 "<div style='margin-top: 1.5rem; padding: 1.5rem; background: rgba(22, 33, 62, 0.6); border: 1px solid rgba(0, 217, 255, 0.2); border-radius: 12px;'>"
-                 "<h2 style='margin-top: 0; margin-bottom: 1rem; color: #00d9ff; font-size: 1.1rem;'>🔑 %s</h2>"
-                 "<form action='' method='GET'>"
-                 "<input type='password' name='new_password' placeholder='New password (empty to disable)' style='width: 100%%; padding: 0.75rem; margin-bottom: 0.75rem; background: rgba(255,255,255,0.1); border: 1px solid rgba(0,217,255,0.3); border-radius: 8px; color: #e0e0e0; font-size: 1rem;'/>"
-                 "<input type='password' name='confirm_password' placeholder='Confirm password' style='width: 100%%; padding: 0.75rem; margin-bottom: 0.75rem; background: rgba(255,255,255,0.1); border: 1px solid rgba(0,217,255,0.3); border-radius: 8px; color: #e0e0e0; font-size: 1rem;'/>"
-                 "<input type='submit' value='%s' style='width: 100%%; padding: 0.75rem; background: linear-gradient(135deg, #f093fb 0%%, #f5576c 100%%); color: #fff; border: none; border-radius: 8px; font-size: 1rem; font-weight: 600; cursor: pointer;'/>"
-                 "<p style='margin-top: 0.75rem; color: #888; font-size: 0.85rem;'>Leave empty to disable password protection.</p>"
-                 "</form>"
-                 "</div>",
-                 form_title, form_title);
+        httpd_resp_send_chunk(req,
+            "<div style='margin-top: 1.5rem; padding: 1.5rem; background: rgba(22, 33, 62, 0.6); border: 1px solid rgba(0, 217, 255, 0.2); border-radius: 12px;'>"
+            "<h2 style='margin-top: 0; margin-bottom: 1rem; color: #00d9ff; font-size: 1.1rem;'>🔑 ", HTTPD_RESP_USE_STRLEN);
+        httpd_resp_send_chunk(req, form_title, HTTPD_RESP_USE_STRLEN);
+        httpd_resp_send_chunk(req,
+            "</h2>"
+            "<form action='' method='GET'>"
+            "<input type='password' name='new_password' placeholder='New password (empty to disable)' style='width: 100%; padding: 0.75rem; margin-bottom: 0.75rem; background: rgba(255,255,255,0.1); border: 1px solid rgba(0,217,255,0.3); border-radius: 8px; color: #e0e0e0; font-size: 1rem;'/>"
+            "<input type='password' name='confirm_password' placeholder='Confirm password' style='width: 100%; padding: 0.75rem; margin-bottom: 0.75rem; background: rgba(255,255,255,0.1); border: 1px solid rgba(0,217,255,0.3); border-radius: 8px; color: #e0e0e0; font-size: 1rem;'/>"
+            "<input type='submit' value='", HTTPD_RESP_USE_STRLEN);
+        httpd_resp_send_chunk(req, form_title, HTTPD_RESP_USE_STRLEN);
+        httpd_resp_send_chunk(req,
+            "' style='width: 100%; padding: 0.75rem; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: #fff; border: none; border-radius: 8px; font-size: 1rem; font-weight: 600; cursor: pointer;'/>"
+            "<p style='margin-top: 0.75rem; color: #888; font-size: 0.85rem;'>Leave empty to disable password protection.</p>"
+            "</form>"
+            "</div>", HTTPD_RESP_USE_STRLEN);
     }
 
-    /* Build the page */
-    const char* index_page_template = INDEX_PAGE;
-    char* safe_ap_ssid = html_escape(ap_ssid);
-    if (safe_ap_ssid == NULL) {
-        safe_ap_ssid = strdup("(unknown)");
-    }
-    int page_len = strlen(index_page_template) + strlen(header_ui) + strlen(safe_ap_ssid) + strlen(auth_ui) + strlen(pcap_status_str) + strlen(uptime_str) + 512;
-    char* index_page = malloc(page_len);
+    /* Footer */
+    httpd_resp_send_chunk(req, INDEX_CHUNK_TAIL, HTTPD_RESP_USE_STRLEN);
 
-    if (index_page == NULL) {
-        ESP_LOGE(TAG, "Failed to allocate memory for index page");
-        free(safe_ap_ssid);
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
-        return ESP_ERR_NO_MEM;
-    }
-
-    snprintf(index_page, page_len, index_page_template,
-        header_ui, safe_ap_ssid, conn_status, uptime_str, sta_ip_str, ap_ip_str, dhcp_pool_str, connect_count, sent_mb, received_mb, pcap_status_str, auth_ui);
-    free(safe_ap_ssid);
-
-    httpd_resp_send(req, index_page, strlen(index_page));
-    free(index_page);
+    /* End chunked response */
+    httpd_resp_send_chunk(req, NULL, 0);
 
     return ESP_OK;
 }
@@ -802,14 +828,6 @@ static esp_err_t config_get_handler(httpd_req_t *req)
         free(buf);
     }
 
-    /* Check session status for logout button */
-    bool session_active_for_logout = session_active && password_protection_enabled;
-    char logout_section[256] = "";
-    if (session_active_for_logout) {
-        snprintf(logout_section, sizeof(logout_section),
-                 "<a href='/?logout=1' style='padding: 0.4rem 1rem; background: rgba(255,82,82,0.15); color: #ff5252; border: 1px solid #ff5252; border-radius: 6px; text-decoration: none; font-size: 0.85rem; font-weight: 500;'>Logout</a>");
-    }
-
     /* Check for SSID pre-fill from scan page */
     char prefill_ssid[64] = "";
     buf_len = httpd_req_get_url_query_len(req) + 1;
@@ -824,14 +842,10 @@ static esp_err_t config_get_handler(httpd_req_t *req)
         if (buf) free(buf);
     }
 
-    /* Build config page with escaped values */
-    const char* config_page_template = ROUTER_CONFIG_PAGE;
-
+    /* Escape values for HTML */
     char* safe_ap_ssid = html_escape(ap_ssid);
     char* safe_ap_passwd = html_escape(ap_passwd);
-    /* Use prefill_ssid if provided, otherwise use configured ssid */
     char* safe_ssid = html_escape(prefill_ssid[0] ? prefill_ssid : ssid);
-    /* Clear password field when pre-filling from scan */
     char* safe_passwd = html_escape(prefill_ssid[0] ? "" : passwd);
     char* safe_ent_username = html_escape(ent_username);
     char* safe_ent_identity = html_escape(ent_identity);
@@ -844,20 +858,6 @@ static esp_err_t config_get_handler(httpd_req_t *req)
         if (ap_ip_str != NULL) {
             strcpy(ap_ip_str, "192.168.4.1");
         }
-    }
-
-    // Get MAC addresses as strings
-    char ap_mac_str[18] = "";
-    char sta_mac_str[18] = "";
-
-    uint8_t mac[6];
-    if (esp_wifi_get_mac(ESP_IF_WIFI_AP, mac) == ESP_OK) {
-        sprintf(ap_mac_str, "%02X:%02X:%02X:%02X:%02X:%02X",
-                mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-    }
-    if (esp_wifi_get_mac(ESP_IF_WIFI_STA, mac) == ESP_OK) {
-        sprintf(sta_mac_str, "%02X:%02X:%02X:%02X:%02X:%02X",
-                mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     }
 
     // Check if any html_escape failed
@@ -876,21 +876,33 @@ static esp_err_t config_get_handler(httpd_req_t *req)
         return ESP_ERR_NO_MEM;
     }
 
-    // Remote Console state for template
+    // Get MAC addresses as strings
+    char ap_mac_str[18] = "";
+    char sta_mac_str[18] = "";
+    uint8_t mac[6];
+    if (esp_wifi_get_mac(ESP_IF_WIFI_AP, mac) == ESP_OK) {
+        sprintf(ap_mac_str, "%02X:%02X:%02X:%02X:%02X:%02X",
+                mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    }
+    if (esp_wifi_get_mac(ESP_IF_WIFI_STA, mac) == ESP_OK) {
+        sprintf(sta_mac_str, "%02X:%02X:%02X:%02X:%02X:%02X",
+                mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    }
+
+    // Remote Console state
     remote_console_config_t rc_config;
     remote_console_status_t rc_status;
     remote_console_get_config(&rc_config);
     remote_console_get_status(&rc_status);
 
-    // AP hidden SSID checkbox
     const char* ap_hidden_checked = ap_ssid_hidden ? "checked" : "";
-
     const char* rc_enabled_checked = rc_config.enabled ? "checked" : "";
     const char* rc_disabled_checked = rc_config.enabled ? "" : "checked";
 
     const char* rc_status_color;
     const char* rc_status_text;
-    char rc_kick_section[256] = "";
+    const char* rc_kick_section = "";
+    char rc_kick_buf[200] = "";
 
     switch (rc_status.state) {
         case RC_STATE_DISABLED:
@@ -908,8 +920,9 @@ static esp_err_t config_get_handler(httpd_req_t *req)
         case RC_STATE_ACTIVE:
             rc_status_color = "#00d9ff";
             rc_status_text = rc_status.client_ip;
-            snprintf(rc_kick_section, sizeof(rc_kick_section),
+            snprintf(rc_kick_buf, sizeof(rc_kick_buf),
                 " <a href='/config?rc_kick=1' style='margin-left: 0.5rem; padding: 0.2rem 0.6rem; background: #f44336; color: #fff; border-radius: 4px; text-decoration: none; font-size: 0.8rem;'>Kick</a>");
+            rc_kick_section = rc_kick_buf;
             break;
         default:
             rc_status_color = "#888";
@@ -921,7 +934,7 @@ static esp_err_t config_get_handler(httpd_req_t *req)
     const char* rc_bind_ap_sel = (rc_config.bind == RC_BIND_AP_ONLY) ? "selected" : "";
     const char* rc_bind_sta_sel = (rc_config.bind == RC_BIND_STA_ONLY) ? "selected" : "";
 
-    // PCAP state for template
+    // PCAP state
     pcap_capture_mode_t pcap_mode = pcap_get_mode();
     const char* pcap_mode_off_sel = (pcap_mode == PCAP_MODE_OFF) ? "selected" : "";
     const char* pcap_mode_acl_sel = (pcap_mode == PCAP_MODE_ACL_MONITOR) ? "selected" : "";
@@ -933,52 +946,63 @@ static esp_err_t config_get_handler(httpd_req_t *req)
     uint32_t pcap_dropped = pcap_get_dropped_count();
     int current_snaplen = pcap_get_snaplen();
 
-    int page_len =
-        strlen(config_page_template) +
-        strlen(safe_ap_ssid) +
-        strlen(safe_ap_passwd) +
-        strlen(ap_ip_str) +
-        strlen(ap_mac_str) +
-        strlen(safe_ssid) +
-        strlen(safe_passwd) +
-        strlen(safe_ent_username) +
-        strlen(safe_ent_identity) +
-        strlen(sta_mac_str) +
-        strlen(static_ip) +
-        strlen(subnet_mask) +
-        strlen(gateway_addr) +
-        strlen(rc_kick_section) +
-        768;
-    char* config_page = malloc(sizeof(char) * page_len);
-    if (config_page == NULL) {
-        ESP_LOGE(TAG, "Failed to allocate memory for config page");
-        free(safe_ap_ssid);
-        free(safe_ap_passwd);
-        free(safe_ssid);
-        free(safe_passwd);
-        free(safe_ent_username);
-        free(safe_ent_identity);
-        free(ap_ip_str);
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
-        return ESP_ERR_NO_MEM;
+    /* Reusable buffer for building sections */
+    char section[2048];
+
+    /* --- Begin chunked response --- */
+
+    /* Chunk 1: Page header (styles) */
+    httpd_resp_send_chunk(req, CONFIG_CHUNK_HEAD, HTTPD_RESP_USE_STRLEN);
+
+    /* Chunk 2: Logout button (if authenticated) */
+    if (session_active && password_protection_enabled) {
+        httpd_resp_send_chunk(req,
+            "<a href='/?logout=1' style='padding: 0.4rem 1rem; background: rgba(255,82,82,0.15); color: #ff5252; border: 1px solid #ff5252; border-radius: 6px; text-decoration: none; font-size: 0.85rem; font-weight: 500;'>Logout</a>",
+            HTTPD_RESP_USE_STRLEN);
     }
 
-    snprintf(
-        config_page, page_len, config_page_template,
-        logout_section,
-        safe_ap_ssid, safe_ap_passwd, ap_ip_str, ap_mac_str, ap_hidden_checked,
-        safe_ssid, safe_passwd, safe_ent_username, safe_ent_identity, sta_mac_str,
-        static_ip, subnet_mask, gateway_addr,
+    /* Chunk 3: JavaScript */
+    httpd_resp_send_chunk(req, CONFIG_CHUNK_SCRIPT, HTTPD_RESP_USE_STRLEN);
+
+    /* Chunk 4: AP Settings */
+    snprintf(section, sizeof(section), CONFIG_CHUNK_AP,
+        safe_ap_ssid, safe_ap_passwd, ap_ip_str, ap_mac_str, ap_hidden_checked);
+    httpd_resp_send_chunk(req, section, HTTPD_RESP_USE_STRLEN);
+
+    /* Chunk 5: STA Settings */
+    snprintf(section, sizeof(section), CONFIG_CHUNK_STA,
+        safe_ssid, safe_passwd, safe_ent_username, safe_ent_identity, sta_mac_str);
+    httpd_resp_send_chunk(req, section, HTTPD_RESP_USE_STRLEN);
+
+    /* Chunk 6: Static IP Settings */
+    snprintf(section, sizeof(section), CONFIG_CHUNK_STATIC,
+        static_ip, subnet_mask, gateway_addr);
+    httpd_resp_send_chunk(req, section, HTTPD_RESP_USE_STRLEN);
+
+    /* Chunk 7: Remote Console */
+    snprintf(section, sizeof(section), CONFIG_CHUNK_RC,
         rc_enabled_checked, rc_disabled_checked,
         rc_status_color, rc_status_text, rc_kick_section,
         rc_config.port,
         rc_bind_both_sel, rc_bind_ap_sel, rc_bind_sta_sel,
-        rc_config.idle_timeout_sec,
+        (unsigned long)rc_config.idle_timeout_sec);
+    httpd_resp_send_chunk(req, section, HTTPD_RESP_USE_STRLEN);
+
+    /* Chunk 8: PCAP */
+    snprintf(section, sizeof(section), CONFIG_CHUNK_PCAP,
         pcap_mode_off_sel, pcap_mode_acl_sel, pcap_mode_promisc_sel,
         pcap_client_color, pcap_client_text,
         (unsigned long)pcap_captured, (unsigned long)pcap_dropped,
         current_snaplen);
+    httpd_resp_send_chunk(req, section, HTTPD_RESP_USE_STRLEN);
 
+    /* Chunk 9: Device management and footer */
+    httpd_resp_send_chunk(req, CONFIG_CHUNK_TAIL, HTTPD_RESP_USE_STRLEN);
+
+    /* End chunked response */
+    httpd_resp_send_chunk(req, NULL, 0);
+
+    /* Cleanup */
     free(safe_ap_ssid);
     free(safe_ap_passwd);
     free(safe_ssid);
@@ -986,9 +1010,6 @@ static esp_err_t config_get_handler(httpd_req_t *req)
     free(safe_ent_username);
     free(safe_ent_identity);
     free(ap_ip_str);
-
-    httpd_resp_send(req, config_page, strlen(config_page));
-    free(config_page);
 
     return ESP_OK;
 }
@@ -999,7 +1020,7 @@ static httpd_uri_t configp = {
     .handler   = config_get_handler,
 };
 
-/* Mappings page GET handler (DHCP Reservations + Port Forwarding) */
+/* Mappings page GET handler (DHCP Reservations + Port Forwarding) - Chunked transfer */
 static esp_err_t mappings_get_handler(httpd_req_t *req)
 {
     /* Check authentication if password protection is enabled */
@@ -1017,6 +1038,7 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
 
     char* buf;
     size_t buf_len;
+    char error_msg[128] = "";
 
     /* Read URL query string length and allocate memory for length + 1 */
     buf_len = httpd_req_get_url_query_len(req) + 1;
@@ -1036,6 +1058,15 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
             char param3[64];
             char param4[64];
 
+            /* Check for error parameter first */
+            if (httpd_query_key_value(buf, "error", param1, sizeof(param1)) == ESP_OK) {
+                /* Decode + back to spaces */
+                for (char *p = param1; *p; p++) {
+                    if (*p == '+') *p = ' ';
+                }
+                snprintf(error_msg, sizeof(error_msg), "%s", param1);
+            }
+
             /* Check for add DHCP reservation */
             if (httpd_query_key_value(buf, "dhcp_action", param1, sizeof(param1)) == ESP_OK) {
                 if (strcmp(param1, "Add+Reservation") == 0 || strcmp(param1, "Add Reservation") == 0) {
@@ -1045,7 +1076,7 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
                         preprocess_string(param1);
                         preprocess_string(param2);
 
-                        const char *error_msg = NULL;
+                        const char *err_msg = NULL;
 
                         // Parse MAC address
                         unsigned int mac[6];
@@ -1054,7 +1085,7 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
                                    &mac[0], &mac[1], &mac[2], &mac[3], &mac[4], &mac[5]) != 6 &&
                             sscanf(param1, "%02x-%02x-%02x-%02x-%02x-%02x",
                                    &mac[0], &mac[1], &mac[2], &mac[3], &mac[4], &mac[5]) != 6) {
-                            error_msg = "Invalid MAC address format";
+                            err_msg = "Invalid MAC address format";
                         } else {
                             for (int i = 0; i < 6; i++) {
                                 mac_bytes[i] = (uint8_t)mac[i];
@@ -1062,9 +1093,9 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
 
                             uint32_t ip = esp_ip4addr_aton(param2);
                             if (ip == IPADDR_NONE) {
-                                error_msg = "Invalid IP address";
+                                err_msg = "Invalid IP address";
                             } else if ((ip & 0x00FFFFFF) != (my_ap_ip & 0x00FFFFFF)) {
-                                error_msg = "IP must be in the same network as the AP";
+                                err_msg = "IP must be in the same network as the AP";
                             } else {
                                 const char *name = NULL;
                                 if (httpd_query_key_value(buf, "dhcp_name", param3, sizeof(param3)) == ESP_OK && strlen(param3) > 0) {
@@ -1076,10 +1107,10 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
                             }
                         }
 
-                        if (error_msg != NULL) {
+                        if (err_msg != NULL) {
                             /* Redirect back with error parameter */
                             char redirect_url[128];
-                            snprintf(redirect_url, sizeof(redirect_url), "/mappings?error=%s", error_msg);
+                            snprintf(redirect_url, sizeof(redirect_url), "/mappings?error=%s", err_msg);
                             for (char *p = redirect_url; *p; p++) {
                                 if (*p == ' ') *p = '+';
                             }
@@ -1132,14 +1163,14 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
                         uint16_t int_port = atoi(param4);
 
                         /* Validate internal IP is in same /24 network as AP interface */
-                        const char *error_msg = NULL;
+                        const char *err_msg = NULL;
                         if (int_ip == IPADDR_NONE) {
-                            error_msg = "Invalid IP address or device name";
+                            err_msg = "Invalid IP address or device name";
                         } else if ((int_ip & 0x00FFFFFF) != (my_ap_ip & 0x00FFFFFF)) {
                             esp_ip4_addr_t ap_addr;
                             ap_addr.addr = my_ap_ip;
                             ESP_LOGW(TAG, "Internal IP not in AP network (" IPSTR "/24)", IP2STR(&ap_addr));
-                            error_msg = "Internal IP must be in the same network as the AP";
+                            err_msg = "Internal IP must be in the same network as the AP";
                         } else {
                             /* Check if external port is already in use for this protocol */
                             for (int i = 0; i < IP_PORTMAP_MAX; i++) {
@@ -1147,19 +1178,19 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
                                     portmap_tab[i].proto == proto &&
                                     portmap_tab[i].mport == ext_port) {
                                     ESP_LOGW(TAG, "External port %d already mapped", ext_port);
-                                    error_msg = "External port is already in use";
+                                    err_msg = "External port is already in use";
                                     break;
                                 }
                             }
                         }
 
-                        if (error_msg == NULL) {
+                        if (err_msg == NULL) {
                             add_portmap(proto, ext_port, int_ip, int_port);
                             ESP_LOGI(TAG, "Added port mapping: %s %d -> %s:%d", param1, ext_port, param3, int_port);
                         } else {
                             /* Redirect back with error parameter */
                             char redirect_url[128];
-                            snprintf(redirect_url, sizeof(redirect_url), "/mappings?error=%s", error_msg);
+                            snprintf(redirect_url, sizeof(redirect_url), "/mappings?error=%s", err_msg);
                             /* URL encode spaces */
                             for (char *p = redirect_url; *p; p++) {
                                 if (*p == ' ') *p = '+';
@@ -1186,28 +1217,43 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
         free(buf);
     }
 
-    /* Check for error parameter (from redirect after validation failure) */
-    char error_msg[128] = "";
-    buf_len = httpd_req_get_url_query_len(req) + 1;
-    if (buf_len > 1) {
-        buf = malloc(buf_len);
-        if (buf && httpd_req_get_url_query_str(req, buf, buf_len) == ESP_OK) {
-            char error_param[128];
-            if (httpd_query_key_value(buf, "error", error_param, sizeof(error_param)) == ESP_OK) {
-                /* Decode + back to spaces */
-                for (char *p = error_param; *p; p++) {
-                    if (*p == '+') *p = ' ';
-                }
-                snprintf(error_msg, sizeof(error_msg), "%s", error_param);
-            }
-        }
-        if (buf) free(buf);
+    /* Reusable buffer for building individual rows */
+    char row[384];
+
+    /* --- Begin chunked response --- */
+
+    /* Chunk 1: Page header (styles, scripts) */
+    httpd_resp_send_chunk(req, MAPPINGS_CHUNK_HEAD, HTTPD_RESP_USE_STRLEN);
+
+    /* Chunk 2: Error modal (if any) */
+    if (error_msg[0] != '\0') {
+        snprintf(row, sizeof(row),
+            "<div class='modal-overlay show' id='errorModal'>"
+            "<div class='modal-box'>"
+            "<h3>Error</h3>"
+            "<p>%s</p>"
+            "<button onclick=\"document.getElementById('errorModal').classList.remove('show'); history.replaceState(null, '', '/mappings');\">OK</button>"
+            "</div>"
+            "</div>",
+            error_msg);
+        httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
     }
 
-    /* Build connected clients table HTML */
-    char clients_html[3072] = "";
-    int clients_offset = 0;
-    #define MAX_DISPLAYED_CLIENTS 8  // ESP32 AP supports max 8 stations
+    /* Chunk 3: Container start and header */
+    httpd_resp_send_chunk(req, MAPPINGS_CHUNK_MID1, HTTPD_RESP_USE_STRLEN);
+
+    /* Chunk 4: Logout button (if authenticated) */
+    if (session_active && password_protection_enabled) {
+        httpd_resp_send_chunk(req,
+            "<a href='/?logout=1' style='padding: 0.4rem 1rem; background: rgba(255,82,82,0.15); color: #ff5252; border: 1px solid #ff5252; border-radius: 6px; text-decoration: none; font-size: 0.85rem; font-weight: 500;'>Logout</a>",
+            HTTPD_RESP_USE_STRLEN);
+    }
+
+    /* Chunk 5: Connected clients table header */
+    httpd_resp_send_chunk(req, MAPPINGS_CHUNK_MID2, HTTPD_RESP_USE_STRLEN);
+
+    /* Chunk 6: Stream connected clients rows */
+    #define MAX_DISPLAYED_CLIENTS 8
     connected_client_t clients[MAX_DISPLAYED_CLIENTS];
     int client_count = get_connected_clients(clients, MAX_DISPLAYED_CLIENTS);
 
@@ -1238,7 +1284,7 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
             }
             js_name[j] = '\0';
 
-            clients_offset += snprintf(clients_html + clients_offset, sizeof(clients_html) - clients_offset,
+            snprintf(row, sizeof(row),
                 "<tr>"
                 "<td>%s</td>"
                 "<td>%s</td>"
@@ -1252,24 +1298,26 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
                 clients[i].has_ip ? ip_str : "",
                 js_name
             );
+            httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
         }
     } else {
-        snprintf(clients_html, sizeof(clients_html),
-            "<tr><td colspan='4' style='text-align:center; color:#888;'>No clients connected</td></tr>");
+        httpd_resp_send_chunk(req,
+            "<tr><td colspan='4' style='text-align:center; color:#888;'>No clients connected</td></tr>",
+            HTTPD_RESP_USE_STRLEN);
     }
 
-    /* Build DHCP reservations table HTML */
-    char dhcp_html[2048] = "";
-    int dhcp_offset = 0;
-    bool has_reservations = false;
+    /* Chunk 7: DHCP reservations table header */
+    httpd_resp_send_chunk(req, MAPPINGS_CHUNK_MID3, HTTPD_RESP_USE_STRLEN);
 
+    /* Chunk 8: Stream DHCP reservation rows */
+    bool has_reservations = false;
     for (int i = 0; i < MAX_DHCP_RESERVATIONS; i++) {
         if (dhcp_reservations[i].valid) {
             has_reservations = true;
             esp_ip4_addr_t addr;
             addr.addr = dhcp_reservations[i].ip;
 
-            dhcp_offset += snprintf(dhcp_html + dhcp_offset, sizeof(dhcp_html) - dhcp_offset,
+            snprintf(row, sizeof(row),
                 "<tr>"
                 "<td>%02X:%02X:%02X:%02X:%02X:%02X</td>"
                 "<td>" IPSTR "</td>"
@@ -1285,19 +1333,21 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
                 dhcp_reservations[i].mac[2], dhcp_reservations[i].mac[3],
                 dhcp_reservations[i].mac[4], dhcp_reservations[i].mac[5]
             );
+            httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
         }
     }
 
     if (!has_reservations) {
-        snprintf(dhcp_html, sizeof(dhcp_html),
-            "<tr><td colspan='4' style='text-align:center; color:#888;'>No DHCP reservations configured</td></tr>");
+        httpd_resp_send_chunk(req,
+            "<tr><td colspan='4' style='text-align:center; color:#888;'>No DHCP reservations configured</td></tr>",
+            HTTPD_RESP_USE_STRLEN);
     }
 
-    /* Build port mapping table HTML */
-    char portmap_html[2048] = "";
-    int offset = 0;
-    bool has_mappings = false;
+    /* Chunk 9: DHCP form and port forwarding table header */
+    httpd_resp_send_chunk(req, MAPPINGS_CHUNK_MID4, HTTPD_RESP_USE_STRLEN);
 
+    /* Chunk 10: Stream port mapping rows */
+    bool has_mappings = false;
     for (int i = 0; i < IP_PORTMAP_MAX; i++) {
         if (portmap_tab[i].valid) {
             has_mappings = true;
@@ -1313,7 +1363,7 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
                 snprintf(ip_or_name, sizeof(ip_or_name), IPSTR, IP2STR(&addr));
             }
 
-            offset += snprintf(portmap_html + offset, sizeof(portmap_html) - offset,
+            snprintf(row, sizeof(row),
                 "<tr>"
                 "<td>%s</td>"
                 "<td>%d</td>"
@@ -1328,51 +1378,21 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
                 portmap_tab[i].proto == PROTO_TCP ? "TCP" : "UDP",
                 portmap_tab[i].mport
             );
+            httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
         }
     }
 
     if (!has_mappings) {
-        snprintf(portmap_html, sizeof(portmap_html),
-            "<tr><td colspan='5' style='text-align:center; color:#888;'>No port mappings configured</td></tr>");
+        httpd_resp_send_chunk(req,
+            "<tr><td colspan='5' style='text-align:center; color:#888;'>No port mappings configured</td></tr>",
+            HTTPD_RESP_USE_STRLEN);
     }
 
-    /* Check session status for logout button */
-    bool session_active_for_logout = session_active && password_protection_enabled;
-    char logout_section[256] = "";
-    if (session_active_for_logout) {
-        snprintf(logout_section, sizeof(logout_section),
-                 "<a href='/?logout=1' style='padding: 0.4rem 1rem; background: rgba(255,82,82,0.15); color: #ff5252; border: 1px solid #ff5252; border-radius: 6px; text-decoration: none; font-size: 0.85rem; font-weight: 500;'>Logout</a>");
-    }
+    /* Chunk 11: Page tail (port form, footer) */
+    httpd_resp_send_chunk(req, MAPPINGS_CHUNK_TAIL, HTTPD_RESP_USE_STRLEN);
 
-    /* Build error modal HTML if there's an error */
-    char error_modal_html[512] = "";
-    if (error_msg[0] != '\0') {
-        snprintf(error_modal_html, sizeof(error_modal_html),
-            "<div class='modal-overlay show' id='errorModal'>"
-            "<div class='modal-box'>"
-            "<h3>Error</h3>"
-            "<p>%s</p>"
-            "<button onclick=\"document.getElementById('errorModal').classList.remove('show'); history.replaceState(null, '', '/mappings');\">OK</button>"
-            "</div>"
-            "</div>",
-            error_msg);
-    }
-
-    /* Build the page */
-    const char* mappings_page_template = MAPPINGS_PAGE;
-    int page_len = strlen(mappings_page_template) + strlen(error_modal_html) + strlen(clients_html) + strlen(dhcp_html) + strlen(portmap_html) + 512;
-    char* mappings_page = malloc(page_len);
-
-    if (mappings_page == NULL) {
-        ESP_LOGE(TAG, "Failed to allocate memory for mappings page");
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
-        return ESP_ERR_NO_MEM;
-    }
-
-    snprintf(mappings_page, page_len, mappings_page_template, error_modal_html, logout_section, clients_html, dhcp_html, portmap_html);
-
-    httpd_resp_send(req, mappings_page, strlen(mappings_page));
-    free(mappings_page);
+    /* End chunked response */
+    httpd_resp_send_chunk(req, NULL, 0);
 
     return ESP_OK;
 }
@@ -1557,17 +1577,49 @@ static esp_err_t firewall_get_handler(httpd_req_t *req)
         return ESP_OK;
     }
 
-    /* Build ACL sections HTML */
-    char acl_html[8192] = "";
-    int html_offset = 0;
+    /* Reusable buffer for building individual elements */
+    char row[384];
 
+    /* --- Begin chunked response --- */
+
+    /* Chunk 1: Page header (styles) */
+    httpd_resp_send_chunk(req, FIREWALL_CHUNK_HEAD, HTTPD_RESP_USE_STRLEN);
+
+    /* Chunk 2: Error modal (if any) */
+    if (error_msg[0] != '\0') {
+        snprintf(row, sizeof(row),
+            "<div class='modal-overlay show' id='errorModal'>"
+            "<div class='modal-box'>"
+            "<h3>Error</h3>"
+            "<p>%s</p>"
+            "<button onclick=\"document.getElementById('errorModal').classList.remove('show'); history.replaceState(null, '', '/firewall');\">OK</button>"
+            "</div>"
+            "</div>",
+            error_msg);
+        httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
+    }
+
+    /* Chunk 3: Container start and header */
+    httpd_resp_send_chunk(req, FIREWALL_CHUNK_MID1, HTTPD_RESP_USE_STRLEN);
+
+    /* Chunk 4: Logout button (if authenticated) */
+    if (session_active && password_protection_enabled) {
+        httpd_resp_send_chunk(req,
+            "<a href='/?logout=1' style='padding: 0.4rem 1rem; background: rgba(255,82,82,0.15); color: #ff5252; border: 1px solid #ff5252; border-radius: 6px; text-decoration: none; font-size: 0.85rem; font-weight: 500;'>Logout</a>",
+            HTTPD_RESP_USE_STRLEN);
+    }
+
+    /* Chunk 5: Description text */
+    httpd_resp_send_chunk(req, FIREWALL_CHUNK_MID2, HTTPD_RESP_USE_STRLEN);
+
+    /* Chunk 6: Stream ACL sections */
     for (int list_no = 0; list_no < MAX_ACL_LISTS; list_no++) {
         acl_entry_t* rules = acl_get_rules(list_no);
         acl_stats_t* stats = acl_get_stats(list_no);
         const char* list_desc = acl_get_desc(list_no);
 
-        /* Section header */
-        html_offset += snprintf(acl_html + html_offset, sizeof(acl_html) - html_offset,
+        /* Section header with stats */
+        snprintf(row, sizeof(row),
             "<div class='acl-section'>"
             "<h3>%s</h3>"
             "<div class='stats'>"
@@ -1581,15 +1633,18 @@ static esp_err_t firewall_get_handler(httpd_req_t *req)
             (unsigned long)stats->packets_denied,
             (unsigned long)stats->packets_nomatch,
             list_no);
+        httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
 
-        /* Rules table */
-        html_offset += snprintf(acl_html + html_offset, sizeof(acl_html) - html_offset,
+        /* Rules table header */
+        httpd_resp_send_chunk(req,
             "<table class='data-table'>"
             "<thead><tr>"
             "<th>#</th><th>Proto</th><th>Source</th><th>SPort</th>"
             "<th>Dest</th><th>DPort</th><th>Action</th><th>Hits</th><th></th>"
-            "</tr></thead><tbody>");
+            "</tr></thead><tbody>",
+            HTTPD_RESP_USE_STRLEN);
 
+        /* Stream rule rows */
         int rule_count = 0;
         for (int i = 0; i < MAX_ACL_ENTRIES; i++) {
             if (!rules[i].valid) continue;
@@ -1645,7 +1700,7 @@ static esp_err_t firewall_get_handler(httpd_req_t *req)
                 action_str = monitor ? "Deny+M" : "Deny";
             }
 
-            html_offset += snprintf(acl_html + html_offset, sizeof(acl_html) - html_offset,
+            snprintf(row, sizeof(row),
                 "<tr>"
                 "<td>%d</td><td>%s</td><td>%s</td><td>%s</td>"
                 "<td>%s</td><td>%s</td><td>%s</td><td>%lu</td>"
@@ -1654,54 +1709,24 @@ static esp_err_t firewall_get_handler(httpd_req_t *req)
                 i, proto_str, src_str, s_port_str,
                 dst_str, d_port_str, action_str, (unsigned long)rules[i].hit_count,
                 list_no, i);
+            httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
         }
 
         if (rule_count == 0) {
-            html_offset += snprintf(acl_html + html_offset, sizeof(acl_html) - html_offset,
-                "<tr><td colspan='9' style='text-align:center; color:#888;'>No rules (all packets allowed)</td></tr>");
+            httpd_resp_send_chunk(req,
+                "<tr><td colspan='9' style='text-align:center; color:#888;'>No rules (all packets allowed)</td></tr>",
+                HTTPD_RESP_USE_STRLEN);
         }
 
-        html_offset += snprintf(acl_html + html_offset, sizeof(acl_html) - html_offset,
-            "</tbody></table></div>");
+        /* Close table and section */
+        httpd_resp_send_chunk(req, "</tbody></table></div>", HTTPD_RESP_USE_STRLEN);
     }
 
-    /* Check session status for logout button */
-    bool session_active_for_logout = session_active && password_protection_enabled;
-    char logout_section[256] = "";
-    if (session_active_for_logout) {
-        snprintf(logout_section, sizeof(logout_section),
-                 "<a href='/?logout=1' style='padding: 0.4rem 1rem; background: rgba(255,82,82,0.15); color: #ff5252; border: 1px solid #ff5252; border-radius: 6px; text-decoration: none; font-size: 0.85rem; font-weight: 500;'>Logout</a>");
-    }
+    /* Chunk 7: Add form and footer */
+    httpd_resp_send_chunk(req, FIREWALL_CHUNK_TAIL, HTTPD_RESP_USE_STRLEN);
 
-    /* Build error modal HTML if there's an error */
-    char error_modal_html[512] = "";
-    if (error_msg[0] != '\0') {
-        snprintf(error_modal_html, sizeof(error_modal_html),
-            "<div class='modal-overlay show' id='errorModal'>"
-            "<div class='modal-box'>"
-            "<h3>Error</h3>"
-            "<p>%s</p>"
-            "<button onclick=\"document.getElementById('errorModal').classList.remove('show'); history.replaceState(null, '', '/firewall');\">OK</button>"
-            "</div>"
-            "</div>",
-            error_msg);
-    }
-
-    /* Build the page */
-    const char* firewall_page_template = FIREWALL_PAGE;
-    int page_len = strlen(firewall_page_template) + strlen(error_modal_html) + strlen(acl_html) + 512;
-    char* firewall_page = malloc(page_len);
-
-    if (firewall_page == NULL) {
-        ESP_LOGE(TAG, "Failed to allocate memory for firewall page");
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
-        return ESP_ERR_NO_MEM;
-    }
-
-    snprintf(firewall_page, page_len, firewall_page_template, error_modal_html, logout_section, acl_html);
-
-    httpd_resp_send(req, firewall_page, strlen(firewall_page));
-    free(firewall_page);
+    /* End chunked response */
+    httpd_resp_send_chunk(req, NULL, 0);
 
     return ESP_OK;
 }
