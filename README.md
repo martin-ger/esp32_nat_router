@@ -400,6 +400,31 @@ Changes take effect after restart.
 
 **Note**: Some boards have active-low LEDs. ESP32-S3 often uses GPIO 48 for an addressable RGB LED (WS2812) which may require different handling.
 
+## Factory Reset via BOOT Button
+
+You can factory reset the ESP32 NAT Router by holding the **BOOT button** for 5 seconds. This erases all settings stored in NVS (WiFi credentials, port mappings, DHCP reservations, ACL rules, passwords, etc.) and restarts the device with default configuration.
+
+The BOOT button GPIO is selected automatically at compile time based on the chip:
+
+| Chip | BOOT Button GPIO |
+|------|-----------------|
+| ESP32, ESP32-S2, ESP32-S3 | GPIO 0 |
+| ESP32-C3, ESP32-C2, ESP32-C6 | GPIO 9 |
+
+### How to Use
+
+1. Press and hold the BOOT button on your ESP32 board
+2. If an LED is configured, it will rapidly blink to indicate the button press is being detected
+3. Continue holding for 5 seconds
+4. The device will erase all settings and restart automatically
+
+After reset, the ESP32 will boot with default settings (open AP with SSID "ESP32_NAT_Router").
+
+### Other Reset Methods
+
+- **Serial console**: Use the `factory_reset` command
+- **Full flash erase**: `esptool.py -p /dev/ttyUSB0 erase_flash` (also erases firmware)
+
 ## TTL Override
 
 The router can override the TTL (Time To Live) value in the IP header for all packets sent upstream via the STA interface. This can be useful to:
@@ -740,6 +765,8 @@ esptool.py --chip esp32c3 \
 0x8000 firmware_esp32c3/partition-table.bin \
 0x10000 firmware_esp32c3/esp32_nat_router.bin
 ```
+
+If especially the ESP32c3 mini with the JTAG-USB has problems during the flash process try the --no-stub option.
 
 For ESP32-S3:
 

@@ -1218,8 +1218,19 @@ static int pcap(int argc, char **argv)
         pcap_set_mode(PCAP_MODE_OFF);
         printf("PCAP capture stopped\n");
     } else if (strcmp(action, "snaplen") == 0) {
+        int val = 0;
+        bool has_value = false;
+
         if (pcap_args.snaplen->count > 0) {
-            int val = pcap_args.snaplen->ival[0];
+            val = pcap_args.snaplen->ival[0];
+            has_value = true;
+        } else if (pcap_args.mode->count > 0) {
+            // argtable may have put the number in mode slot (string before int)
+            val = atoi(pcap_args.mode->sval[0]);
+            if (val > 0) has_value = true;
+        }
+
+        if (has_value) {
             if (pcap_set_snaplen((uint16_t)val)) {
                 printf("Snaplen set to %d bytes\n", pcap_get_snaplen());
             } else {

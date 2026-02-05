@@ -15,6 +15,7 @@
 #include "esp_timer.h"
 #include "esp_console.h"
 #include "esp_vfs_dev.h"
+#include "driver/gpio.h"
 #include "driver/uart.h"
 #include "driver/uart_vfs.h"
 #include "esp_vfs_usb_serial_jtag.h"
@@ -985,7 +986,7 @@ static void initialize_console(void)
 
     /* Initialize the console */
     esp_console_config_t console_config = {
-            .max_cmdline_args = 8,
+            .max_cmdline_args = 12,
             .max_cmdline_length = 256,
 #if CONFIG_LOG_COLORS
             .hint_color = atoi(LOG_COLOR_CYAN)
@@ -1012,32 +1013,83 @@ static void initialize_console(void)
 #endif
 }
 
+// BOOT button is GPIO 9 on ESP32-C3/C2/C6, GPIO 0 on ESP32/S2/S3
+#if defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32C2) || defined(CONFIG_IDF_TARGET_ESP32C6)
+#define BOOT_BUTTON_GPIO      9
+#else
+#define BOOT_BUTTON_GPIO      0
+#endif
+#define FACTORY_RESET_HOLD_MS 5000
+#define POLL_INTERVAL_MS      50
+
 void * led_status_thread(void * p)
 {
-    // If LED GPIO is not configured (-1), exit the thread
-    if (led_gpio < 0) {
+    // Always init boot button for factory reset detection
+    gpio_reset_pin(BOOT_BUTTON_GPIO);
+    gpio_set_direction(BOOT_BUTTON_GPIO, GPIO_MODE_INPUT);
+    gpio_set_pull_mode(BOOT_BUTTON_GPIO, GPIO_PULLUP_ONLY);
+
+    bool led_enabled = (led_gpio >= 0);
+    if (led_enabled) {
+        ESP_LOGI(TAG, "LED status on GPIO %d%s", led_gpio, led_lowactive ? " (low-active)" : "");
+        gpio_reset_pin(led_gpio);
+        gpio_set_direction(led_gpio, GPIO_MODE_OUTPUT);
+    } else {
         ESP_LOGI(TAG, "LED status disabled (no GPIO configured)");
-        return NULL;
     }
 
-    ESP_LOGI(TAG, "LED status on GPIO %d%s", led_gpio, led_lowactive ? " (low-active)" : "");
-    gpio_reset_pin(led_gpio);
-    gpio_set_direction(led_gpio, GPIO_MODE_OUTPUT);
+    int held_ms = 0;
 
     while (true)
     {
-        // XOR with led_lowactive to invert output when in low-active mode
-        gpio_set_level(led_gpio, ap_connect ^ led_lowactive);
-
-        for (int i = 0; i < connect_count; i++)
-        {
-            gpio_set_level(led_gpio, (1 - ap_connect) ^ led_lowactive);
-            vTaskDelay(50 / portTICK_PERIOD_MS);
+        // --- LED status display (only if configured and button not held) ---
+        if (led_enabled && held_ms == 0) {
+            // XOR with led_lowactive to invert output when in low-active mode
             gpio_set_level(led_gpio, ap_connect ^ led_lowactive);
-            vTaskDelay(50 / portTICK_PERIOD_MS);
+
+            for (int i = 0; i < connect_count; i++)
+            {
+                gpio_set_level(led_gpio, (1 - ap_connect) ^ led_lowactive);
+                vTaskDelay(POLL_INTERVAL_MS / portTICK_PERIOD_MS);
+                if (gpio_get_level(BOOT_BUTTON_GPIO) == 0) {
+                    held_ms += POLL_INTERVAL_MS;
+                } else {
+                    held_ms = 0;
+                }
+                gpio_set_level(led_gpio, ap_connect ^ led_lowactive);
+                vTaskDelay(POLL_INTERVAL_MS / portTICK_PERIOD_MS);
+                if (gpio_get_level(BOOT_BUTTON_GPIO) == 0) {
+                    held_ms += POLL_INTERVAL_MS;
+                } else {
+                    held_ms = 0;
+                }
+            }
         }
 
-        vTaskDelay(1000 / portTICK_PERIOD_MS);
+        // --- 1-second wait, broken into 50ms chunks with button polling ---
+        for (int t = 0; t < 1000 / POLL_INTERVAL_MS; t++) {
+            vTaskDelay(POLL_INTERVAL_MS / portTICK_PERIOD_MS);
+
+            if (gpio_get_level(BOOT_BUTTON_GPIO) == 0) {
+                held_ms += POLL_INTERVAL_MS;
+                // Rapid LED toggle for visual feedback during hold
+                if (led_enabled) {
+                    gpio_set_level(led_gpio, ((held_ms / POLL_INTERVAL_MS) % 2) ^ led_lowactive);
+                }
+                if (held_ms >= FACTORY_RESET_HOLD_MS) {
+                    ESP_LOGW(TAG, "BOOT button held %d ms - factory reset!", held_ms);
+                    nvs_handle_t nvs;
+                    if (nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs) == ESP_OK) {
+                        nvs_erase_all(nvs);
+                        nvs_commit(nvs);
+                        nvs_close(nvs);
+                    }
+                    esp_restart();
+                }
+            } else {
+                held_ms = 0;
+            }
+        }
     }
 }
 
