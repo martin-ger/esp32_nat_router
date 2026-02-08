@@ -1000,11 +1000,17 @@ static esp_err_t config_get_handler(httpd_req_t *req)
     httpd_resp_send_chunk(req, section, HTTPD_RESP_USE_STRLEN);
 
     /* Chunk 8: PCAP */
+    char sta_ip_str[16];
+    {
+        ip4_addr_t sta_addr;
+        sta_addr.addr = my_ip;
+        snprintf(sta_ip_str, sizeof(sta_ip_str), IPSTR, IP2STR(&sta_addr));
+    }
     snprintf(section, sizeof(section), CONFIG_CHUNK_PCAP,
         pcap_mode_off_sel, pcap_mode_acl_sel, pcap_mode_promisc_sel,
         pcap_client_color, pcap_client_text,
         (unsigned long)pcap_captured, (unsigned long)pcap_dropped,
-        current_snaplen);
+        current_snaplen, sta_ip_str);
     httpd_resp_send_chunk(req, section, HTTPD_RESP_USE_STRLEN);
 
     /* Chunk 9: Device management and footer */

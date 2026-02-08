@@ -328,7 +328,7 @@ setTimeout(\"location.href = '/'\", 10000);\
 <small>0 = no timeout. Requires web password to be set.</small>\
 </form>"
 
-/* PCAP section - uses: pcap_off/acl/promisc_sel, pcap_color, pcap_status, captured, dropped, snaplen */
+/* PCAP section - uses: pcap_off/acl/promisc_sel, pcap_color, pcap_status, captured, dropped, snaplen, sta_ip */
 #define CONFIG_CHUNK_PCAP "\
 <h2>PCAP Packet Capture</h2>\
 <form action='' method='GET'>\
@@ -350,7 +350,7 @@ setTimeout(\"location.href = '/'\", 10000);\
 <tr><td>Snaplen</td><td><input type='text' name='pcap_snaplen' value='%d' placeholder='64-1600'/></td></tr>\
 <tr><td></td><td><input type='submit' value='Set Snaplen' class='ok-button'/></td></tr>\
 </table>\
-<small>Max bytes to capture per packet (64-1600). Lower values save buffer space.</small>\
+<small>Connect using: nc %s 19000 | wireshark -k -i -</small>\
 </form>"
 
 /* Device management and footer */
