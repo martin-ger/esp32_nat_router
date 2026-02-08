@@ -570,8 +570,18 @@ static esp_err_t config_get_handler(httpd_req_t *req)
                 ESP_LOGI(TAG, "Found URL query parameter => ap_ssid=%s", param1);
                 preprocess_string(param1);
                 if (httpd_query_key_value(buf, "ap_password", param2, sizeof(param2)) == ESP_OK) {
-                    ESP_LOGI(TAG, "Found URL query parameter => ap_password=%s", param2);
                     preprocess_string(param2);
+
+                    // "Open network" checkbox overrides password to empty
+                    {
+                        char open_val[4] = "";
+                        if (httpd_query_key_value(buf, "ap_open", open_val, sizeof(open_val)) == ESP_OK) {
+                            param2[0] = '\0';
+                        } else if (strlen(param2) == 0) {
+                            // Keep existing password if field was left empty
+                            strlcpy(param2, ap_passwd, sizeof(param2));
+                        }
+                    }
 
                     // Set SSID and password
                     int argc = 3;
@@ -639,8 +649,12 @@ static esp_err_t config_get_handler(httpd_req_t *req)
                 ESP_LOGI(TAG, "Found URL query parameter => ssid=%s", param1);
                 preprocess_string(param1);
                 if (httpd_query_key_value(buf, "password", param2, sizeof(param2)) == ESP_OK) {
-                    ESP_LOGI(TAG, "Found URL query parameter => password=%s", param2);
                     preprocess_string(param2);
+
+                    // Keep existing password if field was left empty
+                    if (strlen(param2) == 0) {
+                        strlcpy(param2, passwd, sizeof(param2));
+                    }
                     if (httpd_query_key_value(buf, "ent_username", param3, sizeof(param3)) == ESP_OK) {
                         ESP_LOGI(TAG, "Found URL query parameter => ent_username=%s", param3);
                         preprocess_string(param3);
@@ -844,9 +858,7 @@ static esp_err_t config_get_handler(httpd_req_t *req)
 
     /* Escape values for HTML */
     char* safe_ap_ssid = html_escape(ap_ssid);
-    char* safe_ap_passwd = html_escape(ap_passwd);
     char* safe_ssid = html_escape(prefill_ssid[0] ? prefill_ssid : ssid);
-    char* safe_passwd = html_escape(prefill_ssid[0] ? "" : passwd);
     char* safe_ent_username = html_escape(ent_username);
     char* safe_ent_identity = html_escape(ent_identity);
 
@@ -861,14 +873,12 @@ static esp_err_t config_get_handler(httpd_req_t *req)
     }
 
     // Check if any html_escape failed
-    if (safe_ap_ssid == NULL || safe_ap_passwd == NULL || safe_ssid == NULL ||
-        safe_passwd == NULL || safe_ent_username == NULL || safe_ent_identity == NULL ||
+    if (safe_ap_ssid == NULL || safe_ssid == NULL ||
+        safe_ent_username == NULL || safe_ent_identity == NULL ||
         ap_ip_str == NULL) {
         ESP_LOGE(TAG, "Failed to escape HTML strings");
         free(safe_ap_ssid);
-        free(safe_ap_passwd);
         free(safe_ssid);
-        free(safe_passwd);
         free(safe_ent_username);
         free(safe_ent_identity);
         free(ap_ip_str);
@@ -895,6 +905,7 @@ static esp_err_t config_get_handler(httpd_req_t *req)
     remote_console_get_config(&rc_config);
     remote_console_get_status(&rc_status);
 
+    const char* ap_open_checked = (strlen(ap_passwd) == 0) ? "checked" : "";
     const char* ap_hidden_checked = ap_ssid_hidden ? "checked" : "";
     const char* rc_enabled_checked = rc_config.enabled ? "checked" : "";
     const char* rc_disabled_checked = rc_config.enabled ? "" : "checked";
@@ -966,12 +977,12 @@ static esp_err_t config_get_handler(httpd_req_t *req)
 
     /* Chunk 4: AP Settings */
     snprintf(section, sizeof(section), CONFIG_CHUNK_AP,
-        safe_ap_ssid, safe_ap_passwd, ap_ip_str, ap_mac_str, ap_hidden_checked);
+        safe_ap_ssid, ap_ip_str, ap_mac_str, ap_open_checked, ap_hidden_checked);
     httpd_resp_send_chunk(req, section, HTTPD_RESP_USE_STRLEN);
 
     /* Chunk 5: STA Settings */
     snprintf(section, sizeof(section), CONFIG_CHUNK_STA,
-        safe_ssid, safe_passwd, safe_ent_username, safe_ent_identity, sta_mac_str);
+        safe_ssid, safe_ent_username, safe_ent_identity, sta_mac_str);
     httpd_resp_send_chunk(req, section, HTTPD_RESP_USE_STRLEN);
 
     /* Chunk 6: Static IP Settings */
@@ -1004,9 +1015,7 @@ static esp_err_t config_get_handler(httpd_req_t *req)
 
     /* Cleanup */
     free(safe_ap_ssid);
-    free(safe_ap_passwd);
     free(safe_ssid);
-    free(safe_passwd);
     free(safe_ent_username);
     free(safe_ent_identity);
     free(ap_ip_str);

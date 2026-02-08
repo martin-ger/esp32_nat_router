@@ -16,11 +16,33 @@ extern "C" {
 #endif
 
 /**
- * @brief Initialize the ring buffer
- * @param size Buffer size in bytes
+ * @brief Initialize ring buffer synchronization primitives
+ *
+ * Creates mutex and semaphore only. Call ringbuf_alloc() to allocate the
+ * data buffer when capture is needed.
+ *
  * @return true on success, false on failure
  */
-bool ringbuf_init(size_t size);
+bool ringbuf_init(void);
+
+/**
+ * @brief Allocate the ring buffer data
+ *
+ * Allocates the data buffer and resets all state. ringbuf_init() must be
+ * called first. Safe to call from any task context.
+ *
+ * @param size Buffer size in bytes
+ * @return true on success, false on failure or if already allocated
+ */
+bool ringbuf_alloc(size_t size);
+
+/**
+ * @brief Free the ring buffer data
+ *
+ * Frees the data buffer under mutex protection. Sync primitives are kept
+ * alive so ringbuf_alloc() can be called again later.
+ */
+void ringbuf_free(void);
 
 /**
  * @brief Reset the ring buffer (clear all data)

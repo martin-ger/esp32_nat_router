@@ -50,7 +50,7 @@ static void register_set_ap_ip(void);
 static void register_show(void);
 static void register_portmap(void);
 static void register_dhcp_reserve(void);
-static void register_set_web_password(void);
+static void register_set_router_password(void);
 static void register_web_ui(void);
 static void register_bytes(void);
 static void register_pcap(void);
@@ -214,7 +214,7 @@ void register_router(void)
     register_bytes();
     register_pcap();
     register_web_ui();
-    register_set_web_password();
+    register_set_router_password();
     register_set_led_gpio();
     register_set_led_lowactive();
     register_set_ttl();
@@ -649,11 +649,11 @@ static void register_web_ui(void)
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }
 
-/* 'set_web_password' command */
-static int set_web_password_cmd(int argc, char **argv)
+/* 'set_router_password' command */
+static int set_router_password_cmd(int argc, char **argv)
 {
     if (argc < 2) {
-        printf("Usage: set_web_password <password>\n");
+        printf("Usage: set_router_password <password>\n");
         printf("Use empty string \"\" to disable password protection\n");
         return 1;
     }
@@ -686,13 +686,13 @@ static int set_web_password_cmd(int argc, char **argv)
     return err;
 }
 
-static void register_set_web_password(void)
+static void register_set_router_password(void)
 {
     const esp_console_cmd_t cmd = {
-        .command = "set_web_password",
-        .help = "Set web interface password (empty string to disable)",
+        .command = "set_router_password",
+        .help = "Set router password for web and remote console (empty string to disable)",
         .hint = NULL,
-        .func = &set_web_password_cmd,
+        .func = &set_router_password_cmd,
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }
@@ -904,9 +904,10 @@ static int show(int argc, char **argv)
         printf("Router Configuration:\n");
         printf("====================\n");
         
+        bool hide_pw = remote_console_is_capturing();
         printf("STA Settings:\n");
         printf("  SSID: %s\n", ssid != NULL ? ssid : "<undef>");
-        printf("  Password: %s\n", passwd != NULL ? passwd : "<undef>");
+        printf("  Password: %s\n", passwd == NULL ? "<undef>" : hide_pw ? "***" : passwd);
         if ((ent_username != NULL) && (strlen(ent_username) > 0)) {
             printf("  Enterprise Username: %s\n", ent_username);
             if ((ent_identity != NULL) && (strlen(ent_identity) > 0)) {
@@ -926,7 +927,7 @@ static int show(int argc, char **argv)
         
         printf("\nAP Settings:\n");
         printf("  SSID: %s\n", ap_ssid != NULL ? ap_ssid : "<undef>");
-        printf("  Password: %s\n", ap_passwd != NULL ? ap_passwd : "<undef>");
+        printf("  Password: %s\n", ap_passwd == NULL ? "<undef>" : hide_pw ? "***" : ap_passwd);
         ip4_addr_t addr;
         addr.addr = my_ap_ip;
         printf("  IP Address: " IPSTR "\n", IP2STR(&addr));
@@ -1906,8 +1907,6 @@ static int remote_console_cmd(int argc, char **argv)
         esp_err_t err = remote_console_enable();
         if (err == ESP_OK) {
             printf("Remote console enabled.\n");
-        } else if (err == ESP_ERR_INVALID_STATE) {
-            printf("Error: Set a web password first using 'set_web_password'\n");
         } else {
             printf("Error: %s\n", esp_err_to_name(err));
         }

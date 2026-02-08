@@ -25,16 +25,50 @@ static uint32_t dropped_packets = 0;
 static SemaphoreHandle_t ringbuf_mutex = NULL;
 static SemaphoreHandle_t data_ready_sem = NULL;
 
-bool ringbuf_init(size_t size)
+bool ringbuf_init(void)
 {
-    if (ringbuf_data != NULL) {
+    if (ringbuf_mutex != NULL) {
         ESP_LOGW(TAG, "Ring buffer already initialized");
+        return true;
+    }
+
+    ringbuf_mutex = xSemaphoreCreateMutex();
+    if (ringbuf_mutex == NULL) {
+        ESP_LOGE(TAG, "Failed to create mutex");
+        return false;
+    }
+
+    data_ready_sem = xSemaphoreCreateBinary();
+    if (data_ready_sem == NULL) {
+        ESP_LOGE(TAG, "Failed to create semaphore");
+        vSemaphoreDelete(ringbuf_mutex);
+        ringbuf_mutex = NULL;
+        return false;
+    }
+
+    ESP_LOGI(TAG, "Ring buffer initialized");
+    return true;
+}
+
+bool ringbuf_alloc(size_t size)
+{
+    if (ringbuf_mutex == NULL) {
+        ESP_LOGE(TAG, "Ring buffer not initialized");
+        return false;
+    }
+
+    xSemaphoreTake(ringbuf_mutex, portMAX_DELAY);
+
+    if (ringbuf_data != NULL) {
+        ESP_LOGW(TAG, "Ring buffer already allocated");
+        xSemaphoreGive(ringbuf_mutex);
         return true;
     }
 
     ringbuf_data = malloc(size);
     if (ringbuf_data == NULL) {
         ESP_LOGE(TAG, "Failed to allocate ring buffer (%d bytes)", size);
+        xSemaphoreGive(ringbuf_mutex);
         return false;
     }
 
@@ -44,25 +78,35 @@ bool ringbuf_init(size_t size)
     ringbuf_available = 0;
     dropped_packets = 0;
 
-    ringbuf_mutex = xSemaphoreCreateMutex();
-    if (ringbuf_mutex == NULL) {
-        ESP_LOGE(TAG, "Failed to create mutex");
-        free(ringbuf_data);
-        ringbuf_data = NULL;
-        return false;
-    }
+    xSemaphoreGive(ringbuf_mutex);
 
-    data_ready_sem = xSemaphoreCreateBinary();
-    if (data_ready_sem == NULL) {
-        ESP_LOGE(TAG, "Failed to create semaphore");
-        vSemaphoreDelete(ringbuf_mutex);
-        free(ringbuf_data);
-        ringbuf_data = NULL;
-        return false;
-    }
+    // Drain any stale semaphore signal
+    xSemaphoreTake(data_ready_sem, 0);
 
-    ESP_LOGI(TAG, "Ring buffer initialized (%d bytes)", size);
+    ESP_LOGI(TAG, "Ring buffer allocated (%d bytes)", size);
     return true;
+}
+
+void ringbuf_free(void)
+{
+    if (ringbuf_mutex == NULL) {
+        return;
+    }
+
+    xSemaphoreTake(ringbuf_mutex, portMAX_DELAY);
+
+    if (ringbuf_data != NULL) {
+        free(ringbuf_data);
+        ringbuf_data = NULL;
+        ringbuf_size = 0;
+        ringbuf_head = 0;
+        ringbuf_tail = 0;
+        ringbuf_available = 0;
+        dropped_packets = 0;
+        ESP_LOGI(TAG, "Ring buffer freed");
+    }
+
+    xSemaphoreGive(ringbuf_mutex);
 }
 
 void ringbuf_reset(void)
@@ -89,6 +133,12 @@ bool ringbuf_write(const uint8_t *data, size_t len)
     if (xSemaphoreTake(ringbuf_mutex, 0) != pdTRUE) {
         // Mutex busy, drop packet
         dropped_packets++;
+        return false;
+    }
+
+    // Re-check after taking mutex (buffer may have been freed)
+    if (ringbuf_data == NULL) {
+        xSemaphoreGive(ringbuf_mutex);
         return false;
     }
 
@@ -135,7 +185,8 @@ size_t ringbuf_read(uint8_t *data, size_t max_len, TickType_t timeout)
 
     xSemaphoreTake(ringbuf_mutex, portMAX_DELAY);
 
-    if (ringbuf_available == 0) {
+    // Check if buffer was freed while we waited
+    if (ringbuf_data == NULL || ringbuf_available == 0) {
         xSemaphoreGive(ringbuf_mutex);
         return 0;
     }

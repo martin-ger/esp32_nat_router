@@ -65,7 +65,6 @@ static const char *RC_AUTH_PROMPT = "Password: ";
 static const char *RC_AUTH_OK = "\r\nAuthentication successful.\r\n\r\n";
 static const char *RC_AUTH_FAIL = "\r\nAuthentication failed.\r\n";
 static const char *RC_BUSY = "BUSY: Another session is active.\r\n";
-static const char *RC_NO_PASSWORD = "ERROR: No password set. Set via web interface or 'set_web_password' command.\r\n";
 static const char *RC_GOODBYE = "\r\nGoodbye.\r\n";
 
 /* State */
@@ -277,14 +276,6 @@ esp_err_t remote_console_init(void) {
 
     /* Start server if enabled */
     if (rc_config.enabled) {
-        /* Check if password is set */
-        char password[64];
-        if (!get_web_password(password, sizeof(password))) {
-            ESP_LOGW(TAG, "Remote console enabled but no password set - not starting");
-            rc_state.state = RC_STATE_DISABLED;
-            return ESP_OK;
-        }
-
         /* Create server task */
         BaseType_t ret = xTaskCreate(remote_console_task, "remote_console",
                                      RC_TASK_STACK_SIZE, NULL,
@@ -307,13 +298,6 @@ esp_err_t remote_console_init(void) {
 esp_err_t remote_console_enable(void) {
     if (rc_config.enabled) {
         return ESP_OK;  /* Already enabled */
-    }
-
-    /* Check if password is set */
-    char password[64];
-    if (!get_web_password(password, sizeof(password))) {
-        ESP_LOGE(TAG, "Cannot enable remote console: no password set");
-        return ESP_ERR_INVALID_STATE;
     }
 
     rc_config.enabled = true;
@@ -446,6 +430,10 @@ bool remote_console_is_enabled(void) {
 
 bool remote_console_session_active(void) {
     return rc_state.state == RC_STATE_ACTIVE;
+}
+
+bool remote_console_is_capturing(void) {
+    return rc_capturing;
 }
 
 /* ---- Private functions ---- */
@@ -587,10 +575,11 @@ static bool authenticate_client(int client_fd) {
     char password_stored[64];
     char password_input[64];
 
-    /* Get stored password */
+    /* If no password set, skip authentication */
     if (!get_web_password(password_stored, sizeof(password_stored))) {
-        send_string(client_fd, RC_NO_PASSWORD);
-        return false;
+        ESP_LOGW(TAG, "No password set - allowing unauthenticated access");
+        send_string(client_fd, "WARNING: No password set. Use 'set_router_password' to secure access.\r\n");
+        return true;
     }
 
     for (int attempt = 0; attempt < RC_MAX_AUTH_ATTEMPTS; attempt++) {

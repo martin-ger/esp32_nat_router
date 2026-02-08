@@ -160,8 +160,11 @@ static void pcap_server_task(void *arg)
                  inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
         client_connected = true;
 
-        // Clear ring buffer on new connection
-        ringbuf_reset();
+        // Allocate ring buffer for this capture session
+        if (!ringbuf_alloc(PCAP_RINGBUF_SIZE)) {
+            ESP_LOGE(TAG, "Failed to allocate capture buffer");
+            goto client_disconnect;
+        }
 
         // Send PCAP global header
         pcap_global_header_t global_hdr;
@@ -201,6 +204,8 @@ client_disconnect:
             close(client_socket);
             client_socket = -1;
         }
+        // Free ring buffer until next client connects
+        ringbuf_free();
         ESP_LOGI(TAG, "Client session ended");
     }
 
@@ -212,13 +217,11 @@ client_disconnect:
 
 void pcap_init(void)
 {
-    // Initialize ring buffer
-    if (!ringbuf_init(PCAP_RINGBUF_SIZE)) {
+    // Initialize ring buffer synchronization (data buffer allocated on-demand)
+    if (!ringbuf_init()) {
         ESP_LOGE(TAG, "Failed to initialize ring buffer");
         return;
     }
-
-    ESP_LOGI(TAG, "Capture ring buffer size: %d", PCAP_RINGBUF_SIZE);
 
     // Create TCP server task
     BaseType_t ret = xTaskCreate(
@@ -235,7 +238,7 @@ void pcap_init(void)
         return;
     }
 
-    ESP_LOGI(TAG, "PCAP capture initialized (snaplen=%d, buffer=%dKB)",
+    ESP_LOGI(TAG, "PCAP capture initialized (snaplen=%d, buffer=%dKB on-demand)",
              pcap_snaplen, PCAP_RINGBUF_SIZE / 1024);
 }
 

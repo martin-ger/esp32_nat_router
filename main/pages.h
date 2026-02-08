@@ -247,28 +247,27 @@ setTimeout(\"location.href = '/'\", 10000);\
 }\
 </script>"
 
-/* AP Settings section - uses %s for: ap_ssid, ap_passwd, ap_ip, ap_mac, hidden_checked */
+/* AP Settings section - uses %s for: ap_ssid, ap_ip, ap_mac, open_checked, hidden_checked */
 #define CONFIG_CHUNK_AP "\
 <h2>Access Point Settings</h2>\
 <form action='' method='GET'>\
 <table>\
 <tr><td>SSID</td><td><input type='text' name='ap_ssid' value='%s' placeholder='Network name'/></td></tr>\
-<tr><td>Password</td><td><input type='text' name='ap_password' value='%s' placeholder='Min 8 chars or empty'/></td></tr>\
+<tr><td>Password</td><td><input type='text' id='ap_pw' name='ap_password' placeholder='unchanged' oninput=\"document.getElementById('ap_op').checked=false;\"/></td></tr>\
 <tr><td>AP IP Address</td><td><input type='text' name='ap_ip_addr' value='%s' placeholder='192.168.4.1'/></td></tr>\
 <tr><td>MAC Address</td><td><input type='text' name='ap_mac' value='%s' placeholder='AA:BB:CC:DD:EE:FF'/></td></tr>\
-<tr><td>Hidden SSID</td><td><input type='checkbox' name='ap_hidden' value='1' %s> <span style='color:#888;font-size:0.85rem;'>Hide from scans</span></td></tr>\
+<tr><td>Options</td><td><input type='checkbox' id='ap_op' name='ap_open' value='1' %s onchange=\"if(this.checked)document.getElementById('ap_pw').value='';\"> <span style='color:#888;font-size:0.85rem;'>Open (no password)</span> &nbsp; <input type='checkbox' name='ap_hidden' value='1' %s> <span style='color:#888;font-size:0.85rem;'>Hidden SSID</span></td></tr>\
 <tr><td></td><td><input type='submit' value='Apply' class='ok-button'/></td></tr>\
 </table>\
-<small>Leave password empty for open network</small>\
 </form>"
 
-/* STA Settings section - uses %s for: ssid, passwd, ent_username, ent_identity, sta_mac */
+/* STA Settings section - uses %s for: ssid, ent_username, ent_identity, sta_mac */
 #define CONFIG_CHUNK_STA "\
 <h2>Station Settings (Uplink)</h2>\
 <form action='' method='GET'>\
 <table>\
 <tr><td>SSID</td><td><input type='text' name='ssid' value='%s' placeholder='Uplink network'/></td></tr>\
-<tr><td>Password</td><td><input type='text' name='password' value='%s' placeholder='Network password'/></td></tr>\
+<tr><td>Password</td><td><input type='text' name='password' placeholder='unchanged'/></td></tr>\
 <tr><td colspan='2' style='padding-top: 1rem; color: #888; font-size: 0.85rem;'>WPA2 Enterprise (optional)</td></tr>\
 <tr><td>Username</td><td><input type='text' name='ent_username' value='%s' placeholder='Enterprise username'/></td></tr>\
 <tr><td>Identity</td><td><input type='text' name='ent_identity' value='%s' placeholder='Enterprise identity'/></td></tr>\

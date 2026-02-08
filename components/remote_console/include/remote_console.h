@@ -146,6 +146,13 @@ bool remote_console_is_enabled(void);
  */
 bool remote_console_session_active(void);
 
+/**
+ * @brief Check if output is being captured for a remote console session
+ *
+ * @return true if a command is executing via remote console
+ */
+bool remote_console_is_capturing(void);
+
 #ifdef __cplusplus
 }
 #endif

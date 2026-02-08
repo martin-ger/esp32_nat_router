@@ -97,12 +97,12 @@ You can protect the `/config` and `/mappings` pages with a password. The main st
 
 **Setting a Password (Serial Console):**
 ```
-set_web_password mypassword
+set_router_password mypassword
 ```
 
 To disable password protection, set an empty password:
 ```
-set_web_password ""
+set_router_password ""
 ```
 
 When password protection is enabled:
@@ -478,9 +478,9 @@ The router provides a network-accessible CLI via TCP, allowing remote configurat
 
 ### Enabling Remote Console
 
-First, set a web password (required):
+First, set a web password (recommended):
 ```
-set_web_password mypassword
+set_router_password mypassword
 ```
 
 Then enable the remote console:
@@ -672,8 +672,8 @@ web_ui   <enable|disable>
   web_ui enable       - Enable web interface (after reboot)
   web_ui disable      - Disable web interface (after reboot)
 
-set_web_password 
-  Set web interface password (empty string "" to disable)
+set_router_password 
+  Set router password for web and remote console (empty string to disable)
 
 set_led_gpio
   Set GPIO for status LED blinking (use 'none' to disable)
