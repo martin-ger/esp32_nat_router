@@ -91,6 +91,12 @@ extern uint8_t sta_ttl_override;
 // AP SSID hidden (0 = visible, 1 = hidden)
 extern uint8_t ap_ssid_hidden;
 
+// WPA2-Enterprise settings
+extern int32_t eap_method;          // 0=Auto, 1=PEAP, 2=TTLS, 3=TLS
+extern int32_t ttls_phase2;         // 0=MSCHAPv2, 1=MSCHAP, 2=PAP, 3=CHAP
+extern int32_t use_cert_bundle;     // 0=off, 1=on
+extern int32_t disable_time_check;  // 0=off, 1=on
+
 void preprocess_string(char* str);
 int set_sta(int argc, char **argv);
 int set_sta_static(int argc, char **argv);

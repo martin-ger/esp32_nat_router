@@ -228,6 +228,10 @@ static struct {
     struct arg_str* password;
     struct arg_str* ent_username;
     struct arg_str* ent_identity;
+    struct arg_int* eap_method;
+    struct arg_int* ttls_phase2;
+    struct arg_int* cert_bundle;
+    struct arg_int* no_time_check;
     struct arg_end* end;
 } set_sta_arg;
 
@@ -270,13 +274,31 @@ int set_sta(int argc, char **argv)
                     err = nvs_set_str(nvs, "ent_identity", "");
                 }
 
-        if (err == ESP_OK) {
-            err = nvs_commit(nvs);
-            if (err == ESP_OK) {
-                ESP_LOGI(TAG, "STA settings %s/%s stored.", set_sta_arg.ssid->sval[0], set_sta_arg.password->sval[0]);
+                if (err == ESP_OK) {
+                    // Save WPA2-Enterprise settings
+                    if (set_sta_arg.eap_method->count > 0) {
+                        nvs_set_i32(nvs, "eap_method", set_sta_arg.eap_method->ival[0]);
+                        eap_method = set_sta_arg.eap_method->ival[0];
+                    }
+                    if (set_sta_arg.ttls_phase2->count > 0) {
+                        nvs_set_i32(nvs, "ttls_phase2", set_sta_arg.ttls_phase2->ival[0]);
+                        ttls_phase2 = set_sta_arg.ttls_phase2->ival[0];
+                    }
+                    if (set_sta_arg.cert_bundle->count > 0) {
+                        nvs_set_i32(nvs, "cert_bundle", set_sta_arg.cert_bundle->ival[0]);
+                        use_cert_bundle = set_sta_arg.cert_bundle->ival[0];
+                    }
+                    if (set_sta_arg.no_time_check->count > 0) {
+                        nvs_set_i32(nvs, "no_time_chk", set_sta_arg.no_time_check->ival[0]);
+                        disable_time_check = set_sta_arg.no_time_check->ival[0];
+                    }
+
+                    err = nvs_commit(nvs);
+                    if (err == ESP_OK) {
+                        ESP_LOGI(TAG, "STA settings %s/%s stored.", set_sta_arg.ssid->sval[0], set_sta_arg.password->sval[0]);
+                    }
+                }
             }
-        }
-    }
         }
     }
     nvs_close(nvs);
@@ -288,8 +310,12 @@ static void register_set_sta(void)
     set_sta_arg.ssid = arg_str1(NULL, NULL, "<ssid>", "SSID");
     set_sta_arg.password = arg_str1(NULL, NULL, "<passwd>", "Password");
     set_sta_arg.ent_username = arg_str0("-u", "--username", "<ent_username>", "Enterprise username");
-    set_sta_arg.ent_identity = arg_str0("-a", "--anan", "<ent_identity>", "Enterprise identity");
-    set_sta_arg.end = arg_end(2);
+    set_sta_arg.ent_identity = arg_str0("-a", "--identity", "<ent_identity>", "Enterprise identity");
+    set_sta_arg.eap_method = arg_int0("-e", "--eap", "<0-3>", "EAP method (0=Auto,1=PEAP,2=TTLS,3=TLS)");
+    set_sta_arg.ttls_phase2 = arg_int0("-p", "--phase2", "<0-3>", "TTLS phase2 (0=MSCHAPv2,1=MSCHAP,2=PAP,3=CHAP)");
+    set_sta_arg.cert_bundle = arg_int0("-c", "--cert-bundle", "<0|1>", "Use CA cert bundle");
+    set_sta_arg.no_time_check = arg_int0("-t", "--no-time-check", "<0|1>", "Skip cert time check");
+    set_sta_arg.end = arg_end(6);
 
     const esp_console_cmd_t cmd = {
         .command = "set_sta",
@@ -913,6 +939,12 @@ static int show(int argc, char **argv)
             if ((ent_identity != NULL) && (strlen(ent_identity) > 0)) {
                 printf("  Enterprise Identity: %s\n", ent_identity);
             }
+            const char* eap_names[] = {"Auto", "PEAP", "TTLS", "TLS"};
+            const char* phase2_names[] = {"MSCHAPv2", "MSCHAP", "PAP", "CHAP"};
+            printf("  EAP Method: %s\n", (eap_method >= 0 && eap_method <= 3) ? eap_names[eap_method] : "Unknown");
+            printf("  TTLS Phase 2: %s\n", (ttls_phase2 >= 0 && ttls_phase2 <= 3) ? phase2_names[ttls_phase2] : "Unknown");
+            printf("  CA Cert Bundle: %s\n", use_cert_bundle ? "enabled" : "disabled");
+            printf("  Time Check: %s\n", disable_time_check ? "disabled" : "enabled");
         } else {
             printf("  Enterprise: <not active>\n");
         }

@@ -65,6 +65,12 @@ uint8_t sta_ttl_override = 0;
 // AP SSID hidden (0 = visible, 1 = hidden)
 uint8_t ap_ssid_hidden = 0;
 
+// WPA2-Enterprise settings
+int32_t eap_method = 0;          // 0=Auto, 1=PEAP, 2=TTLS, 3=TLS
+int32_t ttls_phase2 = 0;         // 0=MSCHAPv2, 1=MSCHAP, 2=PAP, 3=CHAP
+int32_t use_cert_bundle = 0;     // 0=off, 1=on
+int32_t disable_time_check = 0;  // 0=off, 1=on
+
 // Original netif input and linkoutput function pointers
 static netif_input_fn original_netif_input = NULL;
 static netif_linkoutput_fn original_netif_linkoutput = NULL;
@@ -1247,34 +1253,51 @@ void wifi_init(const uint8_t* mac, const char* ssid, const char* ent_username, c
 	    strlcpy((char*)ap_config.sta.password, ap_passwd, sizeof(ap_config.sta.password));
     }
 
-    if (strlen(ssid) > 0) {
-        ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA) );
+    // Always use APSTA mode so WiFi scanning works even without an uplink configured
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA) );
 
+    if (strlen(ssid) > 0) {
         //Set SSID
         strlcpy((char*)wifi_config.sta.ssid, ssid, sizeof(wifi_config.sta.ssid));
-        //Set passwprd
+        //Set password
         if(strlen(ent_username) == 0) {
             ESP_LOGI(TAG, "STA regular connection");
             strlcpy((char*)wifi_config.sta.password, passwd, sizeof(wifi_config.sta.password));
         }
         ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config) );
-        if(strlen(ent_username) != 0 && strlen(ent_identity) != 0) {
+        if(strlen(ent_username) != 0) {
             ESP_LOGI(TAG, "STA enterprise connection");
-            if(strlen(ent_username) != 0 && strlen(ent_identity) != 0) {
-                esp_eap_client_set_identity((uint8_t *)ent_identity, strlen(ent_identity)); //provide identity
+            if(strlen(ent_identity) != 0) {
+                esp_eap_client_set_identity((uint8_t *)ent_identity, strlen(ent_identity));
             } else {
                 esp_eap_client_set_identity((uint8_t *)ent_username, strlen(ent_username));
             }
-            esp_eap_client_set_username((uint8_t *)ent_username, strlen(ent_username)); //provide username
-            esp_eap_client_set_password((uint8_t *)passwd, strlen(passwd)); //provide password
+            esp_eap_client_set_username((uint8_t *)ent_username, strlen(ent_username));
+            esp_eap_client_set_password((uint8_t *)passwd, strlen(passwd));
+
+            // Set TTLS phase 2 method
+            if (ttls_phase2 >= 0 && ttls_phase2 <= 3) {
+                esp_eap_client_set_ttls_phase2_method(ttls_phase2);
+            }
+
+            // Use CA certificate bundle for server validation
+#ifdef CONFIG_MBEDTLS_CERTIFICATE_BUNDLE
+            if (use_cert_bundle) {
+                esp_eap_client_use_default_cert_bundle(true);
+            }
+#endif
+
+            // Disable certificate time check
+            if (disable_time_check) {
+                esp_eap_client_set_disable_time_check(true);
+            }
+
             esp_wifi_sta_enterprise_enable();
         }
 
         if (mac != NULL) {
             ESP_ERROR_CHECK(esp_wifi_set_mac(ESP_IF_WIFI_STA, mac));
         }
-    } else {
-        ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP) );
     }
 
     ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &ap_config) );
@@ -1424,6 +1447,24 @@ void app_main(void)
     }
     if (ap_ssid_hidden) {
         ESP_LOGI(TAG, "AP SSID hidden enabled");
+    }
+
+    // Load WPA2-Enterprise settings from NVS (defaults: 0)
+    int eap_setting = 0;
+    if (get_config_param_int("eap_method", &eap_setting) == ESP_OK) {
+        eap_method = (int32_t)eap_setting;
+    }
+    int phase2_setting = 0;
+    if (get_config_param_int("ttls_phase2", &phase2_setting) == ESP_OK) {
+        ttls_phase2 = (int32_t)phase2_setting;
+    }
+    int cert_bundle_setting = 0;
+    if (get_config_param_int("cert_bundle", &cert_bundle_setting) == ESP_OK) {
+        use_cert_bundle = (int32_t)cert_bundle_setting;
+    }
+    int time_check_setting = 0;
+    if (get_config_param_int("no_time_chk", &time_check_setting) == ESP_OK) {
+        disable_time_check = (int32_t)time_check_setting;
     }
 
     // Setup WIFI

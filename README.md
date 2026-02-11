@@ -13,7 +13,7 @@ This is a firmware to use the ESP32 as WiFi NAT router. It can be used as:
 - **Port Forwarding**: Map external ports to internal devices
 - **Firewall**: Define ACL to restrict or monitor traffic
 - **PCAP Capture**: Live packet capture can be streamed to Wireshark
-- **WPA2-Enterprise Support**: Connect to corporate networks and convert them to WPA2-PSK
+- **WPA2-Enterprise Support**: Connect to corporate networks (PEAP, TTLS, TLS) and convert them to WPA2-PSK
 - **Web Interface**: Web UI with password protection for easy configuration
 - **Serial Console**: Full CLI for advanced configuration
 - **Remote Console**: Network-accessible CLI via TCP (password protected)
@@ -53,7 +53,7 @@ Shows a WiFi network scan and allows for direct connection via the config page.
 ### Configuration Page (/config)
 Configure all router settings:
 - **Access Point Settings**: Configure the ESP32's access point name, password, IP address (default: 192.168.4.1), and MAC address
-- **Station Settings (Uplink)**: Enter the SSID and password for the upstream WiFi network (leave password blank for open networks), with optional WPA2-Enterprise credentials and MAC address customization
+- **Station Settings (Uplink)**: Enter the SSID and password for the upstream WiFi network (leave password blank for open networks), with optional WPA2-Enterprise settings (EAP method, TTLS Phase 2, CA cert bundle, time check) and MAC address customization
 - **Static IP Settings**: Optionally configure a static IP for the STA (upstream) interface
 - **PCAP Packet Capture**: Enable/disable packet capture and configure snaplen (max bytes per packet)
 - **Device Management**: Reboot the device
@@ -459,6 +459,48 @@ Changes require a restart to take effect.
 
 **Note**: Hiding the SSID provides minimal security benefit. The SSID is still transmitted in probe responses and association frames. Use strong WPA2 passwords for actual security.
 
+## WPA2-Enterprise
+
+The router supports connecting to WPA2-Enterprise (802.1X) networks, commonly used in corporate and university environments. This allows the ESP32 to bridge an enterprise network to a standard WPA2-PSK access point.
+
+### Supported EAP Methods
+
+| Value | Method | Description |
+|-------|--------|-------------|
+| 0 | Auto | Automatic detection (default) |
+| 1 | PEAP | Protected EAP (most common in corporate networks) |
+| 2 | TTLS | Tunneled TLS |
+| 3 | TLS | Certificate-based TLS |
+
+### TTLS Phase 2 Methods
+
+| Value | Method |
+|-------|--------|
+| 0 | MSCHAPv2 (default) |
+| 1 | MSCHAP |
+| 2 | PAP |
+| 3 | CHAP |
+
+### Configuration
+
+**Web Interface:** On the `/config` page, the Station Settings section includes fields for Enterprise username, identity, EAP method, TTLS Phase 2, and options for CA cert bundle and certificate time check.
+
+**Serial Console:**
+```
+set_sta MyCorpWiFi mypassword -u john.doe -a anonymous -e 1 -p 0 -c 1 -t 1
+```
+
+| Flag | Description |
+|------|-------------|
+| `-u` | Enterprise username |
+| `-a` | Enterprise identity (defaults to username if omitted) |
+| `-e` | EAP method (0=Auto, 1=PEAP, 2=TTLS, 3=TLS) |
+| `-p` | TTLS Phase 2 (0=MSCHAPv2, 1=MSCHAP, 2=PAP, 3=CHAP) |
+| `-c 1` | Enable CA certificate bundle for server validation |
+| `-t 1` | Skip certificate time check (useful if device has no RTC) |
+
+All settings are persisted in NVS and applied on next connection.
+
 ## Remote Console
 
 The router provides a network-accessible CLI via TCP, allowing remote configuration without physical serial access.
@@ -584,12 +626,16 @@ show  [status|config|mappings|acl]
   Show router status, config, mappings or ACL rules
   [status|config|mappings|acl]  Type of information
 
-set_sta  <ssid> <passwd> [-- <ent_username>] [-- <ent_identity>]
+set_sta  <ssid> <passwd> [-u <ent_username>] [-a <ent_identity>] [-e <0-3>] [-p <0-3>] [-c <0|1>] [-t <0|1>]
   Set SSID and password of the STA interface
         <ssid>  SSID
       <passwd>  Password
-  --, -u, ----username=<ent_username>  Enterprise username
-  --, -a, ----anan=<ent_identity>  Enterprise identity
+  -u, --username=<ent_username>  Enterprise username
+  -a, --identity=<ent_identity>  Enterprise identity
+  -e, --eap=<0-3>  EAP method (0=Auto, 1=PEAP, 2=TTLS, 3=TLS)
+  -p, --phase2=<0-3>  TTLS phase2 (0=MSCHAPv2, 1=MSCHAP, 2=PAP, 3=CHAP)
+  -c, --cert-bundle=<0|1>  Use CA cert bundle for server validation
+  -t, --no-time-check=<0|1>  Skip certificate time check
 
 set_sta_static  <ip> <subnet> <gw>
   Set Static IP for the STA interface

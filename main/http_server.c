@@ -682,6 +682,47 @@ static esp_err_t config_get_handler(httpd_req_t *req)
 
                             set_sta(argc, argv);
 
+                            // Save WPA2-Enterprise settings to NVS
+                            {
+                                nvs_handle_t nvs;
+                                if (nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs) == ESP_OK) {
+                                    char eap_param[4] = "";
+                                    int eap_val = 0;
+                                    if (httpd_query_key_value(buf, "eap_method", eap_param, sizeof(eap_param)) == ESP_OK) {
+                                        eap_val = atoi(eap_param);
+                                    }
+                                    nvs_set_i32(nvs, "eap_method", eap_val);
+                                    eap_method = eap_val;
+
+                                    char phase2_param[4] = "";
+                                    int phase2_val = 0;
+                                    if (httpd_query_key_value(buf, "ttls_phase2", phase2_param, sizeof(phase2_param)) == ESP_OK) {
+                                        phase2_val = atoi(phase2_param);
+                                    }
+                                    nvs_set_i32(nvs, "ttls_phase2", phase2_val);
+                                    ttls_phase2 = phase2_val;
+
+                                    // Checkboxes: present = 1, absent = 0
+                                    char cb_param[4] = "";
+                                    int cb_val = 0;
+                                    if (httpd_query_key_value(buf, "cert_bundle", cb_param, sizeof(cb_param)) == ESP_OK) {
+                                        cb_val = 1;
+                                    }
+                                    nvs_set_i32(nvs, "cert_bundle", cb_val);
+                                    use_cert_bundle = cb_val;
+
+                                    int tc_val = 0;
+                                    if (httpd_query_key_value(buf, "no_time_chk", cb_param, sizeof(cb_param)) == ESP_OK) {
+                                        tc_val = 1;
+                                    }
+                                    nvs_set_i32(nvs, "no_time_chk", tc_val);
+                                    disable_time_check = tc_val;
+
+                                    nvs_commit(nvs);
+                                    nvs_close(nvs);
+                                }
+                            }
+
                             // Check for optional STA MAC address
                             if (httpd_query_key_value(buf, "sta_mac", param5, sizeof(param5)) == ESP_OK && strlen(param5) > 0) {
                                 ESP_LOGI(TAG, "Found URL query parameter => sta_mac=%s", param5);
@@ -982,7 +1023,13 @@ static esp_err_t config_get_handler(httpd_req_t *req)
 
     /* Chunk 5: STA Settings */
     snprintf(section, sizeof(section), CONFIG_CHUNK_STA,
-        safe_ssid, safe_ent_username, safe_ent_identity, sta_mac_str);
+        safe_ssid, safe_ent_username, safe_ent_identity,
+        eap_method == 0 ? "selected" : "", eap_method == 1 ? "selected" : "",
+        eap_method == 2 ? "selected" : "", eap_method == 3 ? "selected" : "",
+        ttls_phase2 == 0 ? "selected" : "", ttls_phase2 == 1 ? "selected" : "",
+        ttls_phase2 == 2 ? "selected" : "", ttls_phase2 == 3 ? "selected" : "",
+        use_cert_bundle ? "checked" : "", disable_time_check ? "checked" : "",
+        sta_mac_str);
     httpd_resp_send_chunk(req, section, HTTPD_RESP_USE_STRLEN);
 
     /* Chunk 6: Static IP Settings */
