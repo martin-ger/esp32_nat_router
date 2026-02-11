@@ -52,6 +52,7 @@
 #include "pcap_capture.h"
 #include "acl.h"
 #include "remote_console.h"
+#include "oled_display.h"
 #include "lwip/prot/ip4.h"
 #include "lwip/inet_chksum.h"
 
@@ -1492,6 +1493,9 @@ void app_main(void)
 
     // Initialize remote console (TCP server on port 2323, disabled by default)
     remote_console_init();
+
+    // Initialize OLED display (disabled by default, enable via 'set_oled enable')
+    oled_display_init();
 
     initialize_console();
 

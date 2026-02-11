@@ -20,6 +20,7 @@ This is a firmware to use the ESP32 as WiFi NAT router. It can be used as:
 - **Connected Clients Display**: View all connected devices with MAC, IP, and device names
 - **Static IP Support**: Configure static IP for the STA (upstream) interface
 - **LED Status Indicator**: Visual feedback for connection status and connected clients
+- **OLED Display**: Status display on 72x40 I2C SSD1306 OLEDs (as found on some ESP32-C3 mini boards)
 - **TTL Override**: Set a fixed TTL for upstream packets (useful for hiding NAT from ISPs)
 
 The maximum number of simultaniously connected WiFi clients is 8 (5 on the ESP32c3) due to RAM limitations.
@@ -399,6 +400,30 @@ Changes take effect after restart.
 | Lolin32 Lite | GPIO 22 |
 
 **Note**: Some boards have active-low LEDs. ESP32-S3 often uses GPIO 48 for an addressable RGB LED (WS2812) which may require different handling.
+
+## OLED Display
+
+The firmware supports a 72x40 pixel (0.42") SSD1306 OLED display over I2C. This is specifically designed for the small I2C OLEDs found on certain ESP32-C3 mini boards. Other display sizes or drivers are not supported.
+
+The display shows:
+- AP SSID
+- STA connection status
+- STA IP address
+- Number of connected clients
+- Sent/received traffic in MB
+
+### Configuration
+
+The OLED display is disabled by default. Enable and configure it via the serial console:
+
+```
+oled enable              # Enable OLED display (requires reboot)
+oled disable             # Disable OLED display (requires reboot)
+oled gpio <sda> <scl>    # Set I2C pins (default: SDA=5, SCL=6)
+oled status              # Show current configuration
+```
+
+The default I2C pins (SDA=5, SCL=6) match the typical wiring on ESP32-C3 mini boards with built-in OLED.
 
 ## Factory Reset via BOOT Button
 
