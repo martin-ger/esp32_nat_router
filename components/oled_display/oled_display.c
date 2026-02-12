@@ -2,7 +2,12 @@
  *
  * Shows router status: AP SSID, STA connection, IPs, client count.
  * Disabled by default, configured via CLI with NVS persistence.
+ * Only compiled for ESP32-C3 targets.
  */
+
+#include "oled_display.h"
+
+#ifdef CONFIG_IDF_TARGET_ESP32C3
 
 #include <string.h>
 #include <stdio.h>
@@ -25,6 +30,7 @@ extern uint32_t my_ip;
 extern char *ap_ssid;
 extern uint64_t sta_bytes_sent;
 extern uint64_t sta_bytes_received;
+extern void resync_connect_count(void);
 
 static const char *TAG = "oled";
 
@@ -149,7 +155,7 @@ static void render_status(void)
     if (ap_connect) {
         wifi_ap_record_t ap_info;
         if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
-            snprintf(line, sizeof(line), "UP %d dB", ap_info.rssi);
+            snprintf(line, sizeof(line), "UP %d dBm", ap_info.rssi);
         } else {
             snprintf(line, sizeof(line), "UP");
         }
@@ -230,7 +236,12 @@ static void oled_task(void *arg)
 
     ESP_LOGI(TAG, "OLED 72x40 running on SDA=%d SCL=%d", sda, scl);
 
+    int resync_counter = 0;
     while (true) {
+        if (++resync_counter >= 30) {
+            resync_connect_count();
+            resync_counter = 0;
+        }
         render_status();
         err = oled_flush();
         if (err != ESP_OK) {
@@ -328,3 +339,5 @@ void oled_display_get_config(bool *enabled, int *sda, int *scl)
 
     nvs_close(nvs);
 }
+
+#endif /* CONFIG_IDF_TARGET_ESP32C3 */

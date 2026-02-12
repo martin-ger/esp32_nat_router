@@ -98,6 +98,7 @@ bool ap_connect = false;
 bool has_static_ip = false;
 int led_gpio = -1;  // -1 means LED disabled (none)
 uint8_t led_lowactive = 0;  // 0 = active-high (default), 1 = active-low (inverted)
+static uint8_t led_toggle = 0;  // Shared toggle state for packet-driven LED flicker
 
 uint32_t my_ip;
 uint32_t my_ap_ip;
@@ -698,9 +699,13 @@ static err_t netif_input_hook(struct pbuf *p, struct netif *netif) {
         pcap_capture_packet(p);
     }
 
-    // Count received bytes
+    // Count received bytes and toggle LED
     if (netif == sta_netif && p != NULL) {
         sta_bytes_received += p->tot_len;
+        if (led_gpio >= 0 && ap_connect) {
+            led_toggle ^= 1;
+            gpio_set_level(led_gpio, led_toggle ^ led_lowactive);
+        }
     }
 
     // Call original input function
@@ -768,9 +773,13 @@ static err_t netif_linkoutput_hook(struct netif *netif, struct pbuf *p) {
         pcap_capture_packet(p);
     }
 
-    // Count sent bytes
+    // Count sent bytes and toggle LED
     if (netif == sta_netif && p != NULL) {
         sta_bytes_sent += p->tot_len;
+        if (led_gpio >= 0 && ap_connect) {
+            led_toggle ^= 1;
+            gpio_set_level(led_gpio, led_toggle ^ led_lowactive);
+        }
     }
 
     // Call original linkoutput function
@@ -816,6 +825,13 @@ uint64_t get_sta_bytes_received(void) {
 void reset_sta_byte_counts(void) {
     sta_bytes_sent = 0;
     sta_bytes_received = 0;
+}
+
+void resync_connect_count(void) {
+    wifi_sta_list_t sta_list;
+    if (esp_wifi_ap_get_sta_list(&sta_list) == ESP_OK) {
+        connect_count = sta_list.num;
+    }
 }
 
 // Uptime functions
@@ -1049,31 +1065,12 @@ void * led_status_thread(void * p)
 
     while (true)
     {
-        // --- LED status display (only if configured and button not held) ---
+        // --- LED status: OFF=disconnected, ON=connected (packet hooks flicker it off) ---
         if (led_enabled && held_ms == 0) {
-            // XOR with led_lowactive to invert output when in low-active mode
             gpio_set_level(led_gpio, ap_connect ^ led_lowactive);
-
-            for (int i = 0; i < connect_count; i++)
-            {
-                gpio_set_level(led_gpio, (1 - ap_connect) ^ led_lowactive);
-                vTaskDelay(POLL_INTERVAL_MS / portTICK_PERIOD_MS);
-                if (gpio_get_level(BOOT_BUTTON_GPIO) == 0) {
-                    held_ms += POLL_INTERVAL_MS;
-                } else {
-                    held_ms = 0;
-                }
-                gpio_set_level(led_gpio, ap_connect ^ led_lowactive);
-                vTaskDelay(POLL_INTERVAL_MS / portTICK_PERIOD_MS);
-                if (gpio_get_level(BOOT_BUTTON_GPIO) == 0) {
-                    held_ms += POLL_INTERVAL_MS;
-                } else {
-                    held_ms = 0;
-                }
-            }
         }
 
-        // --- 1-second wait, broken into 50ms chunks with button polling ---
+        // --- Poll interval with button polling ---
         for (int t = 0; t < 1000 / POLL_INTERVAL_MS; t++) {
             vTaskDelay(POLL_INTERVAL_MS / portTICK_PERIOD_MS);
 

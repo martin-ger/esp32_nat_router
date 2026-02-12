@@ -1,9 +1,20 @@
 #!/bin/bash
 
 # ESP32 NAT Router - Multi-Target Build Script
-# Compiles for ESP32, ESP32-C2, ESP32-C3, and ESP32-S3 sequentially
+# Compiles for all targets defined in BUILD_ORDER sequentially
 
 set -e  # Exit on any error
+
+# Build targets in order
+BUILD_ORDER=("esp32" "esp32s3" "esp32c2" "esp32c3")
+
+# Target descriptions
+declare -A TARGET_DESC=(
+    ["esp32"]="ESP32 (Original)"
+    ["esp32c2"]="ESP32-C2"
+    ["esp32c3"]="ESP32-C3"
+    ["esp32s3"]="ESP32-S3"
+)
 
 # Colors for output
 RED='\033[0;31m'
@@ -152,20 +163,12 @@ main() {
     
     print_status "Working directory: $(pwd)"
     
-    # Define targets and their descriptions
-    declare -A TARGETS=(
-        ["esp32"]="ESP32 (Original)"
-        ["esp32c2"]="ESP32-C2" 
-        ["esp32c3"]="ESP32-C3"
-        ["esp32s3"]="ESP32-S3"
-    )
-    
     # Array to store failed targets
     FAILED_TARGETS=()
-    
+
     # Build for each target
-    for target in "esp32" "esp32c2" "esp32c3" "esp32s3"; do
-        description="${TARGETS[$target]}"
+    for target in "${BUILD_ORDER[@]}"; do
+        description="${TARGET_DESC[$target]}"
         echo ""
         print_status "=========================================="
         
@@ -184,14 +187,14 @@ main() {
     if [ ${#FAILED_TARGETS[@]} -eq 0 ]; then
         print_success "All targets built successfully!"
         print_status "Binary artifacts are preserved in firmware directories:"
-        for target in "esp32" "esp32c2" "esp32c3" "esp32s3"; do
+        for target in "${BUILD_ORDER[@]}"; do
             artifacts_dir="firmware_$target"
             if [ -d "$artifacts_dir" ]; then
                 print_status "  - $artifacts_dir/ (preserved)"
             fi
         done
         print_status "Build directories (will be cleaned on next build):"
-        for target in "esp32" "esp32c2" "esp32c3" "esp32s3"; do
+        for target in "${BUILD_ORDER[@]}"; do
             if [ -d "build/$target" ]; then
                 print_status "  - build/$target/"
             fi
@@ -199,7 +202,7 @@ main() {
     else
         print_error "Build failed for ${#FAILED_TARGETS[@]} target(s):"
         for failed_target in "${FAILED_TARGETS[@]}"; do
-            print_error "  - $failed_target (${TARGETS[$failed_target]})"
+            print_error "  - $failed_target (${TARGET_DESC[$failed_target]})"
         done
         exit 1
     fi
@@ -208,7 +211,7 @@ main() {
     echo ""
     print_status "Preserved Binary Sizes:"
     print_status "======================="
-    for target in "esp32" "esp32c2" "esp32c3" "esp32s3"; do
+    for target in "${BUILD_ORDER[@]}"; do
         artifacts_dir="firmware_$target"
         if [ -f "$artifacts_dir/esp32_nat_router.bin" ]; then
             size=$(stat -f%z "$artifacts_dir/esp32_nat_router.bin" 2>/dev/null || stat -c%s "$artifacts_dir/esp32_nat_router.bin" 2>/dev/null || echo "unknown")
@@ -219,7 +222,7 @@ main() {
     # Show total size of all preserved artifacts
     echo ""
     total_size=0
-    for target in "esp32" "esp32c2" "esp32c3" "esp32s3"; do
+    for target in "${BUILD_ORDER[@]}"; do
         artifacts_dir="firmware_$target"
         if [ -d "$artifacts_dir" ]; then
             for bin_file in "$artifacts_dir"/*.bin; do

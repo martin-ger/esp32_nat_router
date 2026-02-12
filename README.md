@@ -19,7 +19,7 @@ This is a firmware to use the ESP32 as WiFi NAT router. It can be used as:
 - **Remote Console**: Network-accessible CLI via TCP (password protected)
 - **Connected Clients Display**: View all connected devices with MAC, IP, and device names
 - **Static IP Support**: Configure static IP for the STA (upstream) interface
-- **LED Status Indicator**: Visual feedback for connection status and connected clients
+- **LED Status Indicator**: Visual feedback for connection and traffic status
 - **OLED Display**: Status display on 72x40 I2C SSD1306 OLEDs (as found on some ESP32-C3 mini boards)
 - **TTL Override**: Set a fixed TTL for upstream packets (useful for hiding NAT from ISPs)
 
@@ -359,20 +359,10 @@ pcap stop            # Legacy: disable capture
 
 ## LED Status Indicator
 
-The on-board LED provides visual feedback about connection status:
-- **LED on**: ESP32 is connected to the upstream AP
-- **LED off**: ESP32 is not connected to upstream
-- **Blinking**: Number of blinks indicates the number of connected clients
-
-For example:
-
-One device connected to the ESP32, and the ESP32 is connected to upstream:
-
-`*****.*****`
-
-Two devices are connected to the ESP32, but the ESP32 is not connected to upstream:
-
-`....*.*....`
+The on-board LED provides visual feedback about connection and traffic status:
+- **LED off**: ESP32 is not connected to upstream AP
+- **LED on (steady)**: ESP32 is connected to upstream, no traffic
+- **LED flickering**: ESP32 is connected, traffic is flowing through the router. The flickering intensity is proportional to the traffic volume — heavier traffic produces more intense flickering
 
 ### Configuring the LED GPIO
 
@@ -401,16 +391,18 @@ Changes take effect after restart.
 
 **Note**: Some boards have active-low LEDs. ESP32-S3 often uses GPIO 48 for an addressable RGB LED (WS2812) which may require different handling.
 
-## OLED Display
+## OLED Display (ESP32-C3 only)
 
 The firmware supports a 72x40 pixel (0.42") SSD1306 OLED display over I2C. This is specifically designed for the small I2C OLEDs found on certain ESP32-C3 mini boards. Other display sizes or drivers are not supported.
 
 The display shows:
 - AP SSID
-- STA connection status
+- STA connection status and RSSI
 - STA IP address
 - Number of connected clients
 - Sent/received traffic in MB
+
+<img src="https://raw.githubusercontent.com/martin-ger/esp32_nat_router/master/ESP32-C3-OLED.png">
 
 ### Configuration
 
@@ -747,7 +739,7 @@ set_router_password
   Set router password for web and remote console (empty string to disable)
 
 set_led_gpio
-  Set GPIO for status LED blinking (use 'none' to disable)
+  Set GPIO for status LED (use 'none' to disable)
 
 set_led_lowactive 
   Set LED to low-active (inverted) mode for active-low LEDs

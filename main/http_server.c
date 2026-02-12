@@ -408,6 +408,7 @@ static esp_err_t index_get_handler(httpd_req_t *req)
     httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
 
     /* Stream Clients row */
+    resync_connect_count();
     snprintf(row, sizeof(row), "<tr><td>Clients:</td><td>%d</td></tr>", connect_count);
     httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
 
@@ -1324,6 +1325,7 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
     #define MAX_DISPLAYED_CLIENTS 8
     connected_client_t clients[MAX_DISPLAYED_CLIENTS];
     int client_count = get_connected_clients(clients, MAX_DISPLAYED_CLIENTS);
+    connect_count = client_count;
 
     if (client_count > 0) {
         for (int i = 0; i < client_count; i++) {

@@ -178,6 +178,7 @@ void init_byte_counter(void);
 uint64_t get_sta_bytes_sent(void);
 uint64_t get_sta_bytes_received(void);
 void reset_sta_byte_counts(void);
+void resync_connect_count(void);
 
 // Uptime functions
 uint32_t get_uptime_seconds(void);

@@ -61,8 +61,10 @@ static void register_set_ttl(void);
 static void register_set_ap_hidden(void);
 static void register_acl(void);
 static void register_remote_console_cmd(void);
+#ifdef CONFIG_IDF_TARGET_ESP32C3
 static void register_set_oled(void);
 static void register_set_oled_gpio(void);
+#endif
 static void register_scan(void);
 
 /* ACL helper functions (forward declarations) */
@@ -223,8 +225,10 @@ void register_router(void)
     register_set_ttl();
     register_set_ap_hidden();
     register_remote_console_cmd();
+#ifdef CONFIG_IDF_TARGET_ESP32C3
     register_set_oled();
     register_set_oled_gpio();
+#endif
 }
 
 /** Arguments used by 'set_sta' function */
@@ -891,6 +895,7 @@ static int show(int argc, char **argv)
         printf("Free heap: %lu bytes\n", (unsigned long)esp_get_free_heap_size());
 
         // Connected clients
+        resync_connect_count();
         printf("Connected clients: %u\n", connect_count);
         if (connect_count > 0) {
             connected_client_t clients[8];
@@ -2036,6 +2041,8 @@ static void register_remote_console_cmd(void)
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }
 
+#ifdef CONFIG_IDF_TARGET_ESP32C3
+
 /* 'set_oled' command - enable/disable OLED display */
 static int set_oled_cmd(int argc, char **argv)
 {
@@ -2123,6 +2130,8 @@ static void register_set_oled_gpio(void)
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }
+
+#endif /* CONFIG_IDF_TARGET_ESP32C3 */
 
 /* Helper function to convert auth mode to string */
 static const char* auth_mode_to_str(wifi_auth_mode_t authmode)

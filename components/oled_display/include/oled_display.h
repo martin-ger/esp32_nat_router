@@ -8,6 +8,8 @@
 extern "C" {
 #endif
 
+#ifdef CONFIG_IDF_TARGET_ESP32C3
+
 #define OLED_DEFAULT_SDA  5
 #define OLED_DEFAULT_SCL  6
 #define OLED_I2C_ADDR     0x3C
@@ -40,6 +42,20 @@ void oled_display_set_gpio(int sda, int scl);
  * @param[out] scl      SCL GPIO pin
  */
 void oled_display_get_config(bool *enabled, int *sda, int *scl);
+
+#else /* !CONFIG_IDF_TARGET_ESP32C3 */
+
+static inline void oled_display_init(void) {}
+static inline void oled_display_enable(void) {}
+static inline void oled_display_disable(void) {}
+static inline void oled_display_set_gpio(int sda, int scl) { (void)sda; (void)scl; }
+static inline void oled_display_get_config(bool *enabled, int *sda, int *scl) {
+    if (enabled) *enabled = false;
+    if (sda) *sda = 0;
+    if (scl) *scl = 0;
+}
+
+#endif /* CONFIG_IDF_TARGET_ESP32C3 */
 
 #ifdef __cplusplus
 }
