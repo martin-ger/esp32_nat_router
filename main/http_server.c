@@ -362,9 +362,15 @@ static esp_err_t index_get_handler(httpd_req_t *req)
     httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
     free(safe_ap_ssid);
 
-    /* Stream connection status row */
+    /* Stream connection status row (with RSSI if connected) */
     if (ap_connect) {
-        httpd_resp_send_chunk(req, "<tr><td>Connection:</td><td><strong>Connected</strong></td></tr>", HTTPD_RESP_USE_STRLEN);
+        wifi_ap_record_t ap_info;
+        if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+            snprintf(row, sizeof(row), "<tr><td>Connection:</td><td><strong>Connected (%d dBm)</strong></td></tr>", ap_info.rssi);
+            httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
+        } else {
+            httpd_resp_send_chunk(req, "<tr><td>Connection:</td><td><strong>Connected</strong></td></tr>", HTTPD_RESP_USE_STRLEN);
+        }
     } else {
         httpd_resp_send_chunk(req, "<tr><td>Connection:</td><td><strong>Disconnected</strong></td></tr>", HTTPD_RESP_USE_STRLEN);
     }

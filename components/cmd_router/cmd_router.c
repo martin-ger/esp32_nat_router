@@ -866,7 +866,16 @@ static int show(int argc, char **argv)
         printf("Uptime: %s\n", uptime_str);
 
         // Connection status
-        printf("Uplink AP: %sconnected\n", ap_connect ? "" : "not ");
+        if (ap_connect) {
+            wifi_ap_record_t ap_info;
+            if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+                printf("Uplink AP: connected (%d dBm)\n", ap_info.rssi);
+            } else {
+                printf("Uplink AP: connected\n");
+            }
+        } else {
+            printf("Uplink AP: not connected\n");
+        }
         if (ap_connect) {
             ip4_addr_t addr;
             addr.addr = my_ip;

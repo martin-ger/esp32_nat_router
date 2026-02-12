@@ -15,6 +15,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_netif_ip_addr.h"
+#include "esp_wifi.h"
 #include "lwip/ip4_addr.h"
 
 /* Extern router globals (avoid including router_globals.h to prevent circular deps) */
@@ -144,8 +145,18 @@ static void render_status(void)
     /* Line 0: AP SSID (truncated by fb_draw_string) */
     fb_draw_string(0, ap_ssid != NULL ? ap_ssid : "NO AP");
 
-    /* Line 1: STA status */
-    fb_draw_string(1, ap_connect ? "STA: UP" : "STA: DOWN");
+    /* Line 1: STA status with RSSI */
+    if (ap_connect) {
+        wifi_ap_record_t ap_info;
+        if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+            snprintf(line, sizeof(line), "UP %d dB", ap_info.rssi);
+        } else {
+            snprintf(line, sizeof(line), "UP");
+        }
+        fb_draw_string(1, line);
+    } else {
+        fb_draw_string(1, "DOWN");
+    }
 
     /* Line 2: STA IP (truncated from front if too long for display) */
     if (ap_connect && my_ip != 0) {
