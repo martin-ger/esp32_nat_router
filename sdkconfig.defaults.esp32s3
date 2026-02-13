@@ -1,0 +1,5 @@
+# ESP32-S3 target overrides
+
+# Use built-in USB_SERIAL_JTAG for console output
+CONFIG_ESP_CONSOLE_UART_DEFAULT=n
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y

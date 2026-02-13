@@ -18,8 +18,8 @@
 #include "driver/gpio.h"
 #include "driver/uart.h"
 #include "driver/uart_vfs.h"
-#include "esp_vfs_usb_serial_jtag.h"
 #include "driver/usb_serial_jtag.h"
+#include "driver/usb_serial_jtag_vfs.h"
 #include "linenoise/linenoise.h"
 #include "argtable3/argtable3.h"
 #include "esp_vfs_fat.h"
@@ -970,11 +970,7 @@ static void initialize_console(void)
             .data_bits = UART_DATA_8_BITS,
             .parity = UART_PARITY_DISABLE,
             .stop_bits = UART_STOP_BITS_1,
-            #if defined(CONFIG_IDF_TARGET_ESP32) || defined(CONFIG_IDF_TARGET_ESP32S2)
-                .source_clk = UART_SCLK_REF_TICK,
-            #else
-                .source_clk = UART_SCLK_XTAL,
-            #endif
+            .source_clk = UART_SCLK_DEFAULT,
     };
     /* Install UART driver for interrupt-driven reads and writes */
     ESP_ERROR_CHECK( uart_driver_install(CONFIG_ESP_CONSOLE_UART_NUM,
@@ -991,10 +987,10 @@ static void initialize_console(void)
     fcntl(fileno(stdin), F_SETFL, O_NONBLOCK);
 
     /* Minicom, screen, idf_monitor send CR when ENTER key is pressed */
-    esp_vfs_dev_usb_serial_jtag_set_rx_line_endings(ESP_LINE_ENDINGS_CR);
+    usb_serial_jtag_vfs_set_rx_line_endings(ESP_LINE_ENDINGS_CR);
 
     /* Move the caret to the beginning of the next line on '\n' */
-    esp_vfs_dev_usb_serial_jtag_set_tx_line_endings(ESP_LINE_ENDINGS_CRLF);
+    usb_serial_jtag_vfs_set_tx_line_endings(ESP_LINE_ENDINGS_CRLF);
     usb_serial_jtag_driver_config_t usb_serial_jtag_config = {
         .tx_buffer_size = 256,
         .rx_buffer_size = 256,
@@ -1004,7 +1000,7 @@ static void initialize_console(void)
     usb_serial_jtag_driver_install(&usb_serial_jtag_config);
 
     /* Tell vfs to use usb-serial-jtag driver */
-    esp_vfs_usb_serial_jtag_use_driver();
+    usb_serial_jtag_vfs_use_driver();
 #endif
 
     /* Initialize the console */
@@ -1072,7 +1068,7 @@ void * led_status_thread(void * p)
 
         // --- Poll interval with button polling ---
         for (int t = 0; t < 1000 / POLL_INTERVAL_MS; t++) {
-            vTaskDelay(POLL_INTERVAL_MS / portTICK_PERIOD_MS);
+            vTaskDelay(pdMS_TO_TICKS(POLL_INTERVAL_MS));
 
             if (gpio_get_level(BOOT_BUTTON_GPIO) == 0) {
                 held_ms += POLL_INTERVAL_MS;
@@ -1318,7 +1314,7 @@ void wifi_init(const uint8_t* mac, const char* ssid, const char* ent_username, c
     // ESP_LOGI(TAG, "DNS IP:" IPSTR, IP2STR(&dnsinfo.ip.u_addr.ip4));
 
     xEventGroupWaitBits(wifi_event_group, CONNECTED_BIT,
-        pdFALSE, pdTRUE, JOIN_TIMEOUT_MS / portTICK_PERIOD_MS);
+        pdFALSE, pdTRUE, pdMS_TO_TICKS(JOIN_TIMEOUT_MS));
     ESP_ERROR_CHECK(esp_wifi_start());
 
     if (strlen(ssid) > 0) {

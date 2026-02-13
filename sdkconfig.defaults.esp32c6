@@ -1,0 +1,8 @@
+# ESP32-C6 target overrides
+
+# Max CPU frequency on C6 is 160 MHz
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_160=y
+
+# Use built-in USB_SERIAL_JTAG for console output
+CONFIG_ESP_CONSOLE_UART_DEFAULT=n
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y

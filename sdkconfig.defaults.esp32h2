@@ -1,0 +1,8 @@
+# ESP32-H2 target overrides
+
+# Max CPU frequency on H2 is 96 MHz
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_96=y
+
+# Use built-in USB_SERIAL_JTAG for console output
+CONFIG_ESP_CONSOLE_UART_DEFAULT=n
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
