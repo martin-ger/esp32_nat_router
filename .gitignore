@@ -3,6 +3,9 @@ build/**
 .vscode
 .vscode/*
 sdkconfig.*
+..mcp.json.swp
+.mcp.json
+__pycache__/*
 sdkconfig.old
 !sdkconfig.defaults
 !sdkconfig.defaults.*

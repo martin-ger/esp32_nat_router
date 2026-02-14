@@ -4,6 +4,7 @@ This is a firmware to use the ESP32 as WiFi NAT router. It can be used as:
 - Simple range extender for an existing WiFi network
 - Setting up an additional WiFi network with different SSID/password and restricted access for guests or IOT devices
 - Convert a corporate (WPA2-Enterprise) network to a regular network, for simple devices
+- MCP-server to control your network using agentic AI
 - Debugging and monitoring of WiFi devices
 
 ## Key Features
@@ -22,6 +23,7 @@ This is a firmware to use the ESP32 as WiFi NAT router. It can be used as:
 - **LED Status Indicator**: Visual feedback for connection and traffic status
 - **OLED Display**: Status display on 72x40 I2C SSD1306 OLEDs (as found on some ESP32-C3 mini boards)
 - **TTL Override**: Set a fixed TTL for upstream packets (useful for hiding NAT from ISPs)
+- **MCP Bridge (AI-Ready)**: BETA - Control the router from AI assistants (Claude, etc.) via the Model Context Protocol
 
 The maximum number of simultaniously connected WiFi clients is 8 (5 on the ESP32c3) due to RAM limitations.
 
@@ -589,6 +591,80 @@ remote_console kick                # Disconnect current session
 - Press Ctrl+D to disconnect
 - The session shows `^C` when Ctrl+C is pressed
 - All command output appears on the remote console
+
+## MCP Bridge (AI-Ready) (BETA)
+
+The ESP32 NAT Router includes an MCP (Model Context Protocol) server (`esp_nat_bridge.py`) that allows AI assistants like Claude to configure and monitor the router programmatically. The bridge connects to the router's remote console via telnet and exposes 47 tools covering all router functionality, including live network capture with tcpdump analysis.
+
+### Prerequisites
+
+```bash
+pip install fastmcp telnetlib3
+```
+
+The router must have the **remote console enabled** with a password set:
+```
+set_router_password mypassword
+remote_console enable
+```
+
+### Configuration
+
+Set environment variables to point the bridge at your router:
+
+```bash
+export ESP_NAT_HOST=192.168.4.1     # Router IP address (default)
+export ESP_NAT_PORT=2323            # Remote console port (default)
+export ESP_NAT_PASSWORD=mypassword  # Remote console password
+```
+
+### Running
+
+```bash
+# stdio mode (for MCP clients like Claude Code)
+python esp_nat_bridge.py
+
+# HTTP transport
+python esp_nat_bridge.py --transport streamable-http --port 8000
+```
+
+### Claude Code Integration
+
+Add the bridge to your Claude Code MCP settings (`~/.claude/claude_desktop_config.json` or project `.mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "esp32-router": {
+      "command": "python",
+      "args": ["esp_nat_bridge.py"],
+      "env": {
+        "ESP_NAT_HOST": "192.168.4.1",
+        "ESP_NAT_PASSWORD": "mypassword"
+      }
+    }
+  }
+}
+```
+
+### Available Tools
+
+| Category | Tools | Description |
+|----------|-------|-------------|
+| **Status** | `show_status`, `show_config`, `show_mappings`, `show_acl` | View router state and configuration |
+| **Info** | `get_heap_info`, `get_version`, `get_tasks`, `get_byte_counts`, `wifi_scan` | System info and diagnostics |
+| **WiFi STA** | `set_sta`, `set_sta_static`, `set_sta_mac` | Upstream WiFi configuration (incl. WPA2-Enterprise) |
+| **WiFi AP** | `set_ap`, `set_ap_ip`, `set_ap_mac`, `set_ap_hidden` | Access point configuration |
+| **DHCP** | `add_dhcp_reservation`, `delete_dhcp_reservation` | Fixed IP assignments by MAC |
+| **Port Forwarding** | `add_portmap`, `delete_portmap` | NAT port mapping rules |
+| **Firewall** | `acl_add`, `acl_delete`, `acl_clear`, `acl_clear_stats` | ACL rule management |
+| **PCAP** | `pcap_set_mode`, `pcap_status`, `pcap_set_snaplen` | Packet capture control |
+| **Network Trace** | `network_trace` | Live capture with local tcpdump analysis |
+| **Web UI** | `web_ui_enable`, `web_ui_disable`, `set_router_password` | Web interface management |
+| **Remote Console** | `remote_console_status`, `remote_console_enable`, ... | Remote console management |
+| **Network** | `set_ttl`, `get_ttl`, `reset_byte_counts` | TTL override, byte counters |
+| **System** | `restart`, `factory_reset`, `set_log_level` | Device management |
+| **Raw** | `raw_command` | Send any CLI command directly |
 
 # Command Line Interface
 
