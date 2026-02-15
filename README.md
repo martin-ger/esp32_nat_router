@@ -660,10 +660,8 @@ Add the bridge to your Claude Code MCP settings (`~/.claude/claude_desktop_confi
 | **Firewall** | `acl_add`, `acl_delete`, `acl_clear`, `acl_clear_stats` | ACL rule management |
 | **PCAP** | `pcap_set_mode`, `pcap_status`, `pcap_set_snaplen` | Packet capture control |
 | **Network Trace** | `network_trace` | Live capture with local tcpdump analysis |
-| **Web UI** | `web_ui_enable`, `web_ui_disable`, `set_router_password` | Web interface management |
-| **Remote Console** | `remote_console_status`, `remote_console_enable`, ... | Remote console management |
 | **Network** | `set_ttl`, `get_ttl`, `reset_byte_counts` | TTL override, byte counters |
-| **System** | `restart`, `factory_reset`, `set_log_level` | Device management |
+| **System** | `restart` | Device management |
 | **Raw** | `raw_command` | Send any CLI command directly |
 
 # Command Line Interface
