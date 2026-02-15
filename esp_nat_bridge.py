@@ -503,41 +503,27 @@ async def acl_add(
     proto: str,
     src: str,
     dst: str,
+    action: str,
     src_port: str = "*",
     dst_port: str = "*",
-    action: str = "allow",
 ) -> str:
-    """Add a firewall ACL rule.
+    """Add a firewall ACL rule to a NAT router.
 
-    This is a NAT/NAPT router: all AP client traffic is translated to the
-    router's single STA IP before reaching the Internet. This means:
+    Use to_ap/from_ap to filter by local client IPs.
+    Use to_sta/from_sta for internet-side filtering (client IPs hidden by NAT).
 
-    - AP-side lists (to_ap, from_ap) see original client IPs — use these
-      to filter traffic per client or device.
-    - STA-side lists (to_sta, from_sta) only see the router's own STA IP
-      as source/destination — individual AP client IPs are NOT visible here.
-      These lists are useful for filtering by remote Internet host, not by
-      local client.
+    Lists:
+    - to_ap: Client -> Router (Pre-NAT upstream)
+    - from_ap: Router -> Client (Post-NAT downstream)
+    - from_sta: Router -> Internet (Post-NAT upstream)
+    - to_sta: Internet -> Router (Pre-NAT downstream)
 
-    To block a specific client from reaching an Internet host, use to_ap
-    (client's outgoing request) and/or from_ap (response back to client).
-
-    Rules are evaluated in order (first match wins). No match = packet allowed.
-
-    ACL lists:
-      - to_ap:    Client -> Router (before NAT, client IP visible as src)
-      - from_ap:  Router -> Client (after reverse NAT, client IP visible as dst)
-      - from_sta: Router -> Internet (post-NAT, only router STA IP as src)
-      - to_sta:   Internet -> Router (pre-NAT, only router STA IP as dst)
-
-    Args:
-        acl_list: ACL list name: to_sta, from_sta, to_ap, or from_ap.
-        proto: Protocol: IP (any), TCP, UDP, or ICMP.
-        src: Source IP/CIDR, "any", or device name from DHCP reservation.
-        dst: Destination IP/CIDR, "any", or device name from DHCP reservation.
-        src_port: Source port number or "*" for any (TCP/UDP only).
-        dst_port: Destination port number or "*" for any (TCP/UDP only).
-        action: Rule action: allow, deny, allow_monitor, or deny_monitor.
+    Parameters:
+    - acl_list: 'to_ap', 'from_ap', 'to_sta', or 'from_sta'.
+    - proto: 'IP', 'TCP', 'UDP', or 'ICMP'.
+    - src/dst: IP, CIDR, 'any', or DHCP device name.
+    - action: 'allow', 'deny', 'allow_monitor', 'deny_monitor'.
+    - src_port/dst_port: Port number or '*' (TCP/UDP only).
     """
     if acl_list not in ACL_LISTS:
         raise ValueError(f"acl_list must be one of {ACL_LISTS}")
@@ -643,98 +629,6 @@ async def pcap_set_snaplen(snaplen: int) -> str:
         raise ValueError("snaplen must be between 64 and 1600")
     return await _cmd(f"pcap snaplen {snaplen}")
 
-
-# ═══════════════════════════════════════════════════════════════════════════
-# WEB INTERFACE MANAGEMENT
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-@mcp.tool()
-async def web_ui_enable() -> str:
-    """Enable the web interface. Takes effect after restart."""
-    return await _cmd("web_ui enable")
-
-
-@mcp.tool()
-async def web_ui_disable() -> str:
-    """Disable the web interface completely. Takes effect after restart.
-    Only re-enable via serial console or remote console."""
-    return await _cmd("web_ui disable")
-
-
-@mcp.tool()
-async def set_router_password(password: str) -> str:
-    """Set the router password for web interface and remote console authentication.
-    Use an empty string to disable password protection.
-
-    Args:
-        password: New password, or empty string to disable.
-    """
-    return await _cmd(f"set_router_password {password}")
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# REMOTE CONSOLE MANAGEMENT
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-@mcp.tool()
-async def remote_console_status() -> str:
-    """Show remote console status, connection info, and configuration."""
-    return await _cmd("remote_console status")
-
-
-@mcp.tool()
-async def remote_console_enable() -> str:
-    """Enable the remote console TCP service. Requires a router password to be set."""
-    return await _cmd("remote_console enable")
-
-
-@mcp.tool()
-async def remote_console_disable() -> str:
-    """Disable the remote console TCP service."""
-    return await _cmd("remote_console disable")
-
-
-@mcp.tool()
-async def remote_console_set_port(port: int) -> str:
-    """Set the TCP port for the remote console.
-
-    Args:
-        port: TCP port number (default: 2323).
-    """
-    return await _cmd(f"remote_console port {port}")
-
-
-@mcp.tool()
-async def remote_console_set_bind(interface: str) -> str:
-    """Set which network interface(s) the remote console listens on.
-
-    Args:
-        interface: "both", "ap", or "sta".
-    """
-    interface = interface.lower()
-    if interface not in ("both", "ap", "sta"):
-        raise ValueError("interface must be 'both', 'ap', or 'sta'")
-    return await _cmd(f"remote_console bind {interface}")
-
-
-@mcp.tool()
-async def remote_console_set_timeout(seconds: int) -> str:
-    """Set the idle timeout for remote console sessions.
-
-    Args:
-        seconds: Timeout in seconds (0 = no timeout).
-    """
-    return await _cmd(f"remote_console timeout {seconds}")
-
-
-@mcp.tool()
-async def remote_console_kick() -> str:
-    """Disconnect the current remote console session (if any other session is active)."""
-    return await _cmd("remote_console kick")
-
-
 # ═══════════════════════════════════════════════════════════════════════════
 # TTL OVERRIDE
 # ═══════════════════════════════════════════════════════════════════════════
@@ -756,29 +650,6 @@ async def set_ttl(ttl: int) -> str:
     if ttl < 0 or ttl > 255:
         raise ValueError("TTL must be 0-255")
     return await _cmd(f"set_ttl {ttl}")
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# LOGGING
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-@mcp.tool()
-async def set_log_level(level: str, tag: str = "") -> str:
-    """Set the ESP32 logging level globally or for a specific tag.
-
-    Args:
-        level: Log level: "none", "error", "warn", "info", "debug", or "verbose".
-        tag: Optional ESP-IDF log tag to set level for (e.g. "wifi", "nat"). Empty = global.
-    """
-    valid_levels = ("none", "error", "warn", "info", "debug", "verbose")
-    if level.lower() not in valid_levels:
-        raise ValueError(f"level must be one of {valid_levels}")
-    cmd = f"log_level {level}"
-    if tag:
-        cmd += f" -t {tag}"
-    return await _cmd(cmd)
-
 
 # ═══════════════════════════════════════════════════════════════════════════
 # SYSTEM COMMANDS
@@ -1023,4 +894,24 @@ async def raw_command(command: str) -> str:
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    mcp.run()
+    import argparse
+
+    parser = argparse.ArgumentParser(description="ESP32 NAT Router MCP Bridge")
+    parser.add_argument(
+        "--transport",
+        choices=["stdio", "sse", "streamable-http"],
+        default="stdio",
+        help="MCP transport (default: stdio)",
+    )
+    parser.add_argument(
+        "--host", default="0.0.0.0", help="Bind address for HTTP transports (default: 0.0.0.0)"
+    )
+    parser.add_argument(
+        "--port", type=int, default=8000, help="Port for HTTP transports (default: 8000)"
+    )
+    args = parser.parse_args()
+
+    if args.transport == "stdio":
+        mcp.run(transport="stdio")
+    else:
+        mcp.run(transport=args.transport, host=args.host, port=args.port)
