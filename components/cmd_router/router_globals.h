@@ -15,7 +15,7 @@ extern "C" {
 
 #define PARAM_NAMESPACE "esp32_nat"
 
-#define ROUTER_VERSION "2.1.4"
+#define ROUTER_VERSION "2.1.5"
 
 #define PROTO_TCP 6
 #define PROTO_UDP 17
@@ -191,6 +191,9 @@ void init_ap_netif_hooks(void);
 esp_err_t save_acl_rules(void);
 esp_err_t load_acl_rules(void);
 
+// Start captive portal DNS server (AP mode only).
+// Resolves all DNS queries to 192.168.4.1 so clients stay connected.
+void web_server_start_captive_dns(void);
 #ifdef __cplusplus
 }
 #endif

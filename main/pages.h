@@ -217,14 +217,22 @@ form { margin-bottom: 1.5rem; }\
 table { width: 100%; border-collapse: collapse; }\
 td { padding: 0.5rem 0; vertical-align: top; }\
 td:first-child { color: #888; font-size: 0.9rem; padding-right: 0.75rem; width: 35%; text-align: right; }\
-input[type='text'], input[type='password'] { width: 100%; background: rgba(22, 33, 62, 0.6); border: 1px solid rgba(0, 217, 255, 0.2); border-radius: 8px; color: #e0e0e0; padding: 0.75rem; font-size: 0.95rem; }\
-input:focus { outline: none; border-color: #00d9ff; box-shadow: 0 0 0 3px rgba(0, 217, 255, 0.1); background: rgba(22, 33, 62, 0.8); }\
+input[type='text'], input[type='password'], input[type='number'] { width: 100%; background: rgba(22, 33, 62, 0.6); border: 1px solid rgba(0, 217, 255, 0.2); border-radius: 8px; color: #e0e0e0; padding: 0.75rem; font-size: 0.95rem; }\
+input[type='text']:focus, input[type='password']:focus, input[type='number']:focus, select:focus { outline: none; border-color: #00d9ff; box-shadow: 0 0 0 3px rgba(0, 217, 255, 0.1); background: rgba(22, 33, 62, 0.8); }\
 input::placeholder { color: #666; }\
+select { width: 100%; background: rgba(22, 33, 62, 0.6); border: 1px solid rgba(0, 217, 255, 0.2); border-radius: 8px; color: #e0e0e0; padding: 0.75rem; font-size: 0.95rem; cursor: pointer; -webkit-appearance: none; -moz-appearance: none; appearance: none; background-image: url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2300d9ff' stroke-width='1.5' fill='none'/%3E%3C/svg%3E\"); background-repeat: no-repeat; background-position: right 0.75rem center; padding-right: 2rem; }\
+select option { background: #16213e; color: #e0e0e0; }\
+input[type='checkbox'], input[type='radio'] { -webkit-appearance: none; -moz-appearance: none; appearance: none; width: 18px; height: 18px; border: 2px solid rgba(0, 217, 255, 0.3); border-radius: 4px; background: rgba(22, 33, 62, 0.6); cursor: pointer; vertical-align: middle; position: relative; flex-shrink: 0; }\
+input[type='radio'] { border-radius: 50%; }\
+input[type='checkbox']:checked, input[type='radio']:checked { background: #00d9ff; border-color: #00d9ff; }\
+input[type='checkbox']:checked::after { content: ''; position: absolute; left: 4px; top: 1px; width: 6px; height: 10px; border: solid #1a1a2e; border-width: 0 2px 2px 0; transform: rotate(45deg); }\
+input[type='radio']:checked::after { content: ''; position: absolute; left: 3px; top: 3px; width: 8px; height: 8px; border-radius: 50%; background: #1a1a2e; }\
+input[type='checkbox']:focus, input[type='radio']:focus { outline: none; border-color: #00d9ff; box-shadow: 0 0 0 3px rgba(0, 217, 255, 0.1); }\
 .ok-button, .red-button { border: none; border-radius: 8px; padding: 0.75rem 1.5rem; font-size: 0.95rem; font-weight: 600; cursor: pointer; width: 100%; margin-top: 0.5rem; }\
 .ok-button { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #fff; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4); }\
 .red-button { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: #fff; box-shadow: 0 4px 15px rgba(245, 87, 108, 0.4); }\
 small { display: block; color: #888; font-size: 0.85rem; margin-top: 0.5rem; line-height: 1.4; }\
-@media (max-width: 600px) { body { padding: 0.5rem; } #container { padding: 1rem; } h1 { font-size: 1.25rem; } h2 { font-size: 1rem; } td:first-child { font-size: 0.8rem; width: 40%; } input[type='text'], input[type='password'] { font-size: 0.9rem; padding: 0.65rem; } .ok-button, .red-button { font-size: 0.9rem; padding: 0.65rem 1.25rem; } }\
+@media (max-width: 600px) { body { padding: 0.5rem; } #container { padding: 1rem; } h1 { font-size: 1.25rem; } h2 { font-size: 1rem; } td:first-child { font-size: 0.8rem; width: 40%; } input[type='text'], input[type='password'], input[type='number'], select { font-size: 0.9rem; padding: 0.65rem; } select { padding-right: 1.75rem; } .ok-button, .red-button { font-size: 0.9rem; padding: 0.65rem 1.25rem; } }\
 </style>\
 <body>\
 <div id='container'>\
@@ -351,7 +359,7 @@ setTimeout(\"location.href = '/'\", 10000);\
 <form action='' method='GET'>\
 <table>\
 <tr><td>Mode</td><td>\
-<select name='pcap_mode' style='padding: 0.4rem; border-radius: 4px; border: 1px solid #ccc;'>\
+<select name='pcap_mode'>\
 <option value='off' %s>Off</option>\
 <option value='acl' %s>ACL Monitor</option>\
 <option value='promisc' %s>Promiscuous</option>\

@@ -1305,8 +1305,14 @@ void wifi_init(const uint8_t* mac, const char* ssid, const char* ent_username, c
     dhcps_offer_t dhcps_dns_value = OFFER_DNS;
     esp_netif_dhcps_option(wifiAP,ESP_NETIF_OP_SET, ESP_NETIF_DOMAIN_NAME_SERVER, &dhcps_dns_value, sizeof(dhcps_dns_value));
 
-    // // Set custom dns server address for dhcp server
-    dnsserver.ip.u_addr.ip4.addr = esp_ip4addr_aton(DEFAULT_DNS);
+    // Set DNS server address for DHCP clients.
+    // When no STA is configured, point clients at the AP itself so the
+    // captive-portal DNS server can intercept all queries.
+    if (strlen(ssid) > 0) {
+        dnsserver.ip.u_addr.ip4.addr = esp_ip4addr_aton(DEFAULT_DNS);
+    } else {
+        dnsserver.ip.u_addr.ip4.addr = esp_ip4addr_aton(DEFAULT_AP_IP);
+    }
     dnsserver.ip.type = ESP_IPADDR_TYPE_V4;
     esp_netif_set_dns_info(wifiAP, ESP_NETIF_DNS_MAIN, &dnsserver);
 

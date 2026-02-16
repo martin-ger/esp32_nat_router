@@ -594,7 +594,7 @@ remote_console kick                # Disconnect current session
 
 ## MCP Bridge (AI-Ready) (BETA)
 
-The ESP32 NAT Router includes an MCP (Model Context Protocol) server (`esp_nat_bridge.py`) that allows AI assistants like Claude to configure and monitor the router programmatically. The bridge connects to the router's remote console via telnet and exposes 47 tools covering all router functionality, including live network capture with tcpdump analysis.
+The ESP32 NAT Router includes an MCP (Model Context Protocol) server (`esp_nat_bridge.py`) that allows AI assistants like Claude to configure and monitor the router programmatically. The bridge connects to the router's remote console via telnet and exposes tools covering all router functionality, including live network capture with tcpdump analysis.
 
 ### Prerequisites
 
@@ -652,7 +652,7 @@ Add the bridge to your Claude Code MCP settings (`~/.claude/claude_desktop_confi
 | Category | Tools | Description |
 |----------|-------|-------------|
 | **Status** | `show_status`, `show_config`, `show_mappings`, `show_acl` | View router state and configuration |
-| **Info** | `get_heap_info`, `get_version`, `get_tasks`, `get_byte_counts`, `wifi_scan` | System info and diagnostics |
+| **Info** | `get_heap_info`, `get_version`, `get_byte_counts`, `wifi_scan` | System info and diagnostics |
 | **WiFi STA** | `set_sta`, `set_sta_static`, `set_sta_mac` | Upstream WiFi configuration (incl. WPA2-Enterprise) |
 | **WiFi AP** | `set_ap`, `set_ap_ip`, `set_ap_mac`, `set_ap_hidden` | Access point configuration |
 | **DHCP** | `add_dhcp_reservation`, `delete_dhcp_reservation` | Fixed IP assignments by MAC |
@@ -667,7 +667,7 @@ Add the bridge to your Claude Code MCP settings (`~/.claude/claude_desktop_confi
 # Command Line Interface
 
 For configuration you have to use a serial console (Putty or GtkTerm with 115200 bps).
-Use the "set_sta" and the "set_ap" command to configure the WiFi settings. Changes are stored persistently in NVS and are applied after next restart. Use "show" to display the current config. The NVS namespace for the parameters is "esp32_nat"
+Use the "set_sta" and the "set_ap" command to configure the WiFi settings. Changes are stored persistently in NVS and are applied after next restart. Use "show" commands to display the current config.
 
 Enter the `help` command get a full list of all available commands:
 ```

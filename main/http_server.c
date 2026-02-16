@@ -6,6 +6,9 @@
    software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
    CONDITIONS OF ANY KIND, either express or implied.
 */
+#include "esp_netif.h"
+#include "lwip/ip_addr.h"
+#include "lwip/inet.h"
 
 #include <esp_wifi.h>
 #include <esp_event.h>
@@ -21,6 +24,7 @@
 #include <esp_http_server.h>
 
 #include "lwip/lwip_napt.h"
+#include "lwip/sockets.h"
 
 #include "pages.h"
 #include "favicon_png.h"
@@ -2022,6 +2026,8 @@ static httpd_uri_t scanp = {
     .handler   = scan_get_handler,
 };
 
+static esp_err_t captive_redirect_handler(httpd_req_t *req, httpd_err_code_t err);
+
 httpd_handle_t start_webserver(void)
 {
     httpd_handle_t server = NULL;
@@ -2041,6 +2047,14 @@ httpd_handle_t start_webserver(void)
         httpd_register_uri_handler(server, &firewallp);
         httpd_register_uri_handler(server, &scanp);
         httpd_register_uri_handler(server, &favicon_uri);
+
+        // Start captive portal DNS only when no upstream WiFi is configured
+        if (ssid == NULL || strlen(ssid) == 0) {
+            ESP_LOGI(TAG, "No STA configured, starting captive portal DNS");
+            httpd_register_err_handler(server, HTTPD_404_NOT_FOUND, captive_redirect_handler);
+            web_server_start_captive_dns();
+        }
+
         return server;
     }
 
@@ -2052,4 +2066,74 @@ static void stop_webserver(httpd_handle_t server)
 {
     // Stop the httpd server
     httpd_stop(server);
+}
+
+
+// ---------- Captive portal ----------
+
+// DNS server: resolve every query to 192.168.4.1 so captive-portal checks succeed
+static void dns_server_task(void *pvParameters)
+{
+    int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (sock < 0) {
+        ESP_LOGE(TAG, "DNS server: socket failed");
+        vTaskDelete(NULL);
+        return;
+    }
+
+    struct sockaddr_in addr = {
+        .sin_family = AF_INET,
+        .sin_port = htons(53),
+        .sin_addr.s_addr = htonl(INADDR_ANY),
+    };
+    if (bind(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+        ESP_LOGE(TAG, "DNS server: bind failed");
+        close(sock);
+        vTaskDelete(NULL);
+        return;
+    }
+
+    ESP_LOGI(TAG, "Captive portal DNS server started");
+    uint8_t buf[512];
+
+    while (1) {
+        struct sockaddr_in client;
+        socklen_t client_len = sizeof(client);
+        int len = recvfrom(sock, buf, sizeof(buf), 0,
+                           (struct sockaddr *)&client, &client_len);
+        if (len < 12) continue;
+
+        // Turn query into response
+        buf[2] = 0x81;  // QR=1, AA=1, RD=1
+        buf[3] = 0x80;  // RA=1
+        buf[6] = 0x00;  buf[7] = 0x01;  // 1 answer
+
+        // Append A record: name-pointer, type A, class IN, TTL 60, 192.168.4.1
+        int pos = len;
+        buf[pos++] = 0xC0; buf[pos++] = 0x0C;
+        buf[pos++] = 0x00; buf[pos++] = 0x01;
+        buf[pos++] = 0x00; buf[pos++] = 0x01;
+        buf[pos++] = 0x00; buf[pos++] = 0x00;
+        buf[pos++] = 0x00; buf[pos++] = 0x3C;
+        buf[pos++] = 0x00; buf[pos++] = 0x04;
+        buf[pos++] = 192;  buf[pos++] = 168;
+        buf[pos++] = 4;    buf[pos++] = 1;
+
+        sendto(sock, buf, pos, 0,
+               (struct sockaddr *)&client, client_len);
+    }
+}
+
+void web_server_start_captive_dns(void)
+{
+    xTaskCreate(dns_server_task, "dns_srv", 4096, NULL, 5, NULL);
+}
+
+// 404 handler: redirect unknown URIs to the main page (captive portal trigger)
+static esp_err_t captive_redirect_handler(httpd_req_t *req, httpd_err_code_t err)
+{
+    httpd_resp_set_status(req, "302 Found");
+    httpd_resp_set_hdr(req, "Location", "http://192.168.4.1/");
+    httpd_resp_send(req, NULL, 0);
+    return ESP_OK;
 }
