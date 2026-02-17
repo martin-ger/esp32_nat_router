@@ -62,7 +62,7 @@ Configure all router settings:
 - **Device Management**: Config backup/restore, reboot, and danger zone (disable web interface)
 - Click "Apply", "Connect", or "Set Static IP" to apply changes (the ESP32 will reboot)
 
-<img src="https://raw.githubusercontent.com/martin-ger/esp32_nat_router/master/UI_Settings.png">
+<img src="https://raw.githubusercontent.com/martin-ger/esp32_nat_router/master/UI_Config.png">
 
 Be aware that changes to AP settings (including the AP IP address) also affect the config interface itself - after changing the AP IP address, reconnect to the ESP32 at the new IP address to continue configuration. Also all currently defined DHCP reservations and port forwards will be deleted.
 
