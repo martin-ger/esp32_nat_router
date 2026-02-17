@@ -30,6 +30,9 @@
 #endif
 #include "lwip/lwip_napt.h"
 
+#include "mbedtls/sha256.h"
+#include "esp_random.h"
+
 #include "router_globals.h"
 #include "cmd_router.h"
 #include "pcap_capture.h"
@@ -48,6 +51,7 @@ static void register_set_sta_static(void);
 static void register_set_mac(void);
 static void register_set_ap(void);
 static void register_set_ap_ip(void);
+static void register_set_ap_dns(void);
 static void register_show(void);
 static void register_portmap(void);
 static void register_dhcp_reserve(void);
@@ -213,6 +217,7 @@ void register_router(void)
     register_scan();
     register_set_ap();
     register_set_ap_ip();
+    register_set_ap_dns();
     register_dhcp_reserve();
     register_portmap();
     register_acl();
@@ -616,6 +621,67 @@ static void register_set_ap_ip(void)
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }
 
+/** Arguments used by 'set_ap_dns' function */
+static struct {
+    struct arg_str *dns_str;
+    struct arg_end *end;
+} set_ap_dns_arg;
+
+/* 'set_ap_dns' command */
+static int set_ap_dns(int argc, char **argv)
+{
+    esp_err_t err;
+    nvs_handle_t nvs;
+
+    int nerrors = arg_parse(argc, argv, (void **) &set_ap_dns_arg);
+    if (nerrors != 0) {
+        arg_print_errors(stderr, set_ap_dns_arg.end, argv[0]);
+        return 1;
+    }
+
+    preprocess_string((char*)set_ap_dns_arg.dns_str->sval[0]);
+
+    err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = nvs_set_str(nvs, "ap_dns", set_ap_dns_arg.dns_str->sval[0]);
+    if (err == ESP_OK) {
+        err = nvs_commit(nvs);
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "AP DNS server '%s' stored.", set_ap_dns_arg.dns_str->sval[0]);
+            printf("AP DNS set to: %s\n", set_ap_dns_arg.dns_str->sval[0]);
+            if (strlen(set_ap_dns_arg.dns_str->sval[0]) == 0) {
+                printf("DNS will be learned from upstream (default behavior).\n");
+            }
+            printf("Restart to apply.\n");
+        }
+    }
+    nvs_close(nvs);
+
+    // Update global
+    free(ap_dns);
+    ap_dns = strdup(set_ap_dns_arg.dns_str->sval[0]);
+
+    return err;
+}
+
+static void register_set_ap_dns(void)
+{
+    set_ap_dns_arg.dns_str = arg_str1(NULL, NULL, "<dns>", "DNS server IP (empty string to clear)");
+    set_ap_dns_arg.end = arg_end(1);
+
+    const esp_console_cmd_t cmd = {
+        .command = "set_ap_dns",
+        .help = "Set DNS server for AP clients (empty to use upstream)",
+        .hint = NULL,
+        .func = &set_ap_dns,
+        .argtable = &set_ap_dns_arg
+    };
+    ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
+}
+
 /* 'web_ui' command */
 static int web_ui_cmd(int argc, char **argv)
 {
@@ -684,6 +750,127 @@ static void register_web_ui(void)
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }
 
+/* --- Password hashing (SHA-256 + 16-byte salt) --- */
+/* NVS key "web_password" stores "salt_hex:hash_hex" (32 + 1 + 64 = 97 chars) */
+
+#define PW_SALT_LEN 16
+#define PW_HASH_LEN 32   /* SHA-256 output */
+
+static void pw_bytes_to_hex(const uint8_t *src, size_t len, char *out)
+{
+    for (size_t i = 0; i < len; i++) {
+        sprintf(out + i * 2, "%02x", src[i]);
+    }
+    out[len * 2] = '\0';
+}
+
+static int pw_hex_to_bytes(const char *src, uint8_t *dst, size_t len)
+{
+    for (size_t i = 0; i < len; i++) {
+        unsigned int b;
+        if (sscanf(src + i * 2, "%2x", &b) != 1) return -1;
+        dst[i] = (uint8_t)b;
+    }
+    return 0;
+}
+
+static void pw_compute_hash(const uint8_t *salt, size_t salt_len,
+                            const char *plaintext, uint8_t *hash_out)
+{
+    mbedtls_sha256_context ctx;
+    mbedtls_sha256_init(&ctx);
+    mbedtls_sha256_starts(&ctx, 0);  /* 0 = SHA-256 (not 224) */
+    mbedtls_sha256_update(&ctx, salt, salt_len);
+    mbedtls_sha256_update(&ctx, (const uint8_t *)plaintext, strlen(plaintext));
+    mbedtls_sha256_finish(&ctx, hash_out);
+    mbedtls_sha256_free(&ctx);
+}
+
+bool is_web_password_set(void)
+{
+    nvs_handle_t nvs;
+    if (nvs_open(PARAM_NAMESPACE, NVS_READONLY, &nvs) != ESP_OK) return false;
+
+    size_t len = 0;
+    esp_err_t err = nvs_get_str(nvs, "web_password", NULL, &len);
+    nvs_close(nvs);
+    return (err == ESP_OK && len > 1);  /* len includes null terminator */
+}
+
+bool verify_web_password(const char *plaintext)
+{
+    nvs_handle_t nvs;
+    if (nvs_open(PARAM_NAMESPACE, NVS_READONLY, &nvs) != ESP_OK) return false;
+
+    size_t stored_len = 0;
+    esp_err_t err = nvs_get_str(nvs, "web_password", NULL, &stored_len);
+    if (err != ESP_OK || stored_len <= 1) { nvs_close(nvs); return false; }
+
+    char *stored = malloc(stored_len);
+    if (!stored) { nvs_close(nvs); return false; }
+    nvs_get_str(nvs, "web_password", stored, &stored_len);
+    nvs_close(nvs);
+
+    /* New format: "salt_hex:hash_hex" (32 + 1 + 64 = 97 chars + null) */
+    char *colon = strchr(stored, ':');
+    if (colon && (colon - stored) == PW_SALT_LEN * 2
+              && strlen(colon + 1) == PW_HASH_LEN * 2) {
+        /* Hashed format */
+        uint8_t salt[PW_SALT_LEN], stored_hash[PW_HASH_LEN], computed_hash[PW_HASH_LEN];
+        if (pw_hex_to_bytes(stored, salt, PW_SALT_LEN) != 0 ||
+            pw_hex_to_bytes(colon + 1, stored_hash, PW_HASH_LEN) != 0) {
+            free(stored);
+            return false;
+        }
+        pw_compute_hash(salt, PW_SALT_LEN, plaintext, computed_hash);
+        free(stored);
+
+        /* Constant-time comparison */
+        volatile int diff = 0;
+        for (int i = 0; i < PW_HASH_LEN; i++) {
+            diff |= stored_hash[i] ^ computed_hash[i];
+        }
+        return diff == 0;
+    }
+
+    /* Legacy plaintext format - compare directly, then migrate */
+    bool match = (strcmp(stored, plaintext) == 0);
+    free(stored);
+    if (match) {
+        /* Silently migrate to hashed format */
+        set_web_password_hashed(plaintext);
+    }
+    return match;
+}
+
+esp_err_t set_web_password_hashed(const char *plaintext)
+{
+    nvs_handle_t nvs;
+    esp_err_t err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err != ESP_OK) return err;
+
+    if (plaintext[0] == '\0') {
+        /* Empty = disable password */
+        nvs_set_str(nvs, "web_password", "");
+    } else {
+        uint8_t salt[PW_SALT_LEN], hash[PW_HASH_LEN];
+        esp_fill_random(salt, PW_SALT_LEN);
+        pw_compute_hash(salt, PW_SALT_LEN, plaintext, hash);
+
+        /* Format: "salt_hex:hash_hex" */
+        char buf[PW_SALT_LEN * 2 + 1 + PW_HASH_LEN * 2 + 1];
+        pw_bytes_to_hex(salt, PW_SALT_LEN, buf);
+        buf[PW_SALT_LEN * 2] = ':';
+        pw_bytes_to_hex(hash, PW_HASH_LEN, buf + PW_SALT_LEN * 2 + 1);
+
+        nvs_set_str(nvs, "web_password", buf);
+    }
+
+    err = nvs_commit(nvs);
+    nvs_close(nvs);
+    return err;
+}
+
 /* 'set_router_password' command */
 static int set_router_password_cmd(int argc, char **argv)
 {
@@ -693,31 +880,18 @@ static int set_router_password_cmd(int argc, char **argv)
         return 1;
     }
 
-    esp_err_t err;
-    nvs_handle_t nvs;
-
-    err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
-    if (err != ESP_OK) {
-        printf("Failed to open NVS\n");
-        return err;
-    }
-
-    err = nvs_set_str(nvs, "web_password", argv[1]);
+    esp_err_t err = set_web_password_hashed(argv[1]);
     if (err == ESP_OK) {
-        err = nvs_commit(nvs);
-        if (err == ESP_OK) {
-            if (argv[1][0] == '\0') {
-                ESP_LOGI(TAG, "Web password protection disabled.");
-                printf("Password protection disabled.\n");
-            } else {
-                ESP_LOGI(TAG, "Web password updated.");
-                printf("Password updated successfully.\n");
-            }
+        if (argv[1][0] == '\0') {
+            ESP_LOGI(TAG, "Web password protection disabled.");
+            printf("Password protection disabled.\n");
+        } else {
+            ESP_LOGI(TAG, "Web password updated.");
+            printf("Password updated successfully.\n");
         }
     } else {
         printf("Failed to set password\n");
     }
-    nvs_close(nvs);
     return err;
 }
 
@@ -982,6 +1156,7 @@ static int show(int argc, char **argv)
         ip4_addr_t addr;
         addr.addr = my_ap_ip;
         printf("  IP Address: " IPSTR "\n", IP2STR(&addr));
+        printf("  DNS Server: %s\n", (ap_dns && ap_dns[0]) ? ap_dns : "(upstream)");
 
         char* web_lock = NULL;
         get_config_param_str("lock", &web_lock);

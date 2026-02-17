@@ -1118,10 +1118,12 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
         my_ip = event->ip_info.ip.addr;
         delete_portmap_tab();
         apply_portmap_tab();
-        if (esp_netif_get_dns_info(wifiSTA, ESP_NETIF_DNS_MAIN, &dns) == ESP_OK)
-        {
-            esp_netif_set_dns_info(wifiAP, ESP_NETIF_DNS_MAIN, &dns);
-            ESP_LOGI(TAG, "set dns to:" IPSTR, IP2STR(&(dns.ip.u_addr.ip4)));
+        if (!(ap_dns && ap_dns[0])) {
+            if (esp_netif_get_dns_info(wifiSTA, ESP_NETIF_DNS_MAIN, &dns) == ESP_OK)
+            {
+                esp_netif_set_dns_info(wifiAP, ESP_NETIF_DNS_MAIN, &dns);
+                ESP_LOGI(TAG, "set dns to:" IPSTR, IP2STR(&(dns.ip.u_addr.ip4)));
+            }
         }
         
         // Initialize byte counter after getting IP (interface is ready)
@@ -1309,7 +1311,8 @@ void wifi_init(const uint8_t* mac, const char* ssid, const char* ent_username, c
     // When no STA is configured, point clients at the AP itself so the
     // captive-portal DNS server can intercept all queries.
     if (strlen(ssid) > 0) {
-        dnsserver.ip.u_addr.ip4.addr = esp_ip4addr_aton(DEFAULT_DNS);
+        const char *dns_src = (ap_dns && ap_dns[0]) ? ap_dns : "1.1.1.1";
+        dnsserver.ip.u_addr.ip4.addr = esp_ip4addr_aton(dns_src);
     } else {
         dnsserver.ip.u_addr.ip4.addr = esp_ip4addr_aton(DEFAULT_AP_IP);
     }
@@ -1343,6 +1346,7 @@ uint8_t* ap_mac = NULL;
 char* ap_ssid = NULL;
 char* ap_passwd = NULL;
 char* ap_ip = NULL;
+char* ap_dns = NULL;
 
 char* param_set_default(const char* def_val) {
     char * retval = malloc(strlen(def_val)+1);
@@ -1407,6 +1411,10 @@ void app_main(void)
     get_config_param_str("ap_ip", &ap_ip);
     if (ap_ip == NULL) {
         ap_ip = param_set_default(DEFAULT_AP_IP);
+    }
+    get_config_param_str("ap_dns", &ap_dns);
+    if (ap_dns == NULL) {
+        ap_dns = param_set_default("");
     }
 
     get_portmap_tab();

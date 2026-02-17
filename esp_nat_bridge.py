@@ -233,7 +233,7 @@ async def show_status() -> str:
 
 @mcp.tool()
 async def show_config() -> str:
-    """Show router configuration: the WiFi network it connects to, the hotspot it broadcasts, static IP settings, and web interface state."""
+    """Show router configuration: the WiFi network it connects to, the hotspot it broadcasts, static IP settings, DNS server, and web interface state."""
     return await _cmd("show config")
 
 
@@ -396,6 +396,19 @@ async def set_ap_ip(ip: str) -> str:
     """
     _require(ip, "ip")
     return await _cmd(f"set_ap_ip {ip}")
+
+
+@mcp.tool()
+async def set_ap_dns(dns: str = "") -> str:
+    """Set the DNS server distributed to hotspot clients via DHCP. Requires restart.
+
+    When empty (default), DNS is automatically learned from the upstream WiFi connection.
+    When set, the custom DNS is always used regardless of upstream.
+
+    Args:
+        dns: DNS server IP address (e.g. "1.1.1.1"), or empty string to use upstream DNS.
+    """
+    return await _cmd(f'set_ap_dns "{dns}"')
 
 
 @mcp.tool()

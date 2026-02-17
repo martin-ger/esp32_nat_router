@@ -13,7 +13,7 @@ This is a firmware to use the ESP32 as WiFi NAT router. It can be used as:
 - **DHCP Reservations**: Assign fixed IPs to specific MAC addresses
 - **Port Forwarding**: Map external ports to internal devices
 - **Firewall**: Define ACL to restrict or monitor traffic
-- **PCAP Capture**: Live packet capture can be streamed to Wireshark
+- **PCAP Capture**: Live packet capture can be streamed to Wireshark or other network tools
 - **WPA2-Enterprise Support**: Connect to corporate networks (PEAP, TTLS, TLS) and convert them to WPA2-PSK
 - **Web Interface**: Web UI with password protection for easy configuration
 - **Serial Console**: Full CLI for advanced configuration
@@ -55,16 +55,25 @@ Shows a WiFi network scan and allows for direct connection via the config page.
 
 ### Configuration Page (/config)
 Configure all router settings:
-- **Access Point Settings**: Configure the ESP32's access point name, password, IP address (default: 192.168.4.1), and MAC address
+- **Access Point Settings**: Configure the ESP32's access point name, password, IP address (default: 192.168.4.1), DNS server, and MAC address
 - **Station Settings (Uplink)**: Enter the SSID and password for the upstream WiFi network (leave password blank for open networks), with optional WPA2-Enterprise settings (EAP method, TTLS Phase 2, CA cert bundle, time check) and MAC address customization
 - **Static IP Settings**: Optionally configure a static IP for the STA (upstream) interface
 - **PCAP Packet Capture**: Enable/disable packet capture and configure snaplen (max bytes per packet)
-- **Device Management**: Reboot the device
+- **Device Management**: Config backup/restore, reboot, and danger zone (disable web interface)
 - Click "Apply", "Connect", or "Set Static IP" to apply changes (the ESP32 will reboot)
 
 <img src="https://raw.githubusercontent.com/martin-ger/esp32_nat_router/master/UI_Settings.png">
 
 Be aware that changes to AP settings (including the AP IP address) also affect the config interface itself - after changing the AP IP address, reconnect to the ESP32 at the new IP address to continue configuration. Also all currently defined DHCP reservations and port forwards will be deleted.
+
+#### Config Backup / Restore
+
+The Configuration page includes a **Config Backup / Restore** section under Device Management:
+
+- **Export (Write Config)**: Downloads a JSON file containing all router settings (WiFi credentials, DHCP reservations, port mappings, ACL rules, etc.)
+- **Import (Read Config)**: Upload a previously exported JSON file to restore settings. The device reboots automatically after import to apply the configuration.
+
+This is useful for cloning settings across multiple devices or for backup before a factory reset.
 
 ### Mappings Page (/mappings)
 Manage network mappings:
@@ -274,7 +283,7 @@ Each rule can have one of four actions:
 
 ## PCAP Packet Capture
 
-The router includes a built-in packet capture feature that streams traffic to Wireshark in real-time via TCP.
+The router includes a built-in packet capture feature that streams traffic to Wireshark or other network tools in real-time via TCP.
 
 ### Capture Modes
 
@@ -310,7 +319,7 @@ acl add to_ap IP MyPhone * any * allow_monitor
 
 1. Set capture mode via the web interface (`/config` page) or serial console:
 
-2. Connect Wireshark from your computer:
+2. Connect **Wireshark** from your computer:
 ```bash
 nc <ESP32's IP address> | wireshark -k -i -
 ```
@@ -318,6 +327,12 @@ nc <ESP32's IP address> | wireshark -k -i -
 Or configure Wireshark directly:
 - Go to Capture > Options > Manage Interfaces > Pipes
 - Add new pipe: `TCP@<ESP32's IP address>:19000`
+
+Other options would be e.g. analyzing the traffic with a tool like **zeek**:
+```bash
+mkdir zeek_logs && chmod 777 zeek_logs
+nc <ESP32's IP address> 19000 | docker run --rm -i -v $(pwd)/zeek_logs:/logs -w /logs zeek/zeek:latest zeek -r -
+```
 
 ### Web Interface
 
@@ -654,7 +669,7 @@ Add the bridge to your Claude Code MCP settings (`~/.claude/claude_desktop_confi
 | **Status** | `show_status`, `show_config`, `show_mappings`, `show_acl` | View router state and configuration |
 | **Info** | `get_heap_info`, `get_version`, `get_byte_counts`, `wifi_scan` | System info and diagnostics |
 | **WiFi STA** | `set_sta`, `set_sta_static`, `set_sta_mac` | Upstream WiFi configuration (incl. WPA2-Enterprise) |
-| **WiFi AP** | `set_ap`, `set_ap_ip`, `set_ap_mac`, `set_ap_hidden` | Access point configuration |
+| **WiFi AP** | `set_ap`, `set_ap_ip`, `set_ap_dns`, `set_ap_mac`, `set_ap_hidden` | Access point configuration |
 | **DHCP** | `add_dhcp_reservation`, `delete_dhcp_reservation` | Fixed IP assignments by MAC |
 | **Port Forwarding** | `add_portmap`, `delete_portmap` | NAT port mapping rules |
 | **Firewall** | `acl_add`, `acl_delete`, `acl_clear`, `acl_clear_stats` | ACL rule management |
@@ -754,6 +769,10 @@ set_ap  <ssid> <passwd>
 set_ap_ip  <ip>
   Set IP for the AP interface
           <ip>  IP
+
+set_ap_dns  <dns>
+  Set DNS server for AP clients (empty to use upstream)
+         <dns>  DNS server IP (empty string to clear)
 
 set_ap_hidden
   Hide or show the AP SSID (on/off, requires restart)
@@ -881,15 +900,15 @@ esptool.py --chip esp32 \
 0x10000 firmware_esp32/esp32_nat_router.bin
 ```
 
-For ESP32-C2:
+For ESP32-C6:
 
 ```bash
-esptool.py --chip esp32c2 \
+esptool.py --chip esp32c6 \
 --before default_reset --after hard_reset write_flash \
 -z --flash_size detect \
-0x0 firmware_esp32c2/bootloader.bin \
-0x8000 firmware_esp32c2/partition-table.bin \
-0x10000 firmware_esp32c2/esp32_nat_router.bin
+0x0 firmware_esp32c6/bootloader.bin \
+0x8000 firmware_esp32c6/partition-table.bin \
+0x10000 firmware_esp32c6/esp32_nat_router.bin
 ```
 
 For ESP32-C3:
@@ -903,7 +922,7 @@ esptool.py --chip esp32c3 \
 0x10000 firmware_esp32c3/esp32_nat_router.bin
 ```
 
-If especially the ESP32c3 mini with the JTAG-USB has problems during the flash process try the --no-stub option.
+If especially the ESP32s with the JTAG-USB have problems during the flash process try the --no-stub option of esptool.
 
 For ESP32-S3:
 
@@ -959,9 +978,21 @@ For automated building across multiple ESP32 targets with esp-idf, use the provi
 ```
 
 ## DNS
-As soon as the ESP32 STA has learned a DNS IP from its upstream DNS server on first connect, it passes that to newly connected clients.
-Before that by default the DNS-Server which is offerd to clients connecting to the ESP32 AP is set to 8.8.8.8.
-Replace the value of the *MY_DNS_IP_ADDR* with your desired DNS-Server IP address (in hex) if you want to use a different one.
+
+By default, the DNS server distributed to AP clients via DHCP is automatically learned from the upstream WiFi connection. Before the first successful STA connection, `1.1.1.1` is used as a fallback.
+
+You can override this with a custom DNS server that is always used regardless of the upstream:
+
+**Web Interface:** On the `/config` page, set the "DNS Server" field in Access Point Settings (leave empty for automatic/upstream DNS).
+
+**Serial Console:**
+```
+set_ap_dns 1.1.1.1         # Use Cloudflare DNS
+set_ap_dns 8.8.8.8         # Use Google DNS
+set_ap_dns ""              # Clear custom DNS (use upstream, default)
+```
+
+The `show config` command displays the current DNS setting under AP Settings. Changes require a restart to take effect.
 
 ## Performance
 

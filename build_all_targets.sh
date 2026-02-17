@@ -6,14 +6,14 @@
 set -e  # Exit on any error
 
 # Build targets in order
-BUILD_ORDER=("esp32" "esp32s3" "esp32c2" "esp32c3")
+BUILD_ORDER=("esp32" "esp32s3" "esp32c6" "esp32c3")
 
 # Target descriptions
 declare -A TARGET_DESC=(
     ["esp32"]="ESP32 (Original)"
-    ["esp32c2"]="ESP32-C2"
-    ["esp32c3"]="ESP32-C3"
     ["esp32s3"]="ESP32-S3"
+    ["esp32c6"]="ESP32-C6"
+    ["esp32c3"]="ESP32-C3"
 )
 
 # Colors for output

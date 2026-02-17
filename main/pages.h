@@ -255,7 +255,7 @@ setTimeout(\"location.href = '/'\", 10000);\
 }\
 </script>"
 
-/* AP Settings section - uses %s for: ap_ssid, ap_ip, ap_mac, open_checked, hidden_checked */
+/* AP Settings section - uses %s for: ap_ssid, ap_ip, ap_dns, ap_mac, open_checked, hidden_checked */
 #define CONFIG_CHUNK_AP "\
 <h2>Access Point Settings</h2>\
 <form action='' method='GET'>\
@@ -263,6 +263,7 @@ setTimeout(\"location.href = '/'\", 10000);\
 <tr><td>SSID</td><td><input type='text' name='ap_ssid' value='%s' placeholder='Network name'/></td></tr>\
 <tr><td>Password</td><td><input type='text' id='ap_pw' name='ap_password' placeholder='unchanged' oninput=\"document.getElementById('ap_op').checked=false;\"/></td></tr>\
 <tr><td>AP IP Address</td><td><input type='text' name='ap_ip_addr' value='%s' placeholder='192.168.4.1'/></td></tr>\
+<tr><td>DNS Server</td><td><input type='text' name='ap_dns' value='%s' placeholder='empty = use upstream DNS'/></td></tr>\
 <tr><td>MAC Address</td><td><input type='text' name='ap_mac' value='%s' placeholder='AA:BB:CC:DD:EE:FF'/></td></tr>\
 <tr><td>Options</td><td><input type='checkbox' id='ap_op' name='ap_open' value='1' %s onchange=\"if(this.checked)document.getElementById('ap_pw').value='';\"> <span style='color:#888;font-size:0.85rem;'>Open (no password)</span> &nbsp; <input type='checkbox' name='ap_hidden' value='1' %s> <span style='color:#888;font-size:0.85rem;'>Hidden SSID</span></td></tr>\
 <tr><td></td><td><input type='submit' value='Apply' class='ok-button'/></td></tr>\
@@ -378,14 +379,62 @@ setTimeout(\"location.href = '/'\", 10000);\
 <small>Connect using: nc %s 19000 | wireshark -k -i -</small>\
 </form>"
 
+/* Config Backup / Restore - now embedded in Device Management */
+#define CONFIG_CHUNK_EXPORT_IMPORT ""
+
 /* Device management and footer */
 #define CONFIG_CHUNK_TAIL "\
 <h2>Device Management</h2>\
+<div id='mainContent'>\
+<h3 style='font-size:1rem;color:#aaa;margin:1rem 0 0.5rem;'>Config Backup / Restore</h3>\
+<table>\
+<tr><td>Export</td><td><a href='/api/config-export' class='ok-button' style='display:inline-block;text-align:center;text-decoration:none;'>Write Config</a></td></tr>\
+<tr><td>Import</td><td>\
+<label style='display:inline-block;padding:0.6rem 1rem;background:rgba(22,33,62,0.6);border:1px solid rgba(0,217,255,0.2);border-radius:8px;color:#e0e0e0;font-size:0.9rem;cursor:pointer;transition:all 0.3s;margin-bottom:0.5rem;'>\
+<input type='file' id='cfgFile' accept='.json' style='display:none;'/>\
+<span id='cfgFileName'>Choose file...</span>\
+</label><br/>\
+<button type='button' onclick='uploadConfig()' class='ok-button'>Read Config</button>\
+<div id='importStatus' style='margin-top:0.5rem;font-size:0.9rem;'></div>\
+</td></tr>\
+</table>\
+<h3 style='font-size:1rem;color:#aaa;margin:1.5rem 0 0.5rem;'>Reboot</h3>\
 <form action='' method='GET'>\
 <table>\
 <tr><td>Device</td><td><input type='submit' name='reset' value='Reboot Now' class='red-button'/></td></tr>\
 </table>\
 </form>\
+</div>\
+<div id='rebootScreen' style='display:none;text-align:center;padding:2rem 0;'>\
+<h2 style='color:#4caf50;margin-bottom:1rem;'>Config Imported Successfully</h2>\
+<p style='font-size:1.1rem;margin-bottom:0.5rem;'>The device is rebooting to apply the new configuration.</p>\
+<p style='font-size:1.5rem;font-weight:bold;color:#00d9ff;' id='countdown'>5</p>\
+<p style='color:#888;font-size:0.9rem;'>Redirecting to home page...</p>\
+</div>\
+<script>\
+document.getElementById('cfgFile').addEventListener('change',function(){document.getElementById('cfgFileName').textContent=this.files[0]?this.files[0].name:'Choose file...';});\
+function uploadConfig(){\
+var f=document.getElementById('cfgFile').files[0];\
+if(!f){document.getElementById('importStatus').textContent='Select a file first.';return;}\
+var r=new FileReader();\
+r.onload=function(){\
+document.getElementById('importStatus').textContent='Uploading...';\
+fetch('/api/config-import',{method:'POST',body:r.result,headers:{'Content-Type':'application/json'}})\
+.then(function(res){return res.json();})\
+.then(function(d){\
+if(d.ok){\
+document.getElementById('mainContent').style.display='none';\
+document.getElementById('rebootScreen').style.display='block';\
+var c=5;var el=document.getElementById('countdown');\
+var t=setInterval(function(){c--;el.textContent=c;if(c<=0){clearInterval(t);window.location.href='/';}},1000);\
+}else{\
+document.getElementById('importStatus').innerHTML='<span style=\"color:#ff5252;\">'+d.msg+'</span>';\
+}\
+});\
+};\
+r.readAsText(f);\
+}\
+</script>\
 <div style='margin-top: 2rem; padding: 1rem; background: #fff3cd; border: 2px solid #ff9800; border-radius: 8px;'>\
 <h2 style='color: #ff6b00; margin-bottom: 0.5rem;'>⚠ Danger Zone</h2>\
 <p style='margin-bottom: 1rem; color: #666; font-size: 0.9rem;'>This will disable the web interface completely. You can only re-enable it via the console using the 'web_ui enable' command.</p>\

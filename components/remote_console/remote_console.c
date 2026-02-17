@@ -24,9 +24,7 @@
 #include "lwip/sockets.h"
 
 #include "remote_console.h"
-
-/* NVS namespace - must match router_globals.h */
-#define PARAM_NAMESPACE "esp32_nat"
+#include "router_globals.h"
 
 /* MSG_NOSIGNAL may not be defined on all platforms */
 #ifndef MSG_NOSIGNAL
@@ -112,7 +110,6 @@ static bool rc_capturing = false;
 static void remote_console_task(void *arg);
 static esp_err_t load_config(void);
 static esp_err_t save_config(void);
-static bool get_web_password(char *password, size_t max_len);
 static bool authenticate_client(int client_fd);
 static void handle_session(int client_fd);
 static int send_string(int fd, const char *str);
@@ -483,23 +480,8 @@ static esp_err_t save_config(void) {
     return ESP_OK;
 }
 
-static bool get_web_password(char *password, size_t max_len) {
-    nvs_handle_t nvs;
-    esp_err_t err = nvs_open(PARAM_NAMESPACE, NVS_READONLY, &nvs);
-    if (err != ESP_OK) {
-        return false;
-    }
-
-    size_t required_size = max_len;
-    err = nvs_get_str(nvs, "web_password", password, &required_size);
-    nvs_close(nvs);
-
-    if (err != ESP_OK || required_size == 0 || password[0] == '\0') {
-        return false;
-    }
-
-    return true;
-}
+/* Password checking uses shared functions from router_globals.h:
+ * is_web_password_set(), verify_web_password() */
 
 static int send_string(int fd, const char *str) {
     size_t len = strlen(str);
@@ -572,11 +554,10 @@ static int recv_line(int fd, char *buf, size_t max_len, uint32_t timeout_sec) {
 }
 
 static bool authenticate_client(int client_fd) {
-    char password_stored[64];
     char password_input[64];
 
     /* If no password set, skip authentication */
-    if (!get_web_password(password_stored, sizeof(password_stored))) {
+    if (!is_web_password_set()) {
         ESP_LOGW(TAG, "No password set - allowing unauthenticated access");
         send_string(client_fd, "WARNING: No password set. Use 'set_router_password' to secure access.\r\n");
         return true;
@@ -591,19 +572,7 @@ static bool authenticate_client(int client_fd) {
             return false;
         }
 
-        /* Constant-time comparison to prevent timing attacks */
-        size_t stored_len = strlen(password_stored);
-        size_t input_len = strlen(password_input);
-        size_t max_len = (stored_len > input_len) ? stored_len : input_len;
-
-        volatile int diff = (stored_len != input_len);
-        for (size_t i = 0; i < max_len; i++) {
-            char a = (i < stored_len) ? password_stored[i] : 0;
-            char b = (i < input_len) ? password_input[i] : 0;
-            diff |= (a ^ b);
-        }
-
-        if (diff == 0) {
+        if (verify_web_password(password_input)) {
             send_string(client_fd, RC_AUTH_OK);
             ESP_LOGI(TAG, "Remote console login successful from %s", rc_state.client_ip);
             return true;

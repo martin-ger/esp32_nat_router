@@ -68,6 +68,7 @@ extern char* subnet_mask;
 extern char* gateway_addr;
 extern char* ap_ssid;
 extern char* ap_passwd;
+extern char* ap_dns;
 
 extern uint16_t connect_count;
 extern bool ap_connect;
@@ -194,6 +195,14 @@ esp_err_t load_acl_rules(void);
 // Start captive portal DNS server (AP mode only).
 // Resolves all DNS queries to 192.168.4.1 so clients stay connected.
 void web_server_start_captive_dns(void);
+
+// Password hashing (SHA-256 + salt)
+// Returns true if a non-empty password is stored in NVS.
+bool is_web_password_set(void);
+// Verify a plaintext password against the stored hash. Returns true on match.
+bool verify_web_password(const char *plaintext);
+// Hash and store a new password (empty string disables protection).
+esp_err_t set_web_password_hashed(const char *plaintext);
 #ifdef __cplusplus
 }
 #endif

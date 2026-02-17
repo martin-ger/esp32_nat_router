@@ -1,7 +1,7 @@
 idf_component_register(
     SRCS "remote_console.c"
     INCLUDE_DIRS "include"
-    REQUIRES esp_timer nvs_flash console lwip esp_netif esp_event log
+    REQUIRES esp_timer nvs_flash console lwip esp_netif esp_event log cmd_router
 )
 
 # Wrap output functions to intercept console output

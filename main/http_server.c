@@ -32,6 +32,7 @@
 #include "pcap_capture.h"
 #include "acl.h"
 #include "remote_console.h"
+#include "cJSON.h"
 
 static const char *TAG = "HTTPServer";
 
@@ -78,25 +79,8 @@ static void clear_session(void)
     session_expiry_time = 0;
 }
 
-/* Load password from NVS (returns true if password is set and non-empty) */
-static bool get_web_password(char* password_out, size_t max_len)
-{
-    nvs_handle_t nvs;
-    esp_err_t err = nvs_open(PARAM_NAMESPACE, NVS_READONLY, &nvs);
-    if (err != ESP_OK) {
-        return false;
-    }
-
-    size_t required_size = max_len;
-    err = nvs_get_str(nvs, "web_password", password_out, &required_size);
-    nvs_close(nvs);
-
-    if (err != ESP_OK || required_size == 0 || password_out[0] == '\0') {
-        return false;  // No password set or empty password
-    }
-
-    return true;
-}
+/* Password checking uses shared functions from router_globals.h:
+ * is_web_password_set(), verify_web_password(), set_web_password_hashed() */
 
 /* Extract cookie value from request headers */
 static bool get_cookie_value(httpd_req_t *req, const char* cookie_name,
@@ -199,6 +183,261 @@ static esp_err_t create_session(httpd_req_t *req)
     return ESP_OK;
 }
 
+/* --- Config Export/Import helpers --- */
+
+#define CONFIG_IMPORT_MAX_SIZE 8192
+
+static char *bytes_to_hex(const uint8_t *src, size_t len)
+{
+    char *hex = malloc(len * 2 + 1);
+    if (!hex) return NULL;
+    for (size_t i = 0; i < len; i++) {
+        sprintf(hex + i * 2, "%02x", src[i]);
+    }
+    hex[len * 2] = '\0';
+    return hex;
+}
+
+static int hex_to_bytes(const char *src, uint8_t *dst, size_t len)
+{
+    for (size_t i = 0; i < len; i++) {
+        unsigned int byte;
+        if (sscanf(src + i * 2, "%2x", &byte) != 1) return -1;
+        dst[i] = (uint8_t)byte;
+    }
+    return 0;
+}
+
+static char *nvs_export_to_json_robust(void)
+{
+    nvs_handle_t nvs;
+    esp_err_t err = nvs_open(PARAM_NAMESPACE, NVS_READONLY, &nvs);
+    if (err != ESP_OK) return NULL;
+
+    cJSON *arr = cJSON_CreateArray();
+    if (!arr) { nvs_close(nvs); return NULL; }
+
+    nvs_iterator_t it = NULL;
+    err = nvs_entry_find_in_handle(nvs, NVS_TYPE_ANY, &it);
+    while (err == ESP_OK) {
+        nvs_entry_info_t info;
+        nvs_entry_info(it, &info);
+
+        cJSON *item = cJSON_CreateObject();
+        cJSON_AddStringToObject(item, "key", info.key);
+        cJSON_AddNumberToObject(item, "type", info.type);
+
+        switch (info.type) {
+            case NVS_TYPE_U8: {
+                uint8_t v; nvs_get_u8(nvs, info.key, &v);
+                cJSON_AddNumberToObject(item, "val", v);
+                break;
+            }
+            case NVS_TYPE_U16: {
+                uint16_t v; nvs_get_u16(nvs, info.key, &v);
+                cJSON_AddNumberToObject(item, "val", v);
+                break;
+            }
+            case NVS_TYPE_U32: {
+                uint32_t v; nvs_get_u32(nvs, info.key, &v);
+                cJSON_AddNumberToObject(item, "val", v);
+                break;
+            }
+            case NVS_TYPE_I32: {
+                int32_t v; nvs_get_i32(nvs, info.key, &v);
+                cJSON_AddNumberToObject(item, "val", v);
+                break;
+            }
+            case NVS_TYPE_STR: {
+                size_t len = 0;
+                nvs_get_str(nvs, info.key, NULL, &len);
+                char *buf = malloc(len);
+                if (buf) {
+                    nvs_get_str(nvs, info.key, buf, &len);
+                    cJSON_AddStringToObject(item, "val", buf);
+                    free(buf);
+                }
+                break;
+            }
+            case NVS_TYPE_BLOB: {
+                size_t len = 0;
+                nvs_get_blob(nvs, info.key, NULL, &len);
+                uint8_t *buf = malloc(len);
+                if (buf) {
+                    nvs_get_blob(nvs, info.key, buf, &len);
+                    char *hex = bytes_to_hex(buf, len);
+                    free(buf);
+                    if (hex) {
+                        cJSON_AddStringToObject(item, "val", hex);
+                        free(hex);
+                    }
+                }
+                break;
+            }
+            default:
+                break;
+        }
+        cJSON_AddItemToArray(arr, item);
+        err = nvs_entry_next(&it);
+    }
+    nvs_release_iterator(it);
+    nvs_close(nvs);
+
+    char *json = cJSON_PrintUnformatted(arr);
+    cJSON_Delete(arr);
+    return json;
+}
+
+static esp_err_t nvs_import_from_json_robust(const char *json_str)
+{
+    cJSON *arr = cJSON_Parse(json_str);
+    if (!arr || !cJSON_IsArray(arr)) {
+        cJSON_Delete(arr);
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    nvs_handle_t nvs;
+    esp_err_t err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err != ESP_OK) { cJSON_Delete(arr); return err; }
+
+    /* Erase all existing keys first so removed entries don't persist */
+    nvs_erase_all(nvs);
+
+    cJSON *item;
+    cJSON_ArrayForEach(item, arr) {
+        cJSON *jkey = cJSON_GetObjectItem(item, "key");
+        cJSON *jtype = cJSON_GetObjectItem(item, "type");
+        cJSON *jval = cJSON_GetObjectItem(item, "val");
+        if (!jkey || !cJSON_IsString(jkey) || !jtype || !cJSON_IsNumber(jtype) || !jval) continue;
+
+        const char *key = jkey->valuestring;
+        int type = (int)jtype->valuedouble;
+
+        switch (type) {
+            case NVS_TYPE_U8:
+                if (cJSON_IsNumber(jval)) nvs_set_u8(nvs, key, (uint8_t)jval->valuedouble);
+                break;
+            case NVS_TYPE_U16:
+                if (cJSON_IsNumber(jval)) nvs_set_u16(nvs, key, (uint16_t)jval->valuedouble);
+                break;
+            case NVS_TYPE_U32:
+                if (cJSON_IsNumber(jval)) nvs_set_u32(nvs, key, (uint32_t)jval->valuedouble);
+                break;
+            case NVS_TYPE_I32:
+                if (cJSON_IsNumber(jval)) nvs_set_i32(nvs, key, (int32_t)jval->valuedouble);
+                break;
+            case NVS_TYPE_STR:
+                if (cJSON_IsString(jval)) nvs_set_str(nvs, key, jval->valuestring);
+                break;
+            case NVS_TYPE_BLOB: {
+                if (!cJSON_IsString(jval)) break;
+                size_t hex_len = strlen(jval->valuestring);
+                if (hex_len % 2 != 0) break;
+                size_t blob_len = hex_len / 2;
+                uint8_t *blob = malloc(blob_len);
+                if (blob) {
+                    if (hex_to_bytes(jval->valuestring, blob, blob_len) == 0) {
+                        nvs_set_blob(nvs, key, blob, blob_len);
+                    }
+                    free(blob);
+                }
+                break;
+            }
+            default:
+                break;
+        }
+    }
+
+    nvs_commit(nvs);
+    nvs_close(nvs);
+    cJSON_Delete(arr);
+    return ESP_OK;
+}
+
+/* --- Config Export/Import HTTP handlers --- */
+
+static esp_err_t config_export_handler(httpd_req_t *req)
+{
+    bool password_protection_enabled = is_web_password_set();
+    if (password_protection_enabled && !is_authenticated(req)) {
+        httpd_resp_set_status(req, "303 See Other");
+        httpd_resp_set_hdr(req, "Location", "/?auth_required=1");
+        httpd_resp_send(req, NULL, 0);
+        return ESP_OK;
+    }
+
+    char *json = nvs_export_to_json_robust();
+    if (!json) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Export failed");
+        return ESP_FAIL;
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Content-Disposition", "attachment; filename=\"esp32_nat_config.json\"");
+    httpd_resp_send(req, json, HTTPD_RESP_USE_STRLEN);
+    free(json);
+    return ESP_OK;
+}
+
+static esp_err_t config_import_handler(httpd_req_t *req)
+{
+    bool password_protection_enabled = is_web_password_set();
+    if (password_protection_enabled && !is_authenticated(req)) {
+        httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "Not authenticated");
+        return ESP_FAIL;
+    }
+
+    if (req->content_len > CONFIG_IMPORT_MAX_SIZE || req->content_len == 0) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"ok\":false,\"msg\":\"Invalid body size\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    char *body = malloc(req->content_len + 1);
+    if (!body) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+        return ESP_FAIL;
+    }
+
+    int total = 0;
+    while (total < req->content_len) {
+        int ret = httpd_req_recv(req, body + total, req->content_len - total);
+        if (ret <= 0) {
+            free(body);
+            if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
+                httpd_resp_send_408(req);
+            }
+            return ESP_FAIL;
+        }
+        total += ret;
+    }
+    body[total] = '\0';
+
+    esp_err_t err = nvs_import_from_json_robust(body);
+    free(body);
+
+    httpd_resp_set_type(req, "application/json");
+    if (err == ESP_OK) {
+        httpd_resp_send(req, "{\"ok\":true,\"msg\":\"Config imported. Rebooting...\"}", HTTPD_RESP_USE_STRLEN);
+        esp_timer_start_once(restart_timer, 3000000);
+    } else {
+        httpd_resp_send(req, "{\"ok\":false,\"msg\":\"Import failed: invalid JSON\"}", HTTPD_RESP_USE_STRLEN);
+    }
+    return ESP_OK;
+}
+
+static httpd_uri_t config_exportp = {
+    .uri       = "/api/config-export",
+    .method    = HTTP_GET,
+    .handler   = config_export_handler,
+};
+
+static httpd_uri_t config_importp = {
+    .uri       = "/api/config-import",
+    .method    = HTTP_POST,
+    .handler   = config_import_handler,
+};
+
 esp_err_t http_404_error_handler(httpd_req_t *req, httpd_err_code_t err)
 {
     httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "Page not found");
@@ -264,8 +503,7 @@ static esp_err_t index_get_handler(httpd_req_t *req)
     char param2[128];
     char login_message[256] = "";
     bool authenticated = false;
-    char password[64];
-    bool password_protection_enabled = get_web_password(password, sizeof(password));
+    bool password_protection_enabled = is_web_password_set();
 
     /* Get query string if any */
     buf_len = httpd_req_get_url_query_len(req) + 1;
@@ -282,7 +520,7 @@ static esp_err_t index_get_handler(httpd_req_t *req)
             /* Handle login */
             else if (httpd_query_key_value(buf, "login_password", param, sizeof(param)) == ESP_OK) {
                 preprocess_string(param);
-                if (password_protection_enabled && strcmp(param, password) == 0) {
+                if (password_protection_enabled && verify_web_password(param)) {
                     create_session(req);
                     ESP_LOGI(TAG, "Web UI login successful");
                     free(buf);
@@ -306,12 +544,8 @@ static esp_err_t index_get_handler(httpd_req_t *req)
                 // Check if user is authenticated or no password is currently set
                 if (is_authenticated(req) || !password_protection_enabled) {
                     if (strcmp(param, param2) == 0) {
-                        nvs_handle_t nvs;
-                        esp_err_t err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
+                        esp_err_t err = set_web_password_hashed(param);
                         if (err == ESP_OK) {
-                            nvs_set_str(nvs, "web_password", param);
-                            nvs_commit(nvs);
-                            nvs_close(nvs);
                             clear_session();  // Force re-login with new password
                             free(buf);
                             /* Redirect to reload page */
@@ -525,8 +759,7 @@ static httpd_uri_t indexp = {
 static esp_err_t config_get_handler(httpd_req_t *req)
 {
     /* Check authentication if password protection is enabled */
-    char password[64];
-    bool password_protection_enabled = get_web_password(password, sizeof(password));
+    bool password_protection_enabled = is_web_password_set();
 
     if (password_protection_enabled && !is_authenticated(req)) {
         ESP_LOGW(TAG, "Unauthenticated access attempt to /config");
@@ -610,6 +843,23 @@ static esp_err_t config_get_handler(httpd_req_t *req)
                         ip_argv[0] = "set_ap_ip";
                         ip_argv[1] = param3;
                         set_ap_ip(2, ip_argv);
+                    }
+
+                    // Check for optional AP DNS server
+                    {
+                        char dns_param[64];
+                        if (httpd_query_key_value(buf, "ap_dns", dns_param, sizeof(dns_param)) == ESP_OK) {
+                            preprocess_string(dns_param);
+                            ESP_LOGI(TAG, "Found URL query parameter => ap_dns=%s", dns_param);
+                            nvs_handle_t nvs;
+                            if (nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs) == ESP_OK) {
+                                nvs_set_str(nvs, "ap_dns", dns_param);
+                                nvs_commit(nvs);
+                                nvs_close(nvs);
+                            }
+                            free(ap_dns);
+                            ap_dns = strdup(dns_param);
+                        }
                     }
 
                     // Check for optional AP MAC address
@@ -1029,7 +1279,7 @@ static esp_err_t config_get_handler(httpd_req_t *req)
 
     /* Chunk 4: AP Settings */
     snprintf(section, sizeof(section), CONFIG_CHUNK_AP,
-        safe_ap_ssid, ap_ip_str, ap_mac_str, ap_open_checked, ap_hidden_checked);
+        safe_ap_ssid, ap_ip_str, ap_dns ? ap_dns : "", ap_mac_str, ap_open_checked, ap_hidden_checked);
     httpd_resp_send_chunk(req, section, HTTPD_RESP_USE_STRLEN);
 
     /* Chunk 5: STA Settings */
@@ -1071,7 +1321,7 @@ static esp_err_t config_get_handler(httpd_req_t *req)
         current_snaplen, sta_ip_str);
     httpd_resp_send_chunk(req, section, HTTPD_RESP_USE_STRLEN);
 
-    /* Chunk 9: Device management and footer */
+    /* Chunk 9: Device management (includes config backup/restore) and footer */
     httpd_resp_send_chunk(req, CONFIG_CHUNK_TAIL, HTTPD_RESP_USE_STRLEN);
 
     /* End chunked response */
@@ -1097,8 +1347,7 @@ static httpd_uri_t configp = {
 static esp_err_t mappings_get_handler(httpd_req_t *req)
 {
     /* Check authentication if password protection is enabled */
-    char password[64];
-    bool password_protection_enabled = get_web_password(password, sizeof(password));
+    bool password_protection_enabled = is_web_password_set();
 
     if (password_protection_enabled && !is_authenticated(req)) {
         ESP_LOGW(TAG, "Unauthenticated access attempt to /mappings");
@@ -1481,8 +1730,7 @@ static httpd_uri_t mappingsp = {
 static esp_err_t firewall_get_handler(httpd_req_t *req)
 {
     /* Check authentication if password protection is enabled */
-    char password[64];
-    bool password_protection_enabled = get_web_password(password, sizeof(password));
+    bool password_protection_enabled = is_web_password_set();
 
     if (password_protection_enabled && !is_authenticated(req)) {
         ESP_LOGW(TAG, "Unauthenticated access attempt to /firewall");
@@ -1855,8 +2103,7 @@ static void url_encode(const char *src, char *dst, size_t dst_len)
 static esp_err_t scan_get_handler(httpd_req_t *req)
 {
     /* Check if user can connect (authenticated or no password set) */
-    char password[64];
-    bool password_protection_enabled = get_web_password(password, sizeof(password));
+    bool password_protection_enabled = is_web_password_set();
     bool can_connect = !password_protection_enabled || is_authenticated(req);
 
     uint16_t ap_count = 0;
@@ -2033,6 +2280,7 @@ httpd_handle_t start_webserver(void)
     httpd_handle_t server = NULL;
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.stack_size = 16384;  // Large stack needed for mappings page with 3x 2KB HTML buffers
+    config.max_uri_handlers = 10;
 
     esp_timer_create(&restart_timer_args, &restart_timer);
 
@@ -2047,6 +2295,8 @@ httpd_handle_t start_webserver(void)
         httpd_register_uri_handler(server, &firewallp);
         httpd_register_uri_handler(server, &scanp);
         httpd_register_uri_handler(server, &favicon_uri);
+        httpd_register_uri_handler(server, &config_exportp);
+        httpd_register_uri_handler(server, &config_importp);
 
         // Start captive portal DNS only when no upstream WiFi is configured
         if (ssid == NULL || strlen(ssid) == 0) {
