@@ -677,7 +677,7 @@ Add the bridge to your Claude Code MCP settings (`~/.claude/claude_desktop_confi
 | **Network Trace** | `network_trace` | Live capture with local tcpdump analysis |
 | **Network** | `set_ttl`, `get_ttl`, `reset_byte_counts` | TTL override, byte counters |
 | **System** | `restart` | Device management |
-| **Raw** | `raw_command` | Send any CLI command directly |
+| **Raw** | `raw_command` | Send any CLI command directly (disabled) |
 
 # Command Line Interface
 

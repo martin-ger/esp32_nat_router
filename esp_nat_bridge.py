@@ -233,7 +233,7 @@ async def show_status() -> str:
 
 @mcp.tool()
 async def show_config() -> str:
-    """Show router configuration: the WiFi network it connects to, the hotspot it broadcasts, static IP settings, DNS server, and web interface state."""
+    """Show router configuration: the WiFi network it connects to, the hotspot it broadcasts, static IP settings, and web interface state."""
     return await _cmd("show config")
 
 
@@ -246,9 +246,16 @@ async def show_mappings() -> str:
 @mcp.tool()
 async def show_acl() -> str:
     """Show firewall rules and hit counts for upstream (client to internet) and downstream (internet to client) traffic."""
-    upstream = await _cmd("acl to_ap show")
-    downstream = await _cmd("acl from_ap show")
-    return f"=== Upstream (client → internet) ===\n{upstream}\n\n=== Downstream (internet → client) ===\n{downstream}"
+    raw = await _cmd("show acl")
+    # Extract to_ap and from_ap sections, rename for MCP consistency
+    sections = re.split(r"(?=^ACL: )", raw, flags=re.MULTILINE)
+    parts = []
+    for section in sections:
+        if section.startswith("ACL: to_ap"):
+            parts.append("=== Upstream (client → internet) ===\n" + section.replace("ACL: to_ap", "").strip())
+        elif section.startswith("ACL: from_ap"):
+            parts.append("=== Downstream (internet → client) ===\n" + section.replace("ACL: from_ap", "").strip())
+    return "\n\n".join(parts) if parts else raw
 
 
 @mcp.tool()
@@ -396,19 +403,6 @@ async def set_ap_ip(ip: str) -> str:
     """
     _require(ip, "ip")
     return await _cmd(f"set_ap_ip {ip}")
-
-
-@mcp.tool()
-async def set_ap_dns(dns: str = "") -> str:
-    """Set the DNS server distributed to hotspot clients via DHCP. Requires restart.
-
-    When empty (default), DNS is automatically learned from the upstream WiFi connection.
-    When set, the custom DNS is always used regardless of upstream.
-
-    Args:
-        dns: DNS server IP address (e.g. "1.1.1.1"), or empty string to use upstream DNS.
-    """
-    return await _cmd(f'set_ap_dns "{dns}"')
 
 
 @mcp.tool()
@@ -1061,19 +1055,19 @@ async def pcap_save(
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
-async def raw_command(command: str) -> str:
-    """Send a raw command directly to the router console. For advanced debugging only.
+# @mcp.tool()
+# async def raw_command(command: str) -> str:
+#     """Send a raw command directly to the router console. For advanced debugging only.
 
-    DANGEROUS: This bypasses all safety checks. Commands might
-    permanently erase important settings. Never use this without explicit user instruction.
-    Prefer the dedicated tools (show_status, set_sta, acl_add, etc.) whenever possible.
+#     DANGEROUS: This bypasses all safety checks. Commands might
+#     permanently erase important settings. Never use this without explicit user instruction.
+#     Prefer the dedicated tools (show_status, set_sta, acl_add, etc.) whenever possible.
 
-    Args:
-        command: The exact command string to send (e.g. "show status").
-    """
-    _require(command, "command")
-    return await _cmd(command)
+#     Args:
+#         command: The exact command string to send (e.g. "show status").
+#     """
+#     _require(command, "command")
+#     return await _cmd(command)
 
 
 # ---------------------------------------------------------------------------
