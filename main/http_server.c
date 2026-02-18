@@ -1936,6 +1936,7 @@ static esp_err_t firewall_get_handler(httpd_req_t *req)
 
     /* Chunk 6: Stream ACL sections */
     for (int list_no = 0; list_no < MAX_ACL_LISTS; list_no++) {
+        acl_lock();
         acl_entry_t* rules = acl_get_rules(list_no);
         acl_stats_t* stats = acl_get_stats(list_no);
         const char* list_desc = acl_get_desc(list_no);
@@ -2042,6 +2043,7 @@ static esp_err_t firewall_get_handler(httpd_req_t *req)
 
         /* Close table and section */
         httpd_resp_send_chunk(req, "</tbody></table></div>", HTTPD_RESP_USE_STRLEN);
+        acl_unlock();
     }
 
     /* Chunk 7: Add form and footer */

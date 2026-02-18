@@ -66,6 +66,7 @@ static const char *TAG = "custom_dhcps";
 #define DHCP_OPTION_HOSTNAME     12
 #define DHCP_OPTION_REQ_LIST     55
 #define DHCP_OPTION_CAPTIVEPORTAL_URI 114
+#define DHCP_OPTION_PAD         0
 #define DHCP_OPTION_END         255
 
 //#define USE_CLASS_B_NET 1
@@ -930,14 +931,39 @@ static u8_t parse_options(dhcps_t *dhcps, u8_t *optptr, s16_t len)
         DHCPS_LOG("dhcps: (s16_t)*optptr = %d\n", (s16_t)*optptr);
 #endif
 
+        /* PAD and END are single-byte options with no length field */
+        if (*optptr == DHCP_OPTION_PAD) {
+            optptr++;
+            continue;
+        }
+
+        if (*optptr == DHCP_OPTION_END) {
+            is_dhcp_parse_end = true;
+            break;
+        }
+
+        /* All other options require at least a length byte after the type */
+        if (optptr + 1 >= end) {
+            break;  /* Truncated: no room for length byte */
+        }
+
+        u8_t opt_len = optptr[1];
+
+        /* Verify the entire option fits within the buffer */
+        if (optptr + 2 + opt_len > end) {
+            break;  /* Truncated option data */
+        }
+
         switch ((s16_t) *optptr) {
 
             case DHCP_OPTION_MSG_TYPE:	//53
-                type = *(optptr + 2);
+                if (opt_len >= 1) {
+                    type = *(optptr + 2);
+                }
                 break;
 
             case DHCP_OPTION_HOSTNAME: { //12
-                u8_t hostname_len = *(optptr + 1);
+                u8_t hostname_len = opt_len;
                 if (hostname_len > 0) {
                     // Limit to our buffer size minus null terminator
                     if (hostname_len >= DHCPS_MAX_HOSTNAME_LEN) {
@@ -953,31 +979,23 @@ static u8_t parse_options(dhcps_t *dhcps, u8_t *optptr, s16_t len)
             }
 
             case DHCP_OPTION_REQ_IPADDR://50
-                if (memcmp((char *) &client.addr, (char *) optptr + 2, 4) == 0) {
+                if (opt_len >= 4) {
+                    if (memcmp((char *) &client.addr, (char *) optptr + 2, 4) == 0) {
 #if DHCPS_DEBUG
-                    DHCPS_LOG("dhcps: DHCP_OPTION_REQ_IPADDR = 0 ok\n");
+                        DHCPS_LOG("dhcps: DHCP_OPTION_REQ_IPADDR = 0 ok\n");
 #endif
-                    s.state = DHCPS_STATE_ACK;
-                } else {
+                        s.state = DHCPS_STATE_ACK;
+                    } else {
 #if DHCPS_DEBUG
-                    DHCPS_LOG("dhcps: DHCP_OPTION_REQ_IPADDR != 0 err\n");
+                        DHCPS_LOG("dhcps: DHCP_OPTION_REQ_IPADDR != 0 err\n");
 #endif
-                    s.state = DHCPS_STATE_NAK;
+                        s.state = DHCPS_STATE_NAK;
+                    }
                 }
-
                 break;
-
-            case DHCP_OPTION_END: {
-                is_dhcp_parse_end = true;
-            }
-            break;
         }
 
-        if (is_dhcp_parse_end) {
-            break;
-        }
-
-        optptr += optptr[1] + 2;
+        optptr += opt_len + 2;
     }
 
     switch (type) {

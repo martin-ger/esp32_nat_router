@@ -549,6 +549,7 @@ esp_err_t save_acl_rules(void) {
 
     /* Save each ACL list */
     const char* acl_keys[MAX_ACL_LISTS] = {"acl_0", "acl_1", "acl_2", "acl_3"};
+    acl_lock();
     for (int i = 0; i < MAX_ACL_LISTS; i++) {
         acl_entry_t* rules = acl_get_rules(i);
         if (rules != NULL) {
@@ -558,6 +559,7 @@ esp_err_t save_acl_rules(void) {
             }
         }
     }
+    acl_unlock();
 
     err = nvs_commit(nvs);
     if (err == ESP_OK) {
@@ -582,6 +584,7 @@ esp_err_t load_acl_rules(void) {
 
     /* Load each ACL list */
     const char* acl_keys[MAX_ACL_LISTS] = {"acl_0", "acl_1", "acl_2", "acl_3"};
+    acl_lock();
     for (int i = 0; i < MAX_ACL_LISTS; i++) {
         acl_entry_t* rules = acl_get_rules(i);
         if (rules == NULL) continue;
@@ -604,6 +607,7 @@ esp_err_t load_acl_rules(void) {
             ESP_LOGW(TAG, "Failed to load ACL list %d: %s", i, esp_err_to_name(err));
         }
     }
+    acl_unlock();
 
     nvs_close(nvs);
     return ESP_OK;

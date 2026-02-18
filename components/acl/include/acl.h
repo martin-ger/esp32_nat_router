@@ -76,6 +76,20 @@ typedef struct {
 void acl_init(void);
 
 /**
+ * @brief Acquire the ACL mutex
+ *
+ * Must be held while iterating over the array returned by acl_get_rules().
+ * Pair every acl_lock() with acl_unlock(). Do not call other acl_ mutating
+ * functions while holding the lock (they take the lock internally).
+ */
+void acl_lock(void);
+
+/**
+ * @brief Release the ACL mutex
+ */
+void acl_unlock(void);
+
+/**
  * @brief Check if an ACL list is empty (has no rules)
  * @param acl_no ACL list index (0-3)
  * @return true if the list has no rules, false if it has rules

@@ -1833,6 +1833,7 @@ static void acl_print_with_names(uint8_t acl_no)
            "Idx", "Proto", "Source", "Destination", "SPort", "DPort", "Action", "Hits");
     printf("---  ------  --------------------  --------------------  ------  ------  --------  ----\n");
 
+    acl_lock();
     acl_entry_t *rules = acl_get_rules(acl_no);
     for (int i = 0; i < MAX_ACL_ENTRIES; i++) {
         acl_entry_t *rule = &rules[i];
@@ -1882,6 +1883,7 @@ static void acl_print_with_names(uint8_t acl_no)
                i, proto_str, src_str, dest_str, s_port_str, d_port_str,
                action_str, (unsigned long)rule->hit_count);
     }
+    acl_unlock();
 }
 
 /* 'acl' command implementation */

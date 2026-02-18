@@ -8,6 +8,8 @@
 #include <stdlib.h>
 #include "esp_log.h"
 #include "esp_netif.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "lwip/ip4.h"
 #include "lwip/ip4_addr.h"
 #include "lwip/inet.h"
@@ -54,11 +56,32 @@ static acl_entry_t acl_lists[MAX_ACL_LISTS][MAX_ACL_ENTRIES];
 /* ACL statistics per list */
 static acl_stats_t acl_stats[MAX_ACL_LISTS];
 
+/* Mutex protecting acl_lists and acl_stats from concurrent access */
+static SemaphoreHandle_t acl_mutex = NULL;
+
 void acl_init(void)
 {
+    if (acl_mutex == NULL) {
+        acl_mutex = xSemaphoreCreateMutex();
+        assert(acl_mutex != NULL);
+    }
     memset(acl_lists, 0, sizeof(acl_lists));
     memset(acl_stats, 0, sizeof(acl_stats));
     ESP_LOGI(TAG, "ACL subsystem initialized");
+}
+
+void acl_lock(void)
+{
+    if (acl_mutex != NULL) {
+        xSemaphoreTake(acl_mutex, portMAX_DELAY);
+    }
+}
+
+void acl_unlock(void)
+{
+    if (acl_mutex != NULL) {
+        xSemaphoreGive(acl_mutex);
+    }
 }
 
 bool acl_is_empty(uint8_t acl_no)
@@ -67,12 +90,16 @@ bool acl_is_empty(uint8_t acl_no)
         return true;
     }
 
+    bool empty = true;
+    acl_lock();
     for (int i = 0; i < MAX_ACL_ENTRIES; i++) {
         if (acl_lists[acl_no][i].valid) {
-            return false;
+            empty = false;
+            break;
         }
     }
-    return true;
+    acl_unlock();
+    return empty;
 }
 
 int acl_get_count(uint8_t acl_no)
@@ -81,12 +108,14 @@ int acl_get_count(uint8_t acl_no)
         return 0;
     }
 
+    acl_lock();
     int count = 0;
     for (int i = 0; i < MAX_ACL_ENTRIES; i++) {
         if (acl_lists[acl_no][i].valid) {
             count++;
         }
     }
+    acl_unlock();
     return count;
 }
 
@@ -96,7 +125,9 @@ void acl_clear(uint8_t acl_no)
         return;
     }
 
+    acl_lock();
     memset(acl_lists[acl_no], 0, sizeof(acl_lists[acl_no]));
+    acl_unlock();
     ESP_LOGI(TAG, "Cleared ACL list %s", acl_names[acl_no]);
 }
 
@@ -106,12 +137,14 @@ void acl_clear_stats(uint8_t acl_no)
         return;
     }
 
+    acl_lock();
     memset(&acl_stats[acl_no], 0, sizeof(acl_stats_t));
 
     /* Also clear hit counts on all rules */
     for (int i = 0; i < MAX_ACL_ENTRIES; i++) {
         acl_lists[acl_no][i].hit_count = 0;
     }
+    acl_unlock();
 }
 
 bool acl_add(uint8_t acl_no, uint32_t src, uint32_t s_mask,
@@ -123,6 +156,8 @@ bool acl_add(uint8_t acl_no, uint32_t src, uint32_t s_mask,
         return false;
     }
 
+    acl_lock();
+
     /* Find first empty slot */
     int slot = -1;
     for (int i = 0; i < MAX_ACL_ENTRIES; i++) {
@@ -133,6 +168,7 @@ bool acl_add(uint8_t acl_no, uint32_t src, uint32_t s_mask,
     }
 
     if (slot < 0) {
+        acl_unlock();
         ESP_LOGE(TAG, "ACL list %s is full", acl_names[acl_no]);
         return false;
     }
@@ -150,6 +186,7 @@ bool acl_add(uint8_t acl_no, uint32_t src, uint32_t s_mask,
     entry->hit_count = 0;
     entry->valid = 1;
 
+    acl_unlock();
     ESP_LOGI(TAG, "Added rule %d to ACL %s", slot, acl_names[acl_no]);
     return true;
 }
@@ -160,7 +197,10 @@ bool acl_delete(uint8_t acl_no, uint8_t rule_idx)
         return false;
     }
 
+    acl_lock();
+
     if (!acl_lists[acl_no][rule_idx].valid) {
+        acl_unlock();
         return false;
     }
 
@@ -177,6 +217,7 @@ bool acl_delete(uint8_t acl_no, uint8_t rule_idx)
         }
     }
 
+    acl_unlock();
     ESP_LOGI(TAG, "Deleted rule %d from ACL %s", rule_idx, acl_names[acl_no]);
     return true;
 }
@@ -251,6 +292,13 @@ uint8_t acl_check_packet(uint8_t acl_no, struct pbuf *p)
         dst_port = lwip_ntohs(udphdr->dest);
     }
 
+    /* Match against rules under the lock; logging happens after release */
+    uint8_t result = ACL_NO_MATCH;
+    int matched_rule = -1;
+    bool should_log = false;
+
+    acl_lock();
+
     /* Check rules in order */
     for (int i = 0; i < MAX_ACL_ENTRIES; i++) {
         acl_entry_t *rule = &acl_lists[acl_no][i];
@@ -289,56 +337,64 @@ uint8_t acl_check_packet(uint8_t acl_no, struct pbuf *p)
             }
         }
 
-        /* Rule matched! */
+        /* Rule matched - update counters under the lock */
         rule->hit_count++;
+        matched_rule = i;
 
-        uint8_t action = rule->allow & 0x01;  /* Extract base action */
-        uint8_t monitor = rule->allow & ACL_MONITOR;  /* Extract monitor flag */
+        uint8_t action = rule->allow & 0x01;
+        uint8_t monitor = rule->allow & ACL_MONITOR;
+        result = action | monitor;
 
         if (action == ACL_ALLOW) {
             acl_stats[acl_no].packets_allowed++;
         } else {
             acl_stats[acl_no].packets_denied++;
 
-            /* Rate-limited logging for denied packets */
+            /* Check rate limit while holding the lock */
             int64_t now = esp_timer_get_time();
             if (now - last_deny_log_time[acl_no] >= ACL_LOG_INTERVAL_US) {
                 last_deny_log_time[acl_no] = now;
-
-                /* Format source and destination for logging */
-                char src_str[24], dst_str[24];
-                ip4_addr_t saddr, daddr;
-                saddr.addr = src_ip;
-                daddr.addr = dest_ip;
-                snprintf(src_str, sizeof(src_str), IPSTR, IP2STR(&saddr));
-                snprintf(dst_str, sizeof(dst_str), IPSTR, IP2STR(&daddr));
-
-                const char *proto_name;
-                switch (proto) {
-                    case IPPROTO_ICMP: proto_name = "ICMP"; break;
-                    case IPPROTO_TCP:  proto_name = "TCP"; break;
-                    case IPPROTO_UDP:  proto_name = "UDP"; break;
-                    default:           proto_name = "IP"; break;
-                }
-
-                if (proto == IPPROTO_TCP || proto == IPPROTO_UDP) {
-                    ESP_LOGW(TAG, "DENY [%s] %s %s:%d -> %s:%d (rule %d)",
-                             acl_names[acl_no], proto_name,
-                             src_str, src_port, dst_str, dst_port, i);
-                } else {
-                    ESP_LOGW(TAG, "DENY [%s] %s %s -> %s (rule %d)",
-                             acl_names[acl_no], proto_name,
-                             src_str, dst_str, i);
-                }
+                should_log = true;
             }
         }
-
-        return action | monitor;
+        break;
     }
 
-    /* No rule matched - allow packet (permissive default) */
-    acl_stats[acl_no].packets_nomatch++;
-    return ACL_NO_MATCH;
+    if (matched_rule < 0) {
+        acl_stats[acl_no].packets_nomatch++;
+    }
+
+    acl_unlock();
+
+    /* Log denied packets outside the lock */
+    if (should_log) {
+        char src_str[24], dst_str[24];
+        ip4_addr_t saddr, daddr;
+        saddr.addr = src_ip;
+        daddr.addr = dest_ip;
+        snprintf(src_str, sizeof(src_str), IPSTR, IP2STR(&saddr));
+        snprintf(dst_str, sizeof(dst_str), IPSTR, IP2STR(&daddr));
+
+        const char *proto_name;
+        switch (proto) {
+            case IPPROTO_ICMP: proto_name = "ICMP"; break;
+            case IPPROTO_TCP:  proto_name = "TCP"; break;
+            case IPPROTO_UDP:  proto_name = "UDP"; break;
+            default:           proto_name = "IP"; break;
+        }
+
+        if (proto == IPPROTO_TCP || proto == IPPROTO_UDP) {
+            ESP_LOGW(TAG, "DENY [%s] %s %s:%d -> %s:%d (rule %d)",
+                     acl_names[acl_no], proto_name,
+                     src_str, src_port, dst_str, dst_port, matched_rule);
+        } else {
+            ESP_LOGW(TAG, "DENY [%s] %s %s -> %s (rule %d)",
+                     acl_names[acl_no], proto_name,
+                     src_str, dst_str, matched_rule);
+        }
+    }
+
+    return result;
 }
 
 acl_entry_t* acl_get_rules(uint8_t acl_no)
@@ -485,6 +541,8 @@ void acl_print(uint8_t acl_no)
         return;
     }
 
+    acl_lock();
+
     printf("\nACL: %s\n", acl_names[acl_no]);
     printf("==========\n");
 
@@ -494,7 +552,17 @@ void acl_print(uint8_t acl_no)
            (unsigned long)stats->packets_denied,
            (unsigned long)stats->packets_nomatch);
 
-    if (acl_is_empty(acl_no)) {
+    /* Check if empty (inline to avoid double-locking) */
+    bool empty = true;
+    for (int i = 0; i < MAX_ACL_ENTRIES; i++) {
+        if (acl_lists[acl_no][i].valid) {
+            empty = false;
+            break;
+        }
+    }
+
+    if (empty) {
+        acl_unlock();
         printf("No rules configured (all packets allowed)\n");
         return;
     }
@@ -551,4 +619,6 @@ void acl_print(uint8_t acl_no)
                i, proto_str, src_str, dest_str, s_port_str, d_port_str,
                action_str, (unsigned long)rule->hit_count);
     }
+
+    acl_unlock();
 }
