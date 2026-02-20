@@ -89,6 +89,9 @@ extern uint8_t led_lowactive;
 // TTL override for STA upstream (0 = disabled/no change, 1-255 = fixed TTL)
 extern uint8_t sta_ttl_override;
 
+// MSS clamp for AP interface (0 = disabled, otherwise max MSS in bytes)
+extern uint16_t ap_mss_clamp;
+
 // AP SSID hidden (0 = visible, 1 = hidden)
 extern uint8_t ap_ssid_hidden;
 

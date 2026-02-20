@@ -63,6 +63,9 @@ uint64_t sta_bytes_received = 0;
 // TTL override for STA upstream (0 = disabled/no change)
 uint8_t sta_ttl_override = 0;
 
+// MSS clamp for AP interface (0 = disabled, otherwise max MSS in bytes)
+uint16_t ap_mss_clamp = 1380;
+
 // AP SSID hidden (0 = visible, 1 = hidden)
 uint8_t ap_ssid_hidden = 0;
 
@@ -859,6 +862,63 @@ void format_uptime(uint32_t seconds, char *buf, size_t buf_len) {
     }
 }
 
+// Clamp the TCP MSS option in a SYN packet to max_mss.
+// Operates on raw Ethernet frames (14-byte header + IPv4 + TCP).
+// Updates the TCP checksum incrementally (RFC 1624).
+static void clamp_tcp_mss(struct pbuf *p, uint16_t max_mss) {
+    if (max_mss == 0 || p == NULL) return;
+    // Need at least Ethernet(14) + min IP(20) + min TCP(20) in the first segment
+    if (p->len < 14 + 20 + 20) return;
+
+    uint8_t *payload = (uint8_t *)p->payload;
+
+    // IPv4 only (ethertype 0x0800)
+    if (payload[12] != 0x08 || payload[13] != 0x00) return;
+
+    struct ip_hdr *iphdr = (struct ip_hdr *)(payload + 14);
+    if (IPH_V(iphdr) != 4 || IPH_PROTO(iphdr) != PROTO_TCP) return;
+
+    uint16_t ip_hdr_len = IPH_HL(iphdr) * 4;
+    if (p->len < 14 + ip_hdr_len + 20) return;
+
+    uint8_t *tcphdr = payload + 14 + ip_hdr_len;
+
+    // SYN flag must be set (TCP flags byte is at offset 13, SYN = bit 1)
+    if (!(tcphdr[13] & 0x02)) return;
+
+    uint8_t tcp_hdr_len = (tcphdr[12] >> 4) * 4;
+    if (tcp_hdr_len < 20 || p->len < 14 + ip_hdr_len + tcp_hdr_len) return;
+
+    // Scan TCP options for MSS option (kind=2, len=4)
+    uint8_t *opt = tcphdr + 20;
+    uint8_t *opt_end = tcphdr + tcp_hdr_len;
+    while (opt < opt_end) {
+        uint8_t kind = opt[0];
+        if (kind == 0) break;               // End of option list
+        if (kind == 1) { opt++; continue; } // NOP
+        if (opt + 1 >= opt_end) break;
+        uint8_t opt_len = opt[1];
+        if (opt_len < 2 || opt + opt_len > opt_end) break;
+
+        if (kind == 2 && opt_len == 4) {
+            uint16_t *mss_ptr = (uint16_t *)(opt + 2);
+            if (ntohs(*mss_ptr) > max_mss) {
+                uint16_t old_mss_net = *mss_ptr;
+                *mss_ptr = htons(max_mss);
+                // Incremental TCP checksum update (RFC 1624): HC' = ~(~HC + ~m + m')
+                uint16_t *chksum = (uint16_t *)(tcphdr + 16);
+                uint32_t sum = (uint16_t)~(*chksum);
+                sum += (uint16_t)~old_mss_net;
+                sum += htons(max_mss);
+                while (sum >> 16) sum = (sum & 0xFFFF) + (sum >> 16);
+                *chksum = (uint16_t)~sum;
+            }
+            break;
+        }
+        opt += opt_len;
+    }
+}
+
 // AP netif hook functions (for PCAP capture and ACL)
 static err_t ap_netif_input_hook(struct pbuf *p, struct netif *netif) {
     bool is_acl_monitored = false;
@@ -880,6 +940,9 @@ static err_t ap_netif_input_hook(struct pbuf *p, struct netif *netif) {
             return ERR_OK;
         }
     }
+
+    // Clamp TCP MSS on SYN packets from clients
+    clamp_tcp_mss(p, ap_mss_clamp);
 
     // Capture packet based on mode and ACL monitor flag (AP interface = true)
     if (pcap_should_capture(is_acl_monitored, true)) {
@@ -913,6 +976,9 @@ static err_t ap_netif_linkoutput_hook(struct netif *netif, struct pbuf *p) {
             return ERR_OK;
         }
     }
+
+    // Clamp TCP MSS on SYN/SYN-ACK packets to clients
+    clamp_tcp_mss(p, ap_mss_clamp);
 
     // Capture packet based on mode and ACL monitor flag (AP interface = true)
     if (pcap_should_capture(is_acl_monitored, true)) {
