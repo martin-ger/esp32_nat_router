@@ -66,6 +66,10 @@ uint8_t sta_ttl_override = 0;
 // MSS clamp for AP interface (0 = disabled, otherwise max MSS in bytes)
 uint16_t ap_mss_clamp = 1380;
 
+// Path MTU for AP clients: send ICMP Fragmentation Needed when a DF-flagged packet
+// from a client exceeds this size (0 = disabled, default 1460).
+uint16_t ap_pmtu = 1440;
+
 // AP SSID hidden (0 = visible, 1 = hidden)
 uint8_t ap_ssid_hidden = 0;
 
@@ -919,6 +923,91 @@ static void clamp_tcp_mss(struct pbuf *p, uint16_t max_mss) {
     }
 }
 
+// Send ICMP Fragmentation Needed (Type 3, Code 4) back to a client on the AP interface.
+// 'p' is an inbound Ethernet frame from the AP; 'mtu' is the next-hop MTU to report.
+// Only sent when the IP DF flag is set and the IP total length exceeds 'mtu'.
+static void send_icmp_frag_needed(struct pbuf *p, struct netif *netif, uint16_t mtu)
+{
+    if (p == NULL || netif == NULL || original_ap_netif_linkoutput == NULL) return;
+    if (p->len < 14 + 20) return; // need Ethernet header + IP header in first segment
+
+    uint8_t *eth = (uint8_t *)p->payload;
+
+    // IPv4 only (ethertype 0x0800)
+    if (eth[12] != 0x08 || eth[13] != 0x00) return;
+
+    struct ip_hdr *orig_ip = (struct ip_hdr *)(eth + 14);
+    if (IPH_V(orig_ip) != 4) return;
+
+    // Only when the packet exceeds the reported path MTU
+    uint16_t ip_total_len = lwip_ntohs(IPH_LEN(orig_ip));
+    if (ip_total_len <= mtu) return;
+
+    // Only send ICMP when DF is set and this is not a non-first fragment
+    // (DF=1 with offset>0 is malformed; fragments with offset>0 have no full transport header)
+    uint16_t flags_offset = lwip_ntohs(IPH_OFFSET(orig_ip));
+    if (!(flags_offset & IP_DF)) return;        // DF not set
+    if (flags_offset & IP_OFFMASK) return;      // fragment offset > 0
+
+    // Don't generate ICMP errors in response to ICMP (avoid feedback loops)
+    if (IPH_PROTO(orig_ip) == 1 /* ICMP */) return;
+
+    uint16_t orig_ihl = IPH_HL(orig_ip) * 4;
+    if (orig_ihl < 20 || orig_ihl > 60) return;
+
+    // ICMP body: 2 bytes unused + 2 bytes next-hop MTU + orig IP header + first 8 data bytes
+    uint16_t avail_data = (p->len > 14u + orig_ihl) ? (p->len - 14 - orig_ihl) : 0;
+    if (avail_data > 8) avail_data = 8;
+
+    uint16_t icmp_body    = 4 + orig_ihl + avail_data; // unused+mtu + orig_hdr + orig_data
+    uint16_t icmp_total   = 4 + icmp_body;              // type+code+chksum + body
+    uint16_t new_ip_len   = 20 + icmp_total;
+    uint16_t frame_len    = 14 + new_ip_len;
+
+    struct pbuf *resp = pbuf_alloc(PBUF_RAW, frame_len, PBUF_RAM);
+    if (resp == NULL) return;
+
+    uint8_t *buf = (uint8_t *)resp->payload;
+    memset(buf, 0, frame_len);
+
+    // Ethernet: swap src/dst MAC (AP MAC → client MAC)
+    memcpy(buf + 0, eth + 6, 6); // dst = original sender's MAC
+    memcpy(buf + 6, eth + 0, 6); // src = our AP MAC (original frame's dst)
+    buf[12] = 0x08;
+    buf[13] = 0x00;
+
+    // IP header
+    struct ip_hdr *rip = (struct ip_hdr *)(buf + 14);
+    IPH_VHL_SET(rip, 4, 5);
+    IPH_TOS_SET(rip, 0);
+    IPH_LEN_SET(rip, lwip_htons(new_ip_len));
+    IPH_ID_SET(rip, 0);
+    IPH_OFFSET_SET(rip, 0);
+    IPH_TTL_SET(rip, 64);
+    IPH_PROTO_SET(rip, 1 /* ICMP */);
+    IPH_CHKSUM_SET(rip, 0);
+    rip->src.addr  = my_ap_ip;
+    rip->dest.addr = orig_ip->src.addr;
+    IPH_CHKSUM_SET(rip, inet_chksum(rip, 20));
+
+    // ICMP Fragmentation Needed (RFC 1191)
+    uint8_t *icmp = buf + 14 + 20;
+    icmp[0] = 3;                        // Type: Destination Unreachable
+    icmp[1] = 4;                        // Code: Fragmentation Needed, DF set
+    icmp[2] = 0; icmp[3] = 0;          // checksum (computed below)
+    icmp[4] = 0; icmp[5] = 0;          // unused
+    icmp[6] = (uint8_t)(mtu >> 8);     // next-hop MTU high byte
+    icmp[7] = (uint8_t)(mtu & 0xFF);   // next-hop MTU low byte
+    memcpy(icmp + 8, orig_ip, orig_ihl);
+    if (avail_data > 0) {
+        memcpy(icmp + 8 + orig_ihl, (uint8_t *)orig_ip + orig_ihl, avail_data);
+    }
+    *((uint16_t *)(icmp + 2)) = inet_chksum(icmp, icmp_total);
+
+    original_ap_netif_linkoutput(netif, resp);
+    pbuf_free(resp);
+}
+
 // AP netif hook functions (for PCAP capture and ACL)
 static err_t ap_netif_input_hook(struct pbuf *p, struct netif *netif) {
     bool is_acl_monitored = false;
@@ -939,6 +1028,11 @@ static err_t ap_netif_input_hook(struct pbuf *p, struct netif *netif) {
             pbuf_free(p);
             return ERR_OK;
         }
+    }
+
+    // PMTU: send ICMP Fragmentation Needed if client sends a DF packet larger than path MTU
+    if (ap_pmtu > 0) {
+        send_icmp_frag_needed(p, netif, ap_pmtu);
     }
 
     // Clamp TCP MSS on SYN packets from clients

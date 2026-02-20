@@ -92,6 +92,9 @@ extern uint8_t sta_ttl_override;
 // MSS clamp for AP interface (0 = disabled, otherwise max MSS in bytes)
 extern uint16_t ap_mss_clamp;
 
+// Path MTU for AP clients (0 = disabled, otherwise send ICMP Frag Needed when DF packets exceed this)
+extern uint16_t ap_pmtu;
+
 // AP SSID hidden (0 = visible, 1 = hidden)
 extern uint8_t ap_ssid_hidden;
 
