@@ -676,6 +676,18 @@ static esp_err_t index_get_handler(httpd_req_t *req)
     }
     httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
 
+    /* Stream VPN status row */
+    if (vpn_enabled) {
+        if (vpn_is_connected()) {
+            snprintf(row, sizeof(row), "<tr><td>VPN:</td><td><span style='color: #4caf50;'>Connected</span></td></tr>");
+        } else if (vpn_connected) {
+            snprintf(row, sizeof(row), "<tr><td>VPN:</td><td><span style='color: #ffc107;'>Handshake Pending</span></td></tr>");
+        } else {
+            snprintf(row, sizeof(row), "<tr><td>VPN:</td><td><span style='color: #f44336;'>Disconnected</span></td></tr>");
+        }
+        httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
+    }
+
     /* Close status table */
     httpd_resp_send_chunk(req, INDEX_CHUNK_STATUS_CLOSE, HTTPD_RESP_USE_STRLEN);
 
@@ -1934,14 +1946,25 @@ static esp_err_t firewall_get_handler(httpd_req_t *req)
     /* Chunk 5: Description text */
     httpd_resp_send_chunk(req, FIREWALL_CHUNK_MID2, HTTPD_RESP_USE_STRLEN);
 
-    /* Chunk 6: Stream ACL sections */
+    /* Chunk 6: Stream ACL sections.
+     * Copy data under lock then release before sending HTTP chunks,
+     * because httpd_resp_send_chunk can block on TCP and would deadlock
+     * with acl_check_packet holding the same lock in the netif hooks. */
     for (int list_no = 0; list_no < MAX_ACL_LISTS; list_no++) {
+        /* Snapshot ACL data under the lock */
+        acl_entry_t rules_copy[MAX_ACL_ENTRIES];
+        acl_stats_t stats_copy;
+        const char* list_desc;
+
         acl_lock();
         acl_entry_t* rules = acl_get_rules(list_no);
         acl_stats_t* stats = acl_get_stats(list_no);
-        const char* list_desc = acl_get_desc(list_no);
+        list_desc = acl_get_desc(list_no);
+        memcpy(rules_copy, rules, sizeof(rules_copy));
+        memcpy(&stats_copy, stats, sizeof(stats_copy));
+        acl_unlock();
 
-        /* Section header with stats */
+        /* Section header with stats (no lock held) */
         snprintf(row, sizeof(row),
             "<div class='acl-section'>"
             "<h3>%s</h3>"
@@ -1952,9 +1975,9 @@ static esp_err_t firewall_get_handler(httpd_req_t *req)
             "<a href='/firewall?clear_acl=%d' class='orange-button' style='float:right;'>Clear</a>"
             "</div>",
             list_desc,
-            (unsigned long)stats->packets_allowed,
-            (unsigned long)stats->packets_denied,
-            (unsigned long)stats->packets_nomatch,
+            (unsigned long)stats_copy.packets_allowed,
+            (unsigned long)stats_copy.packets_denied,
+            (unsigned long)stats_copy.packets_nomatch,
             list_no);
         httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
 
@@ -1967,15 +1990,15 @@ static esp_err_t firewall_get_handler(httpd_req_t *req)
             "</tr></thead><tbody>",
             HTTPD_RESP_USE_STRLEN);
 
-        /* Stream rule rows */
+        /* Stream rule rows from snapshot */
         int rule_count = 0;
         for (int i = 0; i < MAX_ACL_ENTRIES; i++) {
-            if (!rules[i].valid) continue;
+            if (!rules_copy[i].valid) continue;
             rule_count++;
 
             /* Format protocol */
             const char *proto_str;
-            switch (rules[i].proto) {
+            switch (rules_copy[i].proto) {
                 case 0:  proto_str = "IP"; break;
                 case 1:  proto_str = "ICMP"; break;
                 case 6:  proto_str = "TCP"; break;
@@ -1985,38 +2008,38 @@ static esp_err_t firewall_get_handler(httpd_req_t *req)
 
             /* Format IP addresses with device names for /32 */
             char src_str[DHCP_RESERVATION_NAME_LEN], dst_str[DHCP_RESERVATION_NAME_LEN];
-            if (rules[i].s_mask == 0xFFFFFFFF) {
-                const char* name = lookup_device_name_by_ip(rules[i].src);
+            if (rules_copy[i].s_mask == 0xFFFFFFFF) {
+                const char* name = lookup_device_name_by_ip(rules_copy[i].src);
                 if (name) {
                     snprintf(src_str, sizeof(src_str), "%s", name);
                 } else {
-                    acl_format_ip(rules[i].src, rules[i].s_mask, src_str, sizeof(src_str));
+                    acl_format_ip(rules_copy[i].src, rules_copy[i].s_mask, src_str, sizeof(src_str));
                 }
             } else {
-                acl_format_ip(rules[i].src, rules[i].s_mask, src_str, sizeof(src_str));
+                acl_format_ip(rules_copy[i].src, rules_copy[i].s_mask, src_str, sizeof(src_str));
             }
-            if (rules[i].d_mask == 0xFFFFFFFF) {
-                const char* name = lookup_device_name_by_ip(rules[i].dest);
+            if (rules_copy[i].d_mask == 0xFFFFFFFF) {
+                const char* name = lookup_device_name_by_ip(rules_copy[i].dest);
                 if (name) {
                     snprintf(dst_str, sizeof(dst_str), "%s", name);
                 } else {
-                    acl_format_ip(rules[i].dest, rules[i].d_mask, dst_str, sizeof(dst_str));
+                    acl_format_ip(rules_copy[i].dest, rules_copy[i].d_mask, dst_str, sizeof(dst_str));
                 }
             } else {
-                acl_format_ip(rules[i].dest, rules[i].d_mask, dst_str, sizeof(dst_str));
+                acl_format_ip(rules_copy[i].dest, rules_copy[i].d_mask, dst_str, sizeof(dst_str));
             }
 
             /* Format ports */
             char s_port_str[8], d_port_str[8];
-            if (rules[i].s_port == 0) strcpy(s_port_str, "*");
-            else snprintf(s_port_str, sizeof(s_port_str), "%d", rules[i].s_port);
-            if (rules[i].d_port == 0) strcpy(d_port_str, "*");
-            else snprintf(d_port_str, sizeof(d_port_str), "%d", rules[i].d_port);
+            if (rules_copy[i].s_port == 0) strcpy(s_port_str, "*");
+            else snprintf(s_port_str, sizeof(s_port_str), "%d", rules_copy[i].s_port);
+            if (rules_copy[i].d_port == 0) strcpy(d_port_str, "*");
+            else snprintf(d_port_str, sizeof(d_port_str), "%d", rules_copy[i].d_port);
 
             /* Format action */
             const char *action_str;
-            uint8_t action = rules[i].allow & 0x01;
-            uint8_t monitor = rules[i].allow & ACL_MONITOR;
+            uint8_t action = rules_copy[i].allow & 0x01;
+            uint8_t monitor = rules_copy[i].allow & ACL_MONITOR;
             if (action == ACL_ALLOW) {
                 action_str = monitor ? "Allow+M" : "Allow";
             } else {
@@ -2030,7 +2053,7 @@ static esp_err_t firewall_get_handler(httpd_req_t *req)
                 "<td><a href='/firewall?del_acl=%d&del_idx=%d' class='red-button'>Del</a></td>"
                 "</tr>",
                 i, proto_str, src_str, s_port_str,
-                dst_str, d_port_str, action_str, (unsigned long)rules[i].hit_count,
+                dst_str, d_port_str, action_str, (unsigned long)rules_copy[i].hit_count,
                 list_no, i);
             httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
         }
@@ -2043,7 +2066,6 @@ static esp_err_t firewall_get_handler(httpd_req_t *req)
 
         /* Close table and section */
         httpd_resp_send_chunk(req, "</tbody></table></div>", HTTPD_RESP_USE_STRLEN);
-        acl_unlock();
     }
 
     /* Chunk 7: Add form and footer */
@@ -2275,6 +2297,188 @@ static httpd_uri_t scanp = {
     .handler   = scan_get_handler,
 };
 
+/* VPN page GET handler */
+static esp_err_t vpn_get_handler(httpd_req_t *req)
+{
+    /* Check authentication if password protection is enabled */
+    bool password_protection_enabled = is_web_password_set();
+
+    if (password_protection_enabled && !is_authenticated(req)) {
+        ESP_LOGW(TAG, "Unauthenticated access attempt to /vpn");
+        httpd_resp_set_status(req, "303 See Other");
+        httpd_resp_set_hdr(req, "Location", "/?auth_required=1");
+        httpd_resp_send(req, NULL, 0);
+        return ESP_OK;
+    }
+
+    char* buf = NULL;
+    size_t buf_len;
+
+    /* Read URL query string */
+    buf_len = httpd_req_get_url_query_len(req) + 1;
+    if (buf_len > 1) {
+        buf = malloc(buf_len);
+        if (buf != NULL && httpd_req_get_url_query_str(req, buf, buf_len) == ESP_OK) {
+            ESP_LOGI(TAG, "VPN query => %s", buf);
+
+            char param[128];
+            bool has_config = false;
+
+            /* Check if this is a form submission */
+            if (httpd_query_key_value(buf, "vpn_enabled", param, sizeof(param)) == ESP_OK) {
+                has_config = true;
+                nvs_handle_t nvs;
+                if (nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs) == ESP_OK) {
+                    nvs_set_i32(nvs, "vpn_enabled", atoi(param));
+
+                    if (httpd_query_key_value(buf, "vpn_privkey", param, sizeof(param)) == ESP_OK) {
+                        preprocess_string(param);
+                        nvs_set_str(nvs, "vpn_privkey", param);
+                    }
+                    if (httpd_query_key_value(buf, "vpn_pubkey", param, sizeof(param)) == ESP_OK) {
+                        preprocess_string(param);
+                        nvs_set_str(nvs, "vpn_pubkey", param);
+                    }
+                    if (httpd_query_key_value(buf, "vpn_psk", param, sizeof(param)) == ESP_OK) {
+                        preprocess_string(param);
+                        nvs_set_str(nvs, "vpn_psk", param);
+                    }
+                    if (httpd_query_key_value(buf, "vpn_endpoint", param, sizeof(param)) == ESP_OK) {
+                        preprocess_string(param);
+                        nvs_set_str(nvs, "vpn_endpoint", param);
+                    }
+                    if (httpd_query_key_value(buf, "vpn_port", param, sizeof(param)) == ESP_OK) {
+                        nvs_set_i32(nvs, "vpn_port", atoi(param));
+                    }
+                    if (httpd_query_key_value(buf, "vpn_ip", param, sizeof(param)) == ESP_OK) {
+                        preprocess_string(param);
+                        nvs_set_str(nvs, "vpn_ip", param);
+                    }
+                    if (httpd_query_key_value(buf, "vpn_mask", param, sizeof(param)) == ESP_OK) {
+                        preprocess_string(param);
+                        nvs_set_str(nvs, "vpn_mask", param);
+                    }
+                    if (httpd_query_key_value(buf, "vpn_ka", param, sizeof(param)) == ESP_OK) {
+                        nvs_set_i32(nvs, "vpn_ka", atoi(param));
+                    }
+
+                    nvs_commit(nvs);
+                    nvs_close(nvs);
+                    ESP_LOGI(TAG, "VPN settings saved, scheduling restart");
+                    esp_timer_start_once(restart_timer, 500000);
+                }
+            }
+
+            /* If config was submitted, let the JS handle the "rebooting" message */
+            if (has_config) {
+                /* Fall through to render the page (JS will detect query params and show reboot msg) */
+            }
+        }
+        if (buf) free(buf);
+    }
+
+    /* Reusable buffer for VPN page rows */
+    #define VPN_BUF_SIZE 768
+    char *row = malloc(VPN_BUF_SIZE);
+    if (row == NULL) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+        return ESP_ERR_NO_MEM;
+    }
+
+    /* Head */
+    httpd_resp_send_chunk(req, VPN_CHUNK_HEAD, HTTPD_RESP_USE_STRLEN);
+
+    /* Logout button if authenticated */
+    if (session_active && password_protection_enabled) {
+        httpd_resp_send_chunk(req,
+            "<a href='/?logout=1' style='padding: 0.4rem 1rem; background: rgba(255,82,82,0.15); color: #ff5252; border: 1px solid #ff5252; border-radius: 6px; text-decoration: none; font-size: 0.85rem; font-weight: 500;'>Logout</a>",
+            HTTPD_RESP_USE_STRLEN);
+    }
+
+    /* Mid (script) */
+    httpd_resp_send_chunk(req, VPN_CHUNK_MID, HTTPD_RESP_USE_STRLEN);
+
+    /* Status section */
+    httpd_resp_send_chunk(req, "<h2>Status</h2><div class='status-table'><table>", HTTPD_RESP_USE_STRLEN);
+
+    if (vpn_enabled) {
+        const char *state, *color;
+        if (vpn_is_connected()) {
+            state = "Connected"; color = "#4caf50";
+        } else if (vpn_connected) {
+            state = "Handshake Pending"; color = "#ffc107";
+        } else {
+            state = "Disconnected"; color = "#f44336";
+        }
+        snprintf(row, VPN_BUF_SIZE, "<tr><td>VPN:</td><td><strong style='color:%s;'>%s</strong></td></tr>", color, state);
+    } else {
+        snprintf(row, VPN_BUF_SIZE, "<tr><td>VPN:</td><td><strong style='color:#888;'>Disabled</strong></td></tr>");
+    }
+    httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
+
+    if (vpn_address && vpn_address[0]) {
+        snprintf(row, VPN_BUF_SIZE, "<tr><td>Tunnel IP:</td><td>%s</td></tr>", vpn_address);
+        httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
+    }
+    snprintf(row, VPN_BUF_SIZE, "<tr><td>MSS Clamp:</td><td>%u</td></tr><tr><td>Path MTU:</td><td>%u</td></tr>",
+             ap_mss_clamp, ap_pmtu);
+    httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
+
+    httpd_resp_send_chunk(req, "</table></div>", HTTPD_RESP_USE_STRLEN);
+
+    /* Form - streamed field by field to avoid large snprintf */
+    httpd_resp_send_chunk(req, VPN_CHUNK_FORM_OPEN, HTTPD_RESP_USE_STRLEN);
+
+    snprintf(row, VPN_BUF_SIZE,
+        "<tr><td>Enabled</td><td><select name='vpn_enabled'>"
+        "<option value='1' %s>On</option><option value='0' %s>Off</option>"
+        "</select></td></tr>",
+        vpn_enabled ? "selected" : "", vpn_enabled ? "" : "selected");
+    httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
+
+    snprintf(row, VPN_BUF_SIZE,
+        "<tr><td>Private Key</td><td><input type='password' name='vpn_privkey' value='%s' placeholder='Base64 private key'/></td></tr>",
+        vpn_private_key ? vpn_private_key : "");
+    httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
+
+    snprintf(row, VPN_BUF_SIZE,
+        "<tr><td>Public Key</td><td><input type='text' name='vpn_pubkey' value='%s' placeholder='Peer base64 public key'/></td></tr>",
+        vpn_public_key ? vpn_public_key : "");
+    httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
+
+    snprintf(row, VPN_BUF_SIZE,
+        "<tr><td>Preshared Key</td><td><input type='password' name='vpn_psk' value='%s' placeholder='Optional'/></td></tr>",
+        vpn_preshared_key ? vpn_preshared_key : "");
+    httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
+
+    snprintf(row, VPN_BUF_SIZE,
+        "<tr><td>Endpoint</td><td><input type='text' name='vpn_endpoint' value='%s' placeholder='Host or IP'/></td></tr>"
+        "<tr><td>Port</td><td><input type='number' name='vpn_port' value='%d' min='1' max='65535'/></td></tr>"
+        "<tr><td>Tunnel IP</td><td><input type='text' name='vpn_ip' value='%s' placeholder='e.g. 10.0.0.2'/></td></tr>"
+        "<tr><td>Netmask</td><td><input type='text' name='vpn_mask' value='%s' placeholder='255.255.255.0'/></td></tr>"
+        "<tr><td>Keepalive</td><td><input type='number' name='vpn_ka' value='%d' min='0' max='65535'/> sec</td></tr>",
+        vpn_endpoint ? vpn_endpoint : "",
+        (int)vpn_port,
+        vpn_address ? vpn_address : "",
+        vpn_netmask ? vpn_netmask : "255.255.255.0",
+        (int)vpn_keepalive);
+    httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
+
+    httpd_resp_send_chunk(req, VPN_CHUNK_FORM_CLOSE, HTTPD_RESP_USE_STRLEN);
+
+    /* End chunked response */
+    httpd_resp_send_chunk(req, NULL, 0);
+
+    free(row);
+    return ESP_OK;
+}
+
+static httpd_uri_t vpnp = {
+    .uri       = "/vpn",
+    .method    = HTTP_GET,
+    .handler   = vpn_get_handler,
+};
+
 static esp_err_t captive_redirect_handler(httpd_req_t *req, httpd_err_code_t err);
 
 httpd_handle_t start_webserver(void)
@@ -2282,7 +2486,8 @@ httpd_handle_t start_webserver(void)
     httpd_handle_t server = NULL;
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.stack_size = 16384;  // Large stack needed for mappings page with 3x 2KB HTML buffers
-    config.max_uri_handlers = 10;
+    config.max_uri_handlers = 11;
+    config.max_uri_len = 1024;
 
     esp_timer_create(&restart_timer_args, &restart_timer);
 
@@ -2296,6 +2501,7 @@ httpd_handle_t start_webserver(void)
         httpd_register_uri_handler(server, &mappingsp);
         httpd_register_uri_handler(server, &firewallp);
         httpd_register_uri_handler(server, &scanp);
+        httpd_register_uri_handler(server, &vpnp);
         httpd_register_uri_handler(server, &favicon_uri);
         httpd_register_uri_handler(server, &config_exportp);
         httpd_register_uri_handler(server, &config_importp);

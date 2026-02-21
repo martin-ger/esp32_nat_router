@@ -70,6 +70,7 @@ static void register_set_oled(void);
 static void register_set_oled_gpio(void);
 #endif
 static void register_scan(void);
+static void register_set_vpn(void);
 
 /* ACL helper functions (forward declarations) */
 static char* acl_format_ip_with_name(uint32_t ip, uint32_t mask, char* buf, size_t buf_len);
@@ -230,6 +231,7 @@ void register_router(void)
     register_set_ttl();
     register_set_ap_hidden();
     register_remote_console_cmd();
+    register_set_vpn();
 #ifdef CONFIG_IDF_TARGET_ESP32C3
     register_set_oled();
     register_set_oled_gpio();
@@ -1023,11 +1025,12 @@ static int show(int argc, char **argv)
     }
 
     if (show_args.type->count == 0) {
-        printf("Usage: show <status|config|mappings|acl>\n");
+        printf("Usage: show <status|config|mappings|acl|vpn>\n");
         printf("  status   - Show router status (connection, clients, memory)\n");
         printf("  config   - Show router configuration (AP/STA settings)\n");
         printf("  mappings - Show DHCP pool, reservations and port mappings\n");
         printf("  acl      - Show firewall ACL rules\n");
+        printf("  vpn      - Show WireGuard VPN status and config\n");
         return 1;
     }
 
@@ -1198,8 +1201,36 @@ static int show(int argc, char **argv)
             acl_print_with_names(i);
         }
 
+    } else if (strcmp(type, "vpn") == 0) {
+        printf("WireGuard VPN:\n");
+        printf("==============\n");
+        printf("Enabled: %s\n", vpn_enabled ? "yes" : "no");
+        if (vpn_enabled) {
+            const char *state;
+            if (vpn_is_connected()) {
+                state = "peer up";
+            } else if (vpn_connected) {
+                state = "handshake pending";
+            } else {
+                state = "disconnected";
+            }
+            printf("Status: %s\n", state);
+        } else {
+            printf("Status: disabled\n");
+        }
+        bool hide_pw = remote_console_is_capturing();
+        printf("Tunnel IP: %s\n", (vpn_address && vpn_address[0]) ? vpn_address : "<not set>");
+        printf("Netmask: %s\n", (vpn_netmask && vpn_netmask[0]) ? vpn_netmask : "255.255.255.0");
+        printf("Endpoint: %s:%ld\n", (vpn_endpoint && vpn_endpoint[0]) ? vpn_endpoint : "<not set>", (long)vpn_port);
+        printf("Keepalive: %ld sec\n", (long)vpn_keepalive);
+        printf("Private Key: %s\n", (vpn_private_key && vpn_private_key[0]) ? (hide_pw ? "***" : vpn_private_key) : "<not set>");
+        printf("Public Key: %s\n", (vpn_public_key && vpn_public_key[0]) ? vpn_public_key : "<not set>");
+        printf("Preshared Key: %s\n", (vpn_preshared_key && vpn_preshared_key[0]) ? (hide_pw ? "***" : "set") : "<not set>");
+        printf("MSS Clamp: %u\n", ap_mss_clamp);
+        printf("Path MTU: %u\n", ap_pmtu);
+
     } else {
-        printf("Invalid parameter. Use: show <status|config|mappings|acl>\n");
+        printf("Invalid parameter. Use: show <status|config|mappings|acl|vpn>\n");
         return 1;
     }
 
@@ -1208,12 +1239,12 @@ static int show(int argc, char **argv)
 
 static void register_show(void)
 {
-    show_args.type = arg_str1(NULL, NULL, "[status|config|mappings|acl]", "Type of information");
+    show_args.type = arg_str1(NULL, NULL, "[status|config|mappings|acl|vpn]", "Type of information");
     show_args.end = arg_end(1);
 
     const esp_console_cmd_t cmd = {
         .command = "show",
-        .help = "Show router status, config, mappings or ACL rules",
+        .help = "Show router status, config, mappings, ACL rules or VPN",
         .hint = NULL,
         .func = &show,
         .argtable = &show_args
@@ -1833,10 +1864,16 @@ static void acl_print_with_names(uint8_t acl_no)
            "Idx", "Proto", "Source", "Destination", "SPort", "DPort", "Action", "Hits");
     printf("---  ------  --------------------  --------------------  ------  ------  --------  ----\n");
 
+    /* Snapshot rules under the lock, then print outside to avoid
+     * blocking packet processing (printf can block via remote console). */
+    acl_entry_t rules_copy[MAX_ACL_ENTRIES];
     acl_lock();
     acl_entry_t *rules = acl_get_rules(acl_no);
+    memcpy(rules_copy, rules, sizeof(rules_copy));
+    acl_unlock();
+
     for (int i = 0; i < MAX_ACL_ENTRIES; i++) {
-        acl_entry_t *rule = &rules[i];
+        acl_entry_t *rule = &rules_copy[i];
         if (!rule->valid) {
             continue;
         }
@@ -1883,7 +1920,6 @@ static void acl_print_with_names(uint8_t acl_no)
                i, proto_str, src_str, dest_str, s_port_str, d_port_str,
                action_str, (unsigned long)rule->hit_count);
     }
-    acl_unlock();
 }
 
 /* 'acl' command implementation */
@@ -2381,6 +2417,92 @@ static void register_scan(void)
         .help = "Scan for available WiFi networks",
         .hint = NULL,
         .func = &scan_cmd,
+    };
+    ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
+}
+
+/** Arguments used by 'set_vpn' function */
+static struct {
+    struct arg_str *privkey;
+    struct arg_str *pubkey;
+    struct arg_str *endpoint;
+    struct arg_str *address;
+    struct arg_str *psk;
+    struct arg_str *mask;
+    struct arg_int *port;
+    struct arg_int *keepalive;
+    struct arg_int *enable;
+    struct arg_end *end;
+} set_vpn_args;
+
+static int set_vpn_cmd(int argc, char **argv)
+{
+    int nerrors = arg_parse(argc, argv, (void **) &set_vpn_args);
+    if (nerrors != 0) {
+        arg_print_errors(stderr, set_vpn_args.end, argv[0]);
+        return 1;
+    }
+
+    nvs_handle_t nvs;
+    esp_err_t err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err != ESP_OK) {
+        printf("Error opening NVS: %s\n", esp_err_to_name(err));
+        return 1;
+    }
+
+    if (set_vpn_args.privkey->count > 0) {
+        nvs_set_str(nvs, "vpn_privkey", set_vpn_args.privkey->sval[0]);
+    }
+    if (set_vpn_args.pubkey->count > 0) {
+        nvs_set_str(nvs, "vpn_pubkey", set_vpn_args.pubkey->sval[0]);
+    }
+    if (set_vpn_args.endpoint->count > 0) {
+        nvs_set_str(nvs, "vpn_endpoint", set_vpn_args.endpoint->sval[0]);
+    }
+    if (set_vpn_args.address->count > 0) {
+        nvs_set_str(nvs, "vpn_ip", set_vpn_args.address->sval[0]);
+    }
+    if (set_vpn_args.psk->count > 0) {
+        nvs_set_str(nvs, "vpn_psk", set_vpn_args.psk->sval[0]);
+    }
+    if (set_vpn_args.mask->count > 0) {
+        nvs_set_str(nvs, "vpn_mask", set_vpn_args.mask->sval[0]);
+    }
+    if (set_vpn_args.port->count > 0) {
+        nvs_set_i32(nvs, "vpn_port", set_vpn_args.port->ival[0]);
+    }
+    if (set_vpn_args.keepalive->count > 0) {
+        nvs_set_i32(nvs, "vpn_ka", set_vpn_args.keepalive->ival[0]);
+    }
+    if (set_vpn_args.enable->count > 0) {
+        nvs_set_i32(nvs, "vpn_enabled", set_vpn_args.enable->ival[0]);
+    }
+
+    nvs_commit(nvs);
+    nvs_close(nvs);
+    printf("VPN settings saved. Restart to apply.\n");
+    return 0;
+}
+
+static void register_set_vpn(void)
+{
+    set_vpn_args.privkey   = arg_str0(NULL, NULL, "<private_key>", "WireGuard private key (base64)");
+    set_vpn_args.pubkey    = arg_str0(NULL, NULL, "<public_key>", "Peer public key (base64)");
+    set_vpn_args.endpoint  = arg_str0(NULL, NULL, "<endpoint>", "Peer endpoint host/IP");
+    set_vpn_args.address   = arg_str0(NULL, NULL, "<address>", "Tunnel IP (e.g. 10.0.0.2)");
+    set_vpn_args.psk       = arg_str0("k", "psk", "<preshared_key>", "Preshared key (base64)");
+    set_vpn_args.mask      = arg_str0("m", "mask", "<netmask>", "Tunnel netmask (default 255.255.255.0)");
+    set_vpn_args.port      = arg_int0("p", "port", "<port>", "Peer UDP port (default 51820)");
+    set_vpn_args.keepalive = arg_int0("a", "keepalive", "<seconds>", "Persistent keepalive (0=disabled)");
+    set_vpn_args.enable    = arg_int0("e", "enable", "<0|1>", "Enable/disable VPN");
+    set_vpn_args.end       = arg_end(4);
+
+    const esp_console_cmd_t cmd = {
+        .command = "set_vpn",
+        .help = "Configure WireGuard VPN (restart to apply)",
+        .hint = NULL,
+        .func = &set_vpn_cmd,
+        .argtable = &set_vpn_args
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }

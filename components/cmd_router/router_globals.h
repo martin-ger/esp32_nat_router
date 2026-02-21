@@ -104,6 +104,18 @@ extern int32_t ttls_phase2;         // 0=MSCHAPv2, 1=MSCHAP, 2=PAP, 3=CHAP
 extern int32_t use_cert_bundle;     // 0=off, 1=on
 extern int32_t disable_time_check;  // 0=off, 1=on
 
+// WireGuard VPN settings (persisted in NVS)
+extern int32_t vpn_enabled;         // 0=off, 1=on
+extern int32_t vpn_port;            // Peer UDP port (default 51820)
+extern int32_t vpn_keepalive;       // Persistent keepalive seconds (0=disabled)
+extern char* vpn_private_key;       // WireGuard private key (base64)
+extern char* vpn_public_key;        // Peer public key (base64)
+extern char* vpn_preshared_key;     // Preshared key (optional, base64)
+extern char* vpn_endpoint;          // Peer endpoint host/IP
+extern char* vpn_address;           // Tunnel IP (e.g. "10.0.0.2")
+extern char* vpn_netmask;           // Tunnel netmask (e.g. "255.255.255.0")
+extern bool vpn_connected;          // Runtime state: tunnel is up
+
 void preprocess_string(char* str);
 int set_sta(int argc, char **argv);
 int set_sta_static(int argc, char **argv);
@@ -201,6 +213,11 @@ esp_err_t load_acl_rules(void);
 // Start captive portal DNS server (AP mode only).
 // Resolves all DNS queries to 192.168.4.1 so clients stay connected.
 void web_server_start_captive_dns(void);
+
+// WireGuard VPN functions
+esp_err_t vpn_connect(void);
+void vpn_disconnect(void);
+bool vpn_is_connected(void);
 
 // Password hashing (SHA-256 + salt)
 // Returns true if a non-empty password is stored in NVS.

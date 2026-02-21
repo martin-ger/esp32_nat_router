@@ -53,6 +53,7 @@
 #include "acl.h"
 #include "remote_console.h"
 #include "oled_display.h"
+#include "esp_wireguard.h"
 #include "lwip/prot/ip4.h"
 #include "lwip/inet_chksum.h"
 
@@ -64,11 +65,11 @@ uint64_t sta_bytes_received = 0;
 uint8_t sta_ttl_override = 0;
 
 // MSS clamp for AP interface (0 = disabled, otherwise max MSS in bytes)
-uint16_t ap_mss_clamp = 1380;
+uint16_t ap_mss_clamp = 0;
 
 // Path MTU for AP clients: send ICMP Fragmentation Needed when a DF-flagged packet
-// from a client exceeds this size (0 = disabled, default 1460).
-uint16_t ap_pmtu = 1440;
+// from a client exceeds this size (0 = disabled).
+uint16_t ap_pmtu = 0;
 
 // AP SSID hidden (0 = visible, 1 = hidden)
 uint8_t ap_ssid_hidden = 0;
@@ -78,6 +79,23 @@ int32_t eap_method = 0;          // 0=Auto, 1=PEAP, 2=TTLS, 3=TLS
 int32_t ttls_phase2 = 0;         // 0=MSCHAPv2, 1=MSCHAP, 2=PAP, 3=CHAP
 int32_t use_cert_bundle = 0;     // 0=off, 1=on
 int32_t disable_time_check = 0;  // 0=off, 1=on
+
+// WireGuard VPN settings
+int32_t vpn_enabled = 0;
+int32_t vpn_port = 51820;
+int32_t vpn_keepalive = 0;
+char* vpn_private_key = NULL;
+char* vpn_public_key = NULL;
+char* vpn_preshared_key = NULL;
+char* vpn_endpoint = NULL;
+char* vpn_address = NULL;
+char* vpn_netmask = NULL;
+bool vpn_connected = false;
+
+// WireGuard context (module-private)
+static wireguard_config_t wg_config = ESP_WIREGUARD_CONFIG_DEFAULT();
+static wireguard_ctx_t wg_ctx = {0};
+static bool wg_initialized = false;
 
 // Original netif input and linkoutput function pointers
 static netif_input_fn original_netif_input = NULL;
@@ -549,24 +567,30 @@ esp_err_t save_acl_rules(void) {
     esp_err_t err;
     nvs_handle_t nvs;
 
+    /* Snapshot all ACL lists under the lock, then write to NVS outside
+     * the lock to avoid blocking packet processing during flash I/O. */
+    acl_entry_t snapshot[MAX_ACL_LISTS][MAX_ACL_ENTRIES];
+    acl_lock();
+    for (int i = 0; i < MAX_ACL_LISTS; i++) {
+        acl_entry_t* rules = acl_get_rules(i);
+        if (rules != NULL) {
+            memcpy(snapshot[i], rules, sizeof(acl_entry_t) * MAX_ACL_ENTRIES);
+        }
+    }
+    acl_unlock();
+
     err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
     if (err != ESP_OK) {
         return err;
     }
 
-    /* Save each ACL list */
     const char* acl_keys[MAX_ACL_LISTS] = {"acl_0", "acl_1", "acl_2", "acl_3"};
-    acl_lock();
     for (int i = 0; i < MAX_ACL_LISTS; i++) {
-        acl_entry_t* rules = acl_get_rules(i);
-        if (rules != NULL) {
-            err = nvs_set_blob(nvs, acl_keys[i], rules, sizeof(acl_entry_t) * MAX_ACL_ENTRIES);
-            if (err != ESP_OK) {
-                ESP_LOGE(TAG, "Failed to save ACL list %d: %s", i, esp_err_to_name(err));
-            }
+        err = nvs_set_blob(nvs, acl_keys[i], snapshot[i], sizeof(acl_entry_t) * MAX_ACL_ENTRIES);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to save ACL list %d: %s", i, esp_err_to_name(err));
         }
     }
-    acl_unlock();
 
     err = nvs_commit(nvs);
     if (err == ESP_OK) {
@@ -1257,6 +1281,85 @@ void * led_status_thread(void * p)
     }
 }
 
+/* WireGuard VPN connect/disconnect */
+esp_err_t vpn_connect(void)
+{
+    if (!vpn_enabled) {
+        ESP_LOGI(TAG, "VPN not enabled");
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (vpn_private_key == NULL || strlen(vpn_private_key) == 0 ||
+        vpn_public_key == NULL || strlen(vpn_public_key) == 0 ||
+        vpn_endpoint == NULL || strlen(vpn_endpoint) == 0 ||
+        vpn_address == NULL || strlen(vpn_address) == 0) {
+        ESP_LOGE(TAG, "VPN missing required config (privkey, pubkey, endpoint, address)");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    wg_config.private_key = vpn_private_key;
+    wg_config.public_key = vpn_public_key;
+    wg_config.preshared_key = (vpn_preshared_key && strlen(vpn_preshared_key) > 0) ? vpn_preshared_key : NULL;
+    wg_config.allowed_ip = vpn_address;
+    wg_config.allowed_ip_mask = (vpn_netmask && strlen(vpn_netmask) > 0) ? vpn_netmask : "255.255.255.0";
+    wg_config.endpoint = vpn_endpoint;
+    wg_config.port = vpn_port;
+    wg_config.persistent_keepalive = vpn_keepalive;
+
+    esp_err_t err;
+    if (!wg_initialized) {
+        err = esp_wireguard_init(&wg_config, &wg_ctx);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "WireGuard init failed: %s", esp_err_to_name(err));
+            return err;
+        }
+        wg_initialized = true;
+    }
+
+    err = esp_wireguard_connect(&wg_ctx);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "WireGuard connect failed: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    err = esp_wireguard_set_default(&wg_ctx);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "WireGuard set_default failed: %s", esp_err_to_name(err));
+    }
+
+    ap_mss_clamp = 1380;
+    ap_pmtu = 1440;
+    vpn_connected = true;
+    ESP_LOGI(TAG, "WireGuard VPN connected, MSS=1380 PMTU=1440");
+    return ESP_OK;
+}
+
+void vpn_disconnect(void)
+{
+    if (wg_initialized) {
+        esp_wireguard_disconnect(&wg_ctx);
+        wg_initialized = false;
+    }
+    ap_mss_clamp = 0;
+    ap_pmtu = 0;
+    vpn_connected = false;
+    ESP_LOGI(TAG, "WireGuard VPN disconnected, MSS/PMTU disabled");
+}
+
+bool vpn_is_connected(void)
+{
+    if (!wg_initialized || !vpn_connected) {
+        return false;
+    }
+    return esp_wireguardif_peer_is_up(&wg_ctx) == ESP_OK;
+}
+
+static void vpn_connect_task(void *pvParameters)
+{
+    vTaskDelay(pdMS_TO_TICKS(2000));  // Wait for network to stabilize
+    vpn_connect();
+    vTaskDelete(NULL);
+}
+
 static void wifi_event_handler(void* arg, esp_event_base_t event_base,
                                 int32_t event_id, void* event_data)
 {
@@ -1269,6 +1372,9 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
     else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED)
     {
         ESP_LOGI(TAG,"disconnected - retry to connect to the AP");
+        if (vpn_connected) {
+            vpn_disconnect();
+        }
         ap_connect = false;
         esp_wifi_connect();
         ESP_LOGI(TAG, "retry to connect to the AP");
@@ -1292,7 +1398,12 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
         
         // Initialize byte counter after getting IP (interface is ready)
         init_byte_counter();
-        
+
+        // Start VPN connection if enabled
+        if (vpn_enabled) {
+            xTaskCreate(vpn_connect_task, "vpn_connect", 4096, NULL, 5, NULL);
+        }
+
         xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);
     }
     else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_AP_START)
@@ -1637,6 +1748,38 @@ void app_main(void)
     int time_check_setting = 0;
     if (get_config_param_int("no_time_chk", &time_check_setting) == ESP_OK) {
         disable_time_check = (int32_t)time_check_setting;
+    }
+
+    // Load WireGuard VPN settings from NVS
+    int vpn_setting = 0;
+    if (get_config_param_int("vpn_enabled", &vpn_setting) == ESP_OK) {
+        vpn_enabled = (int32_t)vpn_setting;
+    }
+    get_config_param_str("vpn_privkey", &vpn_private_key);
+    if (vpn_private_key == NULL) vpn_private_key = param_set_default("");
+    get_config_param_str("vpn_pubkey", &vpn_public_key);
+    if (vpn_public_key == NULL) vpn_public_key = param_set_default("");
+    get_config_param_str("vpn_psk", &vpn_preshared_key);
+    if (vpn_preshared_key == NULL) vpn_preshared_key = param_set_default("");
+    get_config_param_str("vpn_endpoint", &vpn_endpoint);
+    if (vpn_endpoint == NULL) vpn_endpoint = param_set_default("");
+    int vpn_port_setting = 51820;
+    if (get_config_param_int("vpn_port", &vpn_port_setting) == ESP_OK) {
+        vpn_port = (int32_t)vpn_port_setting;
+    }
+    get_config_param_str("vpn_ip", &vpn_address);
+    if (vpn_address == NULL) vpn_address = param_set_default("");
+    get_config_param_str("vpn_mask", &vpn_netmask);
+    if (vpn_netmask == NULL) vpn_netmask = param_set_default("255.255.255.0");
+    int vpn_ka_setting = 0;
+    if (get_config_param_int("vpn_ka", &vpn_ka_setting) == ESP_OK) {
+        vpn_keepalive = (int32_t)vpn_ka_setting;
+    }
+    // Pre-set MSS/PMTU when VPN is enabled (before WiFi connects)
+    if (vpn_enabled) {
+        ap_mss_clamp = 1380;
+        ap_pmtu = 1440;
+        ESP_LOGI(TAG, "VPN enabled, MSS=1380 PMTU=1440 pre-set");
     }
 
     // Setup WIFI
