@@ -54,6 +54,7 @@
 #include "remote_console.h"
 #include "oled_display.h"
 #include "esp_wireguard.h"
+#include "esp_sntp.h"
 #include "lwip/prot/ip4.h"
 #include "lwip/inet_chksum.h"
 
@@ -890,6 +891,22 @@ void format_uptime(uint32_t seconds, char *buf, size_t buf_len) {
     }
 }
 
+void format_boot_time(char *buf, size_t buf_len) {
+    time_t now;
+    time(&now);
+    if (now < 100000) {
+        // Time not yet synchronized
+        snprintf(buf, buf_len, "unknown");
+        return;
+    }
+    time_t boot_time = now - (time_t)get_uptime_seconds();
+    struct tm timeinfo;
+    localtime_r(&boot_time, &timeinfo);
+    snprintf(buf, buf_len, "%04d-%02d-%02d %02d:%02d:%02d",
+             timeinfo.tm_year + 1900, timeinfo.tm_mon + 1, timeinfo.tm_mday,
+             timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+}
+
 // Clamp the TCP MSS option in a SYN packet to max_mss.
 // Operates on raw Ethernet frames (14-byte header + IPv4 + TCP).
 // Updates the TCP checksum incrementally (RFC 1624).
@@ -1353,9 +1370,38 @@ bool vpn_is_connected(void)
     return esp_wireguardif_peer_is_up(&wg_ctx) == ESP_OK;
 }
 
+static void init_sntp(void)
+{
+    ESP_LOGI(TAG, "Initializing SNTP");
+    esp_sntp_setoperatingmode(ESP_SNTP_OPMODE_POLL);
+    esp_sntp_setservername(0, "pool.ntp.org");
+    esp_sntp_setservername(1, "time.nist.gov");
+    esp_sntp_setservername(2, "time.google.com");
+    esp_sntp_init();
+}
+
 static void vpn_connect_task(void *pvParameters)
 {
-    vTaskDelay(pdMS_TO_TICKS(2000));  // Wait for network to stabilize
+    // Wait for SNTP time sync before connecting VPN
+    // WireGuard uses TAI64N timestamps - needs valid wall clock after reboot
+    int retry = 0;
+    const int max_retry = 30;  // 15 seconds max
+    while (sntp_get_sync_status() == SNTP_SYNC_STATUS_RESET && retry < max_retry) {
+        ESP_LOGI(TAG, "Waiting for SNTP time sync... (%d/%d)", retry + 1, max_retry);
+        vTaskDelay(pdMS_TO_TICKS(500));
+        retry++;
+    }
+    if (sntp_get_sync_status() != SNTP_SYNC_STATUS_RESET) {
+        time_t now;
+        struct tm timeinfo;
+        time(&now);
+        localtime_r(&now, &timeinfo);
+        ESP_LOGI(TAG, "Time synchronized: %04d-%02d-%02d %02d:%02d:%02d",
+                 timeinfo.tm_year + 1900, timeinfo.tm_mon + 1, timeinfo.tm_mday,
+                 timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+    } else {
+        ESP_LOGW(TAG, "SNTP sync timeout, proceeding with VPN anyway");
+    }
     vpn_connect();
     vTaskDelete(NULL);
 }
@@ -1398,6 +1444,11 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
         
         // Initialize byte counter after getting IP (interface is ready)
         init_byte_counter();
+
+        // Start SNTP time synchronization
+        if (!esp_sntp_enabled()) {
+            init_sntp();
+        }
 
         // Start VPN connection if enabled
         if (vpn_enabled) {

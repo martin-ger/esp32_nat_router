@@ -1044,7 +1044,9 @@ static int show(int argc, char **argv)
         // Uptime
         char uptime_str[32];
         format_uptime(get_uptime_seconds(), uptime_str, sizeof(uptime_str));
-        printf("Uptime: %s\n", uptime_str);
+        char boot_time_str[32];
+        format_boot_time(boot_time_str, sizeof(boot_time_str));
+        printf("Uptime: %s (since %s)\n", uptime_str, boot_time_str);
 
         // Connection status
         if (ap_connect) {

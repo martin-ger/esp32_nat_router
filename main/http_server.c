@@ -223,6 +223,12 @@ static char *nvs_export_to_json_robust(void)
         nvs_entry_info_t info;
         nvs_entry_info(it, &info);
 
+        // Skip WireGuard secrets for security
+        if (strcmp(info.key, "vpn_privkey") == 0 || strcmp(info.key, "vpn_psk") == 0) {
+            err = nvs_entry_next(&it);
+            continue;
+        }
+
         cJSON *item = cJSON_CreateObject();
         cJSON_AddStringToObject(item, "key", info.key);
         cJSON_AddNumberToObject(item, "type", info.type);
@@ -671,7 +677,9 @@ static esp_err_t index_get_handler(httpd_req_t *req)
     /* Stream Uptime row */
     char uptime_str[32];
     format_uptime(get_uptime_seconds(), uptime_str, sizeof(uptime_str));
-    snprintf(row, sizeof(row), "<tr><td>Uptime:</td><td>%s</td></tr>", uptime_str);
+    char boot_time_str[32];
+    format_boot_time(boot_time_str, sizeof(boot_time_str));
+    snprintf(row, sizeof(row), "<tr><td>Uptime:</td><td>%s (since %s)</td></tr>", uptime_str, boot_time_str);
     httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
 
     /* Close status table */

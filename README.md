@@ -661,6 +661,114 @@ show vpn
 
 All settings are persisted in NVS and applied after restart.
 
+### Setting Up a WireGuard Server on Linux
+
+To use the ESP32 NAT Router as a VPN client, you need a WireGuard server (peer) to connect to. Here's how to set one up on a Linux machine.
+
+#### 1. Install WireGuard
+
+```bash
+# Debian/Ubuntu
+sudo apt install wireguard
+
+# Fedora
+sudo dnf install wireguard-tools
+
+# Arch
+sudo pacman -S wireguard-tools
+```
+
+#### 2. Generate Keys
+
+```bash
+# Server keys
+wg genkey | tee server_private.key | wg pubkey > server_public.key
+
+# ESP32 client keys
+wg genkey | tee esp32_private.key | wg pubkey > esp32_public.key
+
+# Optional: preshared key for extra security
+wg genpsk > preshared.key
+```
+
+#### 3. Configure the Server
+
+Create `/etc/wireguard/wg0.conf`:
+
+```ini
+[Interface]
+PrivateKey = <contents of server_private.key>
+Address = 10.0.0.1/24
+ListenPort = 51820
+
+# Enable IP forwarding and NAT for client traffic
+PostUp = iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE; sysctl -w net.ipv4.ip_forward=1
+PostDown = iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE
+
+[Peer]
+# ESP32 NAT Router
+PublicKey = <contents of esp32_public.key>
+# PresharedKey = <contents of preshared.key>    # optional
+AllowedIPs = 10.0.0.2/32, 192.168.4.0/24
+```
+
+Replace `eth0` with your server's internet-facing interface (check with `ip route show default`).
+
+The `AllowedIPs` line includes:
+- `10.0.0.2/32` - the ESP32's tunnel address
+- `192.168.4.0/24` - the ESP32's AP subnet, so the server can route traffic back to AP clients
+
+#### 4. Start the Server
+
+```bash
+# Start and enable on boot
+sudo systemctl enable --now wg-quick@wg0
+
+# Verify
+sudo wg show
+```
+
+#### 5. Open the Firewall
+
+```bash
+sudo ufw allow 51820/udp
+```
+
+#### 6. Configure the ESP32
+
+Use the server's public key and the ESP32's private key to configure the router:
+
+**Web interface** (`/vpn` page):
+- Private Key: contents of `esp32_private.key`
+- Public Key: contents of `server_public.key`
+- Endpoint: your server's public IP or hostname
+- Port: 51820
+- Tunnel IP: 10.0.0.2
+- Netmask: 255.255.255.0
+- Keepalive: 25 (recommended when ESP32 is behind NAT)
+- Enable: checked
+
+**CLI:**
+```
+set_vpn <esp32_private_key> <server_public_key> <server_ip> 10.0.0.2 -p 51820 -a 25 -e 1
+```
+
+#### 7. Verify the Connection
+
+On the server:
+```bash
+sudo wg show
+```
+
+You should see a handshake timestamp and data transfer for the ESP32 peer. On the ESP32, `show vpn` or the `/vpn` web page should show "Connected".
+
+#### Troubleshooting
+
+- **No handshake**: Check that UDP port 51820 is reachable on the server. Verify keys are correct (public/private not swapped).
+- **Handshake but no traffic**: Ensure IP forwarding is enabled (`sysctl net.ipv4.ip_forward`) and the MASQUERADE rule is active (`iptables -t nat -L`).
+- **DNS not working**: The ESP32 routes all client traffic through the tunnel. Make sure the server can forward DNS queries, or set a public DNS on the ESP32's AP (`set_ap_dns 1.1.1.1`).
+- **MTU issues**: The ESP32 automatically applies MSS clamping (1380) and Path MTU (1440). If you still see issues, try reducing the server's tunnel MTU: add `MTU = 1420` to the server's `[Interface]` section.
+
 ## MCP Bridge (AI-Ready) (BETA)
 
 The ESP32 NAT Router includes an MCP (Model Context Protocol) server (`esp_nat_bridge.py`) that allows AI assistants like Claude to configure and monitor the router programmatically. The bridge connects to the router's remote console via telnet and exposes tools covering all router functionality, including live network capture with tcpdump analysis.

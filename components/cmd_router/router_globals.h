@@ -15,7 +15,7 @@ extern "C" {
 
 #define PARAM_NAMESPACE "esp32_nat"
 
-#define ROUTER_VERSION "2.1.5"
+#define ROUTER_VERSION "2.2.0"
 
 #define PROTO_TCP 6
 #define PROTO_UDP 17
@@ -202,6 +202,7 @@ void resync_connect_count(void);
 // Uptime functions
 uint32_t get_uptime_seconds(void);
 void format_uptime(uint32_t seconds, char *buf, size_t buf_len);
+void format_boot_time(char *buf, size_t buf_len);
 
 // AP netif hook functions (for future use)
 void init_ap_netif_hooks(void);

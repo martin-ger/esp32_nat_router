@@ -6,6 +6,7 @@
 */
 
 #include <string.h>
+#include <sys/time.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <unistd.h>
@@ -270,9 +271,10 @@ void pcap_capture_packet(struct pbuf *p)
 
     // Create packet header
     pcap_packet_header_t pkt_hdr;
-    int64_t now_us = esp_timer_get_time();
-    pkt_hdr.ts_sec = (uint32_t)(now_us / 1000000);
-    pkt_hdr.ts_usec = (uint32_t)(now_us % 1000000);
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    pkt_hdr.ts_sec = (uint32_t)tv.tv_sec;
+    pkt_hdr.ts_usec = (uint32_t)tv.tv_usec;
     pkt_hdr.orig_len = p->tot_len;
     pkt_hdr.incl_len = (p->tot_len > pcap_snaplen) ? pcap_snaplen : p->tot_len;
 
