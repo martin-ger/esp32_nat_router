@@ -2146,8 +2146,10 @@ static int remote_console_cmd(int argc, char **argv)
         printf("Enabled:        %s\n", config.enabled ? "yes" : "no");
         printf("Port:           %d\n", config.port);
 
-        const char *bind_str[] = {"both", "AP only", "STA only"};
-        printf("Interface:      %s\n", bind_str[config.bind]);
+        printf("Interface:      %s%s%s\n",
+               (config.bind & RC_BIND_AP) ? "AP " : "",
+               (config.bind & RC_BIND_STA) ? "STA " : "",
+               (config.bind & RC_BIND_VPN) ? "VPN " : "");
         printf("Idle timeout:   %lu sec\n", (unsigned long)config.idle_timeout_sec);
 
         const char *state_str[] = {"disabled", "listening", "auth wait", "active"};
@@ -2164,7 +2166,7 @@ static int remote_console_cmd(int argc, char **argv)
 
         printf("\nWARNING: Currently uses plain TCP (not encrypted).\n");
         printf("Connect: nc %s %d\n",
-               config.bind == RC_BIND_STA_ONLY ? "<STA_IP>" : "192.168.4.1",
+               (config.bind & RC_BIND_AP) ? "192.168.4.1" : "<interface_IP>",
                config.port);
 
     } else if (strcmp(action, "enable") == 0) {
@@ -2194,18 +2196,27 @@ static int remote_console_cmd(int argc, char **argv)
 
     } else if (strcmp(action, "bind") == 0) {
         if (argc < 3) {
-            printf("Usage: remote_console bind <both|ap|sta>\n");
+            printf("Usage: remote_console bind <ap,sta,vpn>\n");
+            printf("  Comma-separated list, e.g.: ap,sta or ap,vpn\n");
             return 1;
         }
-        remote_console_bind_t bind;
-        if (strcmp(argv[2], "both") == 0) {
-            bind = RC_BIND_BOTH;
-        } else if (strcmp(argv[2], "ap") == 0) {
-            bind = RC_BIND_AP_ONLY;
-        } else if (strcmp(argv[2], "sta") == 0) {
-            bind = RC_BIND_STA_ONLY;
-        } else {
-            printf("Invalid bind option. Use: both, ap, or sta\n");
+        uint8_t bind = 0;
+        char arg_copy[64];
+        strncpy(arg_copy, argv[2], sizeof(arg_copy) - 1);
+        arg_copy[sizeof(arg_copy) - 1] = '\0';
+        char *token = strtok(arg_copy, ",");
+        while (token) {
+            if (strcmp(token, "ap") == 0) bind |= RC_BIND_AP;
+            else if (strcmp(token, "sta") == 0) bind |= RC_BIND_STA;
+            else if (strcmp(token, "vpn") == 0) bind |= RC_BIND_VPN;
+            else {
+                printf("Unknown interface: %s. Use: ap, sta, vpn\n", token);
+                return 1;
+            }
+            token = strtok(NULL, ",");
+        }
+        if (bind == 0) {
+            printf("Must specify at least one interface\n");
             return 1;
         }
         remote_console_set_bind(bind);
@@ -2245,7 +2256,7 @@ static void register_remote_console_cmd(void)
                 "  remote_console enable               - Enable remote console\n"
                 "  remote_console disable              - Disable remote console\n"
                 "  remote_console port <port>          - Set TCP port (default: 2323)\n"
-                "  remote_console bind <both|ap|sta>   - Set interface binding\n"
+                "  remote_console bind <ap,sta,vpn>    - Set interface binding\n"
                 "  remote_console timeout <seconds>    - Set idle timeout (0=none)\n"
                 "  remote_console kick                 - Disconnect current session",
         .hint = " <action> [<args>]",

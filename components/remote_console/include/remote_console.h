@@ -22,12 +22,10 @@ extern "C" {
 /** Default idle timeout in seconds */
 #define REMOTE_CONSOLE_DEFAULT_TIMEOUT  300
 
-/** Interface binding options */
-typedef enum {
-    RC_BIND_BOTH = 0,   /**< Listen on both AP and STA interfaces */
-    RC_BIND_AP_ONLY,    /**< Listen only on AP interface */
-    RC_BIND_STA_ONLY    /**< Listen only on STA interface */
-} remote_console_bind_t;
+/** Interface binding bitmask */
+#define RC_BIND_AP    0x01   /**< Listen on AP interface */
+#define RC_BIND_STA   0x02   /**< Listen on STA interface */
+#define RC_BIND_VPN   0x04   /**< Listen on VPN tunnel interface */
 
 /** Session state */
 typedef enum {
@@ -41,7 +39,7 @@ typedef enum {
 typedef struct {
     bool enabled;                   /**< Service enabled */
     uint16_t port;                  /**< TCP port */
-    remote_console_bind_t bind;     /**< Interface binding */
+    uint8_t bind;                   /**< Interface binding bitmask (RC_BIND_*) */
     uint32_t idle_timeout_sec;      /**< Idle timeout in seconds */
 } remote_console_config_t;
 
@@ -99,7 +97,7 @@ esp_err_t remote_console_set_port(uint16_t port);
  * @return ESP_OK on success
  * @note Requires restart to take effect if service is running
  */
-esp_err_t remote_console_set_bind(remote_console_bind_t bind);
+esp_err_t remote_console_set_bind(uint8_t bind);
 
 /**
  * @brief Set idle timeout

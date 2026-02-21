@@ -22,6 +22,7 @@
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "lwip/sockets.h"
+#include "lwip/ip4_addr.h"
 
 #include "remote_console.h"
 #include "router_globals.h"
@@ -69,7 +70,7 @@ static const char *RC_GOODBYE = "\r\nGoodbye.\r\n";
 static remote_console_config_t rc_config = {
     .enabled = false,
     .port = REMOTE_CONSOLE_DEFAULT_PORT,
-    .bind = RC_BIND_AP_ONLY,
+    .bind = RC_BIND_AP,
     .idle_timeout_sec = REMOTE_CONSOLE_DEFAULT_TIMEOUT
 };
 
@@ -361,16 +362,19 @@ esp_err_t remote_console_set_port(uint16_t port) {
     return ESP_OK;
 }
 
-esp_err_t remote_console_set_bind(remote_console_bind_t bind) {
-    if (bind > RC_BIND_STA_ONLY) {
-        return ESP_ERR_INVALID_ARG;
+esp_err_t remote_console_set_bind(uint8_t bind) {
+    if (bind == 0) {
+        bind = RC_BIND_AP;  /* Must have at least one */
     }
 
-    rc_config.bind = bind;
+    rc_config.bind = bind & (RC_BIND_AP | RC_BIND_STA | RC_BIND_VPN);
     save_config();
 
-    const char *bind_str[] = {"both", "AP only", "STA only"};
-    ESP_LOGI(TAG, "Bind set to %s (restart required)", bind_str[bind]);
+    char bind_str[32] = "";
+    if (rc_config.bind & RC_BIND_AP) strcat(bind_str, "AP ");
+    if (rc_config.bind & RC_BIND_STA) strcat(bind_str, "STA ");
+    if (rc_config.bind & RC_BIND_VPN) strcat(bind_str, "VPN ");
+    ESP_LOGI(TAG, "Bind set to %s(restart required)", bind_str);
     return ESP_OK;
 }
 
@@ -453,7 +457,14 @@ static esp_err_t load_config(void) {
         rc_config.port = u16_val;
     }
     if (nvs_get_u8(nvs, NVS_KEY_BIND, &u8_val) == ESP_OK) {
-        rc_config.bind = (remote_console_bind_t)u8_val;
+        /* Migrate old enum values (0=both, 1=AP, 2=STA) to bitmask */
+        if (u8_val <= 2) {
+            const uint8_t migrate[] = {RC_BIND_AP | RC_BIND_STA, RC_BIND_AP, RC_BIND_STA};
+            rc_config.bind = migrate[u8_val];
+        } else {
+            rc_config.bind = u8_val & (RC_BIND_AP | RC_BIND_STA | RC_BIND_VPN);
+        }
+        if (rc_config.bind == 0) rc_config.bind = RC_BIND_AP;
     }
     if (nvs_get_u32(nvs, NVS_KEY_TIMEOUT, &u32_val) == ESP_OK) {
         rc_config.idle_timeout_sec = u32_val;
@@ -711,7 +722,7 @@ static void remote_console_task(void *arg) {
         memset(&server_addr, 0, sizeof(server_addr));
         server_addr.sin_family = AF_INET;
         server_addr.sin_port = htons(rc_config.port);
-        server_addr.sin_addr.s_addr = htonl(INADDR_ANY);  /* TODO: implement bind filtering */
+        server_addr.sin_addr.s_addr = htonl(INADDR_ANY);  /* Filtered per-connection by rc_config.bind */
 
         if (bind(rc_state.server_socket, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
             ESP_LOGE(TAG, "Failed to bind to port %d: %d", rc_config.port, errno);
@@ -752,8 +763,33 @@ static void remote_console_task(void *arg) {
 
             /* Get client IP */
             inet_ntop(AF_INET, &client_addr.sin_addr, rc_state.client_ip, sizeof(rc_state.client_ip));
-            rc_state.total_connections++;
 
+            /* Check interface binding - reject connections on disallowed interfaces */
+            {
+                struct sockaddr_in local_addr;
+                socklen_t addr_len = sizeof(local_addr);
+                getsockname(rc_state.client_socket, (struct sockaddr *)&local_addr, &addr_len);
+                uint32_t local_ip = local_addr.sin_addr.s_addr;
+
+                bool allowed = false;
+                if ((rc_config.bind & RC_BIND_AP) && local_ip == my_ap_ip) allowed = true;
+                if ((rc_config.bind & RC_BIND_STA) && local_ip == my_ip) allowed = true;
+                if ((rc_config.bind & RC_BIND_VPN) && vpn_connected && vpn_address && vpn_address[0]) {
+                    ip4_addr_t vpn_addr;
+                    if (ip4addr_aton(vpn_address, &vpn_addr) && local_ip == vpn_addr.addr) {
+                        allowed = true;
+                    }
+                }
+
+                if (!allowed) {
+                    ESP_LOGW(TAG, "Connection from %s rejected (interface not allowed)", rc_state.client_ip);
+                    close(rc_state.client_socket);
+                    rc_state.client_socket = -1;
+                    continue;
+                }
+            }
+
+            rc_state.total_connections++;
             ESP_LOGI(TAG, "Connection from %s", rc_state.client_ip);
 
             /* Try to acquire session mutex */

@@ -600,24 +600,29 @@ static esp_err_t index_get_handler(httpd_req_t *req)
     httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
     free(safe_ap_ssid);
 
-    /* Stream connection status row (with RSSI if connected) */
+    /* Stream AP IP row */
+    esp_ip4_addr_t ap_addr;
+    ap_addr.addr = my_ap_ip;
+    snprintf(row, sizeof(row), "<tr><td>AP IP:</td><td>" IPSTR "</td></tr>", IP2STR(&ap_addr));
+    httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
+
+    /* Stream AP Clients row */
+    resync_connect_count();
+    snprintf(row, sizeof(row), "<tr><td>AP Clients:</td><td>%d</td></tr>", connect_count);
+    httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
+
+    /* Stream Uplink row (with RSSI if connected) */
     if (ap_connect) {
         wifi_ap_record_t ap_info;
         if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
-            snprintf(row, sizeof(row), "<tr><td>Connection:</td><td><strong>Connected (%d dBm)</strong></td></tr>", ap_info.rssi);
+            snprintf(row, sizeof(row), "<tr><td>Uplink:</td><td><strong>Connected (%d dBm)</strong></td></tr>", ap_info.rssi);
             httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
         } else {
-            httpd_resp_send_chunk(req, "<tr><td>Connection:</td><td><strong>Connected</strong></td></tr>", HTTPD_RESP_USE_STRLEN);
+            httpd_resp_send_chunk(req, "<tr><td>Uplink:</td><td><strong>Connected</strong></td></tr>", HTTPD_RESP_USE_STRLEN);
         }
     } else {
-        httpd_resp_send_chunk(req, "<tr><td>Connection:</td><td><strong>Disconnected</strong></td></tr>", HTTPD_RESP_USE_STRLEN);
+        httpd_resp_send_chunk(req, "<tr><td>Uplink:</td><td><strong>Disconnected</strong></td></tr>", HTTPD_RESP_USE_STRLEN);
     }
-
-    /* Stream uptime row */
-    char uptime_str[32];
-    format_uptime(get_uptime_seconds(), uptime_str, sizeof(uptime_str));
-    snprintf(row, sizeof(row), "<tr><td>Uptime:</td><td>%s</td></tr>", uptime_str);
-    httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
 
     /* Stream STA IP row */
     if (ap_connect) {
@@ -626,53 +631,6 @@ static esp_err_t index_get_handler(httpd_req_t *req)
         snprintf(row, sizeof(row), "<tr><td>STA IP:</td><td>" IPSTR "</td></tr>", IP2STR(&addr));
     } else {
         snprintf(row, sizeof(row), "<tr><td>STA IP:</td><td>N/A</td></tr>");
-    }
-    httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
-
-    /* Stream AP IP row */
-    esp_ip4_addr_t ap_addr;
-    ap_addr.addr = my_ap_ip;
-    snprintf(row, sizeof(row), "<tr><td>AP IP:</td><td>" IPSTR "</td></tr>", IP2STR(&ap_addr));
-    httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
-
-    /* Stream DHCP Pool row */
-    uint32_t start_ip, end_ip;
-    get_dhcp_pool_range(my_ap_ip, &start_ip, &end_ip);
-    esp_ip4_addr_t start_addr, end_addr;
-    start_addr.addr = start_ip;
-    end_addr.addr = end_ip;
-    snprintf(row, sizeof(row), "<tr><td>DHCP Pool:</td><td>" IPSTR " - " IPSTR "</td></tr>",
-             IP2STR(&start_addr), IP2STR(&end_addr));
-    httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
-
-    /* Stream Clients row */
-    resync_connect_count();
-    snprintf(row, sizeof(row), "<tr><td>Clients:</td><td>%d</td></tr>", connect_count);
-    httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
-
-    /* Stream Bytes Sent row */
-    uint64_t bytes_sent = get_sta_bytes_sent();
-    float sent_mb = bytes_sent / (1024.0 * 1024.0);
-    snprintf(row, sizeof(row), "<tr><td>Bytes Sent:</td><td>%.1f MB</td></tr>", sent_mb);
-    httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
-
-    /* Stream Bytes Received row */
-    uint64_t bytes_received = get_sta_bytes_received();
-    float received_mb = bytes_received / (1024.0 * 1024.0);
-    snprintf(row, sizeof(row), "<tr><td>Bytes Received:</td><td>%.1f MB</td></tr>", received_mb);
-    httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
-
-    /* Stream PCAP status row */
-    pcap_capture_mode_t mode = pcap_get_mode();
-    if (mode != PCAP_MODE_OFF) {
-        const char* mode_name = (mode == PCAP_MODE_ACL_MONITOR) ? "ACL Monitor" : "Promiscuous";
-        snprintf(row, sizeof(row),
-                 "<tr><td>PCAP Capture:</td><td><span style='color: #4caf50;'>%s</span> <br>captured: %lu, dropped: %lu</td></tr>",
-                 mode_name,
-                 (unsigned long)pcap_get_captured_count(),
-                 (unsigned long)pcap_get_dropped_count());
-    } else {
-        snprintf(row, sizeof(row), "<tr><td>PCAP Capture:</td><td><span style='color: #888;'>Off</span></td></tr>");
     }
     httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
 
@@ -687,6 +645,34 @@ static esp_err_t index_get_handler(httpd_req_t *req)
         }
         httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
     }
+
+    /* Stream Bytes row (sent/received combined) */
+    uint64_t bytes_sent = get_sta_bytes_sent();
+    uint64_t bytes_received = get_sta_bytes_received();
+    float sent_mb = bytes_sent / (1024.0 * 1024.0);
+    float received_mb = bytes_received / (1024.0 * 1024.0);
+    snprintf(row, sizeof(row), "<tr><td>Bytes:</td><td>%.1f MB sent / %.1f MB received</td></tr>", sent_mb, received_mb);
+    httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
+
+    /* Stream Monitoring row */
+    pcap_capture_mode_t mode = pcap_get_mode();
+    if (mode != PCAP_MODE_OFF) {
+        const char* mode_name = (mode == PCAP_MODE_ACL_MONITOR) ? "ACL Monitor" : "Promiscuous";
+        snprintf(row, sizeof(row),
+                 "<tr><td>Monitoring:</td><td><span style='color: #4caf50;'>%s</span> (%lu captured, %lu dropped)</td></tr>",
+                 mode_name,
+                 (unsigned long)pcap_get_captured_count(),
+                 (unsigned long)pcap_get_dropped_count());
+    } else {
+        snprintf(row, sizeof(row), "<tr><td>Monitoring:</td><td><span style='color: #888;'>Off</span></td></tr>");
+    }
+    httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
+
+    /* Stream Uptime row */
+    char uptime_str[32];
+    format_uptime(get_uptime_seconds(), uptime_str, sizeof(uptime_str));
+    snprintf(row, sizeof(row), "<tr><td>Uptime:</td><td>%s</td></tr>", uptime_str);
+    httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
 
     /* Close status table */
     httpd_resp_send_chunk(req, INDEX_CHUNK_STATUS_CLOSE, HTTPD_RESP_USE_STRLEN);
@@ -1045,61 +1031,41 @@ static esp_err_t config_get_handler(httpd_req_t *req)
                 }
             }
 
-            /* Handle Remote Console enable/disable */
-            if (httpd_query_key_value(buf, "rc_enabled", param1, sizeof(param1)) == ESP_OK) {
-                preprocess_string(param1);
-                if (strcmp(param1, "1") == 0) {
-                    remote_console_enable();
-                    ESP_LOGI(TAG, "Remote console enabled via web");
-                } else {
-                    remote_console_disable();
-                    ESP_LOGI(TAG, "Remote console disabled via web");
+            /* Handle Remote Console settings (single form) */
+            if (httpd_query_key_value(buf, "rc_save", param1, sizeof(param1)) == ESP_OK) {
+                /* Enable/disable */
+                if (httpd_query_key_value(buf, "rc_enabled", param1, sizeof(param1)) == ESP_OK) {
+                    preprocess_string(param1);
+                    if (strcmp(param1, "1") == 0) {
+                        remote_console_enable();
+                    } else {
+                        remote_console_disable();
+                    }
                 }
-                free(buf);
-                httpd_resp_set_status(req, "303 See Other");
-                httpd_resp_set_hdr(req, "Location", "/config");
-                httpd_resp_send(req, NULL, 0);
-                return ESP_OK;
-            }
-
-            /* Handle Remote Console port */
-            if (httpd_query_key_value(buf, "rc_port", param1, sizeof(param1)) == ESP_OK) {
-                preprocess_string(param1);
-                int port = atoi(param1);
-                if (port >= 1 && port <= 65535) {
-                    remote_console_set_port((uint16_t)port);
-                    ESP_LOGI(TAG, "Remote console port set to %d via web", port);
+                /* Port */
+                if (httpd_query_key_value(buf, "rc_port", param1, sizeof(param1)) == ESP_OK) {
+                    preprocess_string(param1);
+                    int port = atoi(param1);
+                    if (port >= 1 && port <= 65535) {
+                        remote_console_set_port((uint16_t)port);
+                    }
                 }
-                free(buf);
-                httpd_resp_set_status(req, "303 See Other");
-                httpd_resp_set_hdr(req, "Location", "/config");
-                httpd_resp_send(req, NULL, 0);
-                return ESP_OK;
-            }
-
-            /* Handle Remote Console bind */
-            if (httpd_query_key_value(buf, "rc_bind", param1, sizeof(param1)) == ESP_OK) {
-                preprocess_string(param1);
-                int bind = atoi(param1);
-                if (bind >= 0 && bind <= 2) {
-                    remote_console_set_bind((remote_console_bind_t)bind);
-                    ESP_LOGI(TAG, "Remote console bind set to %d via web", bind);
+                /* Bind interfaces (checkboxes: absent = unchecked) */
+                uint8_t bind = 0;
+                if (httpd_query_key_value(buf, "rc_bind_ap", param1, sizeof(param1)) == ESP_OK) bind |= RC_BIND_AP;
+                if (httpd_query_key_value(buf, "rc_bind_sta", param1, sizeof(param1)) == ESP_OK) bind |= RC_BIND_STA;
+                if (httpd_query_key_value(buf, "rc_bind_vpn", param1, sizeof(param1)) == ESP_OK) bind |= RC_BIND_VPN;
+                if (bind == 0) bind = RC_BIND_AP;
+                remote_console_set_bind(bind);
+                /* Timeout */
+                if (httpd_query_key_value(buf, "rc_timeout", param1, sizeof(param1)) == ESP_OK) {
+                    preprocess_string(param1);
+                    int timeout = atoi(param1);
+                    if (timeout >= 0) {
+                        remote_console_set_timeout((uint32_t)timeout);
+                    }
                 }
-                free(buf);
-                httpd_resp_set_status(req, "303 See Other");
-                httpd_resp_set_hdr(req, "Location", "/config");
-                httpd_resp_send(req, NULL, 0);
-                return ESP_OK;
-            }
-
-            /* Handle Remote Console timeout */
-            if (httpd_query_key_value(buf, "rc_timeout", param1, sizeof(param1)) == ESP_OK) {
-                preprocess_string(param1);
-                int timeout = atoi(param1);
-                if (timeout >= 0) {
-                    remote_console_set_timeout((uint32_t)timeout);
-                    ESP_LOGI(TAG, "Remote console timeout set to %d via web", timeout);
-                }
+                ESP_LOGI(TAG, "Remote console settings saved via web");
                 free(buf);
                 httpd_resp_set_status(req, "303 See Other");
                 httpd_resp_set_hdr(req, "Location", "/config");
@@ -1118,34 +1084,26 @@ static esp_err_t config_get_handler(httpd_req_t *req)
                 return ESP_OK;
             }
 
-            /* Handle PCAP mode selection */
-            if (httpd_query_key_value(buf, "pcap_mode", param1, sizeof(param1)) == ESP_OK) {
-                preprocess_string(param1);
-                if (strcmp(param1, "off") == 0) {
-                    pcap_set_mode(PCAP_MODE_OFF);
-                    ESP_LOGI(TAG, "PCAP mode set to OFF via web");
-                } else if (strcmp(param1, "acl") == 0) {
-                    pcap_set_mode(PCAP_MODE_ACL_MONITOR);
-                    ESP_LOGI(TAG, "PCAP mode set to ACL_MONITOR via web");
-                } else if (strcmp(param1, "promisc") == 0) {
-                    pcap_set_mode(PCAP_MODE_PROMISCUOUS);
-                    ESP_LOGI(TAG, "PCAP mode set to PROMISCUOUS via web");
+            /* Handle PCAP settings (single form) */
+            if (httpd_query_key_value(buf, "pcap_save", param1, sizeof(param1)) == ESP_OK) {
+                if (httpd_query_key_value(buf, "pcap_mode", param1, sizeof(param1)) == ESP_OK) {
+                    preprocess_string(param1);
+                    if (strcmp(param1, "off") == 0) {
+                        pcap_set_mode(PCAP_MODE_OFF);
+                    } else if (strcmp(param1, "acl") == 0) {
+                        pcap_set_mode(PCAP_MODE_ACL_MONITOR);
+                    } else if (strcmp(param1, "promisc") == 0) {
+                        pcap_set_mode(PCAP_MODE_PROMISCUOUS);
+                    }
                 }
-                free(buf);
-                httpd_resp_set_status(req, "303 See Other");
-                httpd_resp_set_hdr(req, "Location", "/config");
-                httpd_resp_send(req, NULL, 0);
-                return ESP_OK;
-            }
-
-            /* Handle PCAP snaplen */
-            if (httpd_query_key_value(buf, "pcap_snaplen", param1, sizeof(param1)) == ESP_OK) {
-                preprocess_string(param1);
-                int snaplen = atoi(param1);
-                if (snaplen >= 64 && snaplen <= 1600) {
-                    pcap_set_snaplen((uint16_t)snaplen);
-                    ESP_LOGI(TAG, "PCAP snaplen set to %d via web", snaplen);
+                if (httpd_query_key_value(buf, "pcap_snaplen", param1, sizeof(param1)) == ESP_OK) {
+                    preprocess_string(param1);
+                    int snaplen = atoi(param1);
+                    if (snaplen >= 64 && snaplen <= 1600) {
+                        pcap_set_snaplen((uint16_t)snaplen);
+                    }
                 }
+                ESP_LOGI(TAG, "PCAP settings saved via web");
                 free(buf);
                 httpd_resp_set_status(req, "303 See Other");
                 httpd_resp_set_hdr(req, "Location", "/config");
@@ -1255,9 +1213,9 @@ static esp_err_t config_get_handler(httpd_req_t *req)
             break;
     }
 
-    const char* rc_bind_both_sel = (rc_config.bind == RC_BIND_BOTH) ? "selected" : "";
-    const char* rc_bind_ap_sel = (rc_config.bind == RC_BIND_AP_ONLY) ? "selected" : "";
-    const char* rc_bind_sta_sel = (rc_config.bind == RC_BIND_STA_ONLY) ? "selected" : "";
+    const char* rc_ap_chk = (rc_config.bind & RC_BIND_AP) ? "checked" : "";
+    const char* rc_sta_chk = (rc_config.bind & RC_BIND_STA) ? "checked" : "";
+    const char* rc_vpn_chk = (rc_config.bind & RC_BIND_VPN) ? "checked" : "";
 
     // PCAP state
     pcap_capture_mode_t pcap_mode = pcap_get_mode();
@@ -1315,7 +1273,7 @@ static esp_err_t config_get_handler(httpd_req_t *req)
         rc_enabled_checked, rc_disabled_checked,
         rc_status_color, rc_status_text, rc_kick_section,
         rc_config.port,
-        rc_bind_both_sel, rc_bind_ap_sel, rc_bind_sta_sel,
+        rc_ap_chk, rc_sta_chk, rc_vpn_chk,
         (unsigned long)rc_config.idle_timeout_sec);
     httpd_resp_send_chunk(req, section, HTTPD_RESP_USE_STRLEN);
 
@@ -1641,8 +1599,24 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
             HTTPD_RESP_USE_STRLEN);
     }
 
-    /* Chunk 7: DHCP reservations table header */
+    /* Chunk 7: DHCP reservations heading */
     httpd_resp_send_chunk(req, MAPPINGS_CHUNK_MID3, HTTPD_RESP_USE_STRLEN);
+
+    /* DHCP Pool info */
+    {
+        uint32_t start_ip, end_ip;
+        get_dhcp_pool_range(my_ap_ip, &start_ip, &end_ip);
+        esp_ip4_addr_t start_addr, end_addr;
+        start_addr.addr = start_ip;
+        end_addr.addr = end_ip;
+        snprintf(row, sizeof(row),
+                 "<small style='color:#888;'>Pool: " IPSTR " - " IPSTR "</small>",
+                 IP2STR(&start_addr), IP2STR(&end_addr));
+        httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
+    }
+
+    /* DHCP reservations table header */
+    httpd_resp_send_chunk(req, MAPPINGS_CHUNK_MID3B, HTTPD_RESP_USE_STRLEN);
 
     /* Chunk 8: Stream DHCP reservation rows */
     bool has_reservations = false;
@@ -2233,7 +2207,7 @@ static esp_err_t scan_get_handler(httpd_req_t *req)
                 char encoded_ssid[128];
                 url_encode((const char *)ap_list[i].ssid, encoded_ssid, sizeof(encoded_ssid));
                 snprintf(connect_cell, sizeof(connect_cell),
-                    "<td><a href='/config?ssid=%s' class='connect-button'>Connect</a></td>",
+                    "<td><a href='/setup?ssid=%s' class='connect-button'>Connect</a></td>",
                     encoded_ssid);
             }
 
@@ -2295,6 +2269,104 @@ static httpd_uri_t scanp = {
     .uri       = "/scan",
     .method    = HTTP_GET,
     .handler   = scan_get_handler,
+};
+
+/* Getting Started page GET handler */
+static esp_err_t setup_get_handler(httpd_req_t *req)
+{
+    /* Check authentication if password protection is enabled */
+    if (is_web_password_set() && !is_authenticated(req)) {
+        httpd_resp_set_status(req, "303 See Other");
+        httpd_resp_set_hdr(req, "Location", "/?auth_required=1");
+        httpd_resp_send(req, NULL, 0);
+        return ESP_OK;
+    }
+
+    char param1[64], param2[64];
+
+    /* Handle form submission */
+    size_t buf_len = httpd_req_get_url_query_len(req) + 1;
+    if (buf_len > 1) {
+        char *buf = malloc(buf_len);
+        if (buf != NULL && httpd_req_get_url_query_str(req, buf, buf_len) == ESP_OK) {
+
+            /* Handle AP settings */
+            if (httpd_query_key_value(buf, "ap_ssid", param1, sizeof(param1)) == ESP_OK) {
+                preprocess_string(param1);
+                if (httpd_query_key_value(buf, "ap_password", param2, sizeof(param2)) == ESP_OK) {
+                    preprocess_string(param2);
+                    if (strlen(param2) == 0) {
+                        strlcpy(param2, ap_passwd, sizeof(param2));
+                    }
+                    int argc = 3;
+                    char* argv[3];
+                    argv[0] = "set_ap";
+                    argv[1] = param1;
+                    argv[2] = param2;
+                    set_ap(argc, argv);
+                }
+            }
+
+            /* Handle STA settings */
+            if (httpd_query_key_value(buf, "ssid", param1, sizeof(param1)) == ESP_OK) {
+                preprocess_string(param1);
+                if (httpd_query_key_value(buf, "password", param2, sizeof(param2)) == ESP_OK) {
+                    preprocess_string(param2);
+                    if (strlen(param2) == 0) {
+                        strlcpy(param2, passwd, sizeof(param2));
+                    }
+                    int argc = 3;
+                    char* argv[3];
+                    argv[0] = "set_sta";
+                    argv[1] = param1;
+                    argv[2] = param2;
+                    set_sta(argc, argv);
+                    esp_timer_start_once(restart_timer, 500000);
+                }
+            }
+        }
+        free(buf);
+    }
+
+    /* Check for SSID pre-fill from scan page */
+    char prefill_ssid[64] = "";
+    buf_len = httpd_req_get_url_query_len(req) + 1;
+    if (buf_len > 1) {
+        char *buf = malloc(buf_len);
+        if (buf != NULL && httpd_req_get_url_query_str(req, buf, buf_len) == ESP_OK) {
+            if (httpd_query_key_value(buf, "ssid", prefill_ssid, sizeof(prefill_ssid)) == ESP_OK) {
+                preprocess_string(prefill_ssid);
+            }
+        }
+        if (buf) free(buf);
+    }
+
+    /* Render page */
+    httpd_resp_set_type(req, "text/html");
+
+    httpd_resp_send_chunk(req, SETUP_CHUNK_HEAD, HTTPD_RESP_USE_STRLEN);
+
+    char* safe_ap_ssid = html_escape(ap_ssid);
+    char* safe_ssid = html_escape(prefill_ssid[0] ? prefill_ssid : ssid);
+    if (safe_ap_ssid == NULL) safe_ap_ssid = strdup("");
+    if (safe_ssid == NULL) safe_ssid = strdup("");
+
+    char section[1024];
+    snprintf(section, sizeof(section), SETUP_CHUNK_FORM,
+        safe_ap_ssid, safe_ssid);
+    httpd_resp_send_chunk(req, section, HTTPD_RESP_USE_STRLEN);
+
+    free(safe_ap_ssid);
+    free(safe_ssid);
+
+    httpd_resp_send_chunk(req, NULL, 0);
+    return ESP_OK;
+}
+
+static httpd_uri_t setupp = {
+    .uri       = "/setup",
+    .method    = HTTP_GET,
+    .handler   = setup_get_handler,
 };
 
 /* VPN page GET handler */
@@ -2486,7 +2558,7 @@ httpd_handle_t start_webserver(void)
     httpd_handle_t server = NULL;
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.stack_size = 16384;  // Large stack needed for mappings page with 3x 2KB HTML buffers
-    config.max_uri_handlers = 11;
+    config.max_uri_handlers = 12;
     config.max_uri_len = 1024;
 
     esp_timer_create(&restart_timer_args, &restart_timer);
@@ -2502,6 +2574,7 @@ httpd_handle_t start_webserver(void)
         httpd_register_uri_handler(server, &firewallp);
         httpd_register_uri_handler(server, &scanp);
         httpd_register_uri_handler(server, &vpnp);
+        httpd_register_uri_handler(server, &setupp);
         httpd_register_uri_handler(server, &favicon_uri);
         httpd_register_uri_handler(server, &config_exportp);
         httpd_register_uri_handler(server, &config_importp);

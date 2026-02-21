@@ -6,6 +6,9 @@ sdkconfig.*
 ..mcp.json.swp
 .mcp.json
 __pycache__/*
+managed_components/
+dependencies.lock
+.gemini/
 sdkconfig.old
 !sdkconfig.defaults
 !sdkconfig.defaults.*

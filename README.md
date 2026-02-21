@@ -2,14 +2,16 @@
 
 This is a firmware to use the ESP32 as WiFi NAT router. It can be used as:
 - Simple range extender for an existing WiFi network
-- Setting up an additional WiFi network with different SSID/password and restricted access for guests or IOT devices
-- Convert a corporate (WPA2-Enterprise) network to a regular network, for simple devices
+- An additional WiFi network with different SSID/password and restricted access for guests or IOT devices
+- VPN-Router using WireGuard
+- Converter from a corporate (WPA2-Enterprise) network to a regular (WPA-PSK) network for simple devices
 - MCP-server to control your network using agentic AI
 - Debugging and monitoring of WiFi devices
 
 ## Key Features
 
 - **NAT Routing**: Full WiFi NAT router with IP forwarding (15+ Mbps throughput)
+- **WireGuard VPN**: Optional VPN tunnel for upstream traffic with automatic MSS clamping and Path MTU
 - **DHCP Reservations**: Assign fixed IPs to specific MAC addresses
 - **Port Forwarding**: Map external ports to internal devices
 - **Firewall**: Define ACL to restrict or monitor traffic
@@ -17,12 +19,9 @@ This is a firmware to use the ESP32 as WiFi NAT router. It can be used as:
 - **WPA2-Enterprise Support**: Connect to corporate networks (PEAP, TTLS, TLS) and convert them to WPA2-PSK
 - **Web Interface**: Web UI with password protection for easy configuration
 - **Serial Console**: Full CLI for advanced configuration
-- **Remote Console**: Network-accessible CLI via TCP (password protected)
-- **Connected Clients Display**: View all connected devices with MAC, IP, and device names
-- **Static IP Support**: Configure static IP for the STA (upstream) interface
+- **Remote Console**: Network-accessible CLI via TCP (password protected, per-interface binding)
 - **LED Status Indicator**: Visual feedback for connection and traffic status
 - **OLED Display**: Status display on 72x40 I2C SSD1306 OLEDs (as found on some ESP32-C3 mini boards)
-- **TTL Override**: Set a fixed TTL for upstream packets (useful for hiding NAT from ISPs)
 - **MCP Bridge (AI-Ready)**: BETA - Control the router from AI assistants (Claude, etc.) via the Model Context Protocol
 
 The maximum number of simultaniously connected WiFi clients is 8 (5 on the ESP32c3) due to RAM limitations.
@@ -35,32 +34,41 @@ After first boot the ESP32 NAT Router will offer a WiFi network with an open AP 
 ## Web Config Interface
 The web interface allows for the configuration of all parameters. Connect your PC or smartphone to the WiFi SSID "ESP32_NAT_Router" and point your browser to "http://192.168.4.1" (or later the configured AP IP address).
 
-The web interface consists of five pages:
+The web interface consists of seven pages:
 
 ### System Status Page (/)
 The main dashboard displays:
-- Current connection status and uptime
-- STA (upstream) and AP IP addresses and MAC addresses
-- Used IP pool for DHCP
-- Number of connected clients
-- Bytes sent and received
-- PCAP capture status (when enabled: captured/dropped packet counts)
+- SSID and AP IP address
+- Number of connected AP clients
+- Uplink connection status with signal strength
+- STA IP address
+- VPN status (when enabled)
+- Bytes sent/received
+- Monitoring (PCAP capture) status
+- Uptime
 
 <img src="https://raw.githubusercontent.com/martin-ger/esp32_nat_router/master/UI_Index.png">
 
+### Getting Started Page (/setup)
+A simplified setup page for first-time configuration:
+- **Access Point**: Set AP SSID and password
+- **Uplink (Internet)**: Set upstream WiFi SSID and password
+
+The WiFi Scan page "Connect" buttons link directly to this page with the SSID pre-filled. Click "Save & Reboot" to apply changes.
+
 ### WiFi Scan Page (/scan)
-Shows a WiFi network scan and allows for direct connection via the config page.
+Shows a WiFi network scan and allows for direct connection via the Getting Started page.
 
 <img src="https://raw.githubusercontent.com/martin-ger/esp32_nat_router/master/UI_Scan.png">
 
 ### Configuration Page (/config)
 Configure all router settings:
-- **Access Point Settings**: Configure the ESP32's access point name, password, IP address (default: 192.168.4.1), DNS server, and MAC address
+- **Access Point Settings**: Configure the ESP32's access point name, password, IP address, DNS server, and MAC address
 - **Station Settings (Uplink)**: Enter the SSID and password for the upstream WiFi network (leave password blank for open networks), with optional WPA2-Enterprise settings (EAP method, TTLS Phase 2, CA cert bundle, time check) and MAC address customization
 - **Static IP Settings**: Optionally configure a static IP for the STA (upstream) interface
-- **PCAP Packet Capture**: Enable/disable packet capture and configure snaplen (max bytes per packet)
+- **Remote Console**: Enable/disable, port, interface binding (AP/STA/VPN), and idle timeout
+- **PCAP Packet Capture**: Capture mode, snaplen (max bytes per packet), and connection status
 - **Device Management**: Config backup/restore, reboot, and danger zone (disable web interface)
-- Click "Apply", "Connect", or "Set Static IP" to apply changes (the ESP32 will reboot)
 
 <img src="https://raw.githubusercontent.com/martin-ger/esp32_nat_router/master/UI_Config.png">
 
@@ -92,6 +100,13 @@ Configure Access Control Lists (ACLs) for packet filtering:
 - **Statistics**: View hit counters for each rule and overall ACL statistics
 
 <img src="https://raw.githubusercontent.com/martin-ger/esp32_nat_router/master/UI_Firewall.png">
+
+### VPN Page (/vpn)
+Configure WireGuard VPN tunnel for upstream traffic:
+- **Status**: Connection state (Connected/Handshake Pending/Disconnected), tunnel IP, MSS/PMTU values
+- **Configuration**: Enable/disable, private key, public key, preshared key (optional), endpoint, port, tunnel IP, netmask, keepalive
+
+When VPN is enabled, all NATed traffic from AP clients is routed through the WireGuard tunnel. MSS clamping (1380) and Path MTU (1440) are automatically applied. The VPN auto-reconnects when the STA interface goes down and comes back up.
 
 ### Web Interface Security
 
@@ -585,7 +600,7 @@ remote_console status              # Show remote console status
 remote_console enable              # Enable remote console
 remote_console disable             # Disable remote console
 remote_console port <port>         # Set TCP port (default: 2323)
-remote_console bind <both|ap|sta>  # Set interface binding
+remote_console bind <ap,sta,vpn>  # Set interface binding (comma-separated)
 remote_console timeout <seconds>   # Set idle timeout (0 = no timeout)
 remote_console kick                # Disconnect current session
 ```
@@ -595,7 +610,7 @@ remote_console kick                # Disconnect current session
 | Setting | Default | Description |
 |---------|---------|-------------|
 | Port | 2323 | TCP port for connections |
-| Bind | AP only | Which interface(s) to listen on |
+| Bind | AP only | Which interface(s) to listen on (AP, STA, VPN) |
 | Timeout | 300 sec | Idle timeout before disconnect |
 | Enabled | No | Service must be explicitly enabled |
 
@@ -606,6 +621,45 @@ remote_console kick                # Disconnect current session
 - Press Ctrl+D to disconnect
 - The session shows `^C` when Ctrl+C is pressed
 - All command output appears on the remote console
+
+## WireGuard VPN
+
+The router supports an optional WireGuard VPN tunnel for upstream traffic. When enabled, all NATed traffic from AP clients is routed through the WireGuard tunnel while the physical STA WiFi link remains unchanged.
+
+### Features
+
+- **Automatic MSS/PMTU**: MSS clamping (1380) and Path MTU (1440) are automatically enabled when VPN is active
+- **Auto-reconnect**: VPN reconnects automatically when the STA interface goes down and comes back up
+- **Web Configuration**: Full configuration via the `/vpn` page
+- **CLI Configuration**: Use `set_vpn` command for console-based setup
+
+### Quick Start
+
+1. Configure via web interface (`/vpn` page) or CLI:
+```
+set_vpn <your_private_key> <peer_public_key> <endpoint_ip> <tunnel_ip> -e 1
+```
+
+2. Check status:
+```
+show vpn
+```
+
+### Configuration
+
+| Setting | CLI Flag | Default | Description |
+|---------|----------|---------|-------------|
+| Private Key | (positional) | - | Your WireGuard private key (base64) |
+| Public Key | (positional) | - | Peer's public key (base64) |
+| Endpoint | (positional) | - | Peer endpoint IP or hostname |
+| Tunnel IP | (positional) | - | Your tunnel IP (e.g. 10.0.0.2) |
+| Preshared Key | `-k` | empty | Optional preshared key |
+| Netmask | `-m` | 255.255.255.0 | Tunnel netmask |
+| Port | `-p` | 51820 | Peer UDP port |
+| Keepalive | `-a` | 0 | Persistent keepalive (seconds, 0=disabled) |
+| Enabled | `-e` | 0 | Enable VPN (0 or 1) |
+
+All settings are persisted in NVS and applied after restart.
 
 ## MCP Bridge (AI-Ready) (BETA)
 
@@ -728,9 +782,9 @@ log_level  [<level>] [-t <tag>]
 tasks 
   Get information about running tasks
 
-show  [status|config|mappings|acl]
-  Show router status, config, mappings or ACL rules
-  [status|config|mappings|acl]  Type of information
+show  [status|config|mappings|acl|vpn]
+  Show router status, config, mappings, ACL rules, or VPN status
+  [status|config|mappings|acl|vpn]  Type of information
 
 set_sta  <ssid> <passwd> [-u <ent_username>] [-a <ent_identity>] [-e <0-3>] [-p <0-3>] [-c <0|1>] [-t <0|1>]
   Set SSID and password of the STA interface
@@ -840,13 +894,25 @@ set_led_lowactive
 set_ttl
   Set TTL override for upstream STA packets (0 = disabled)
 
+set_vpn  <private_key> <public_key> <endpoint> <address> [-k <psk>] [-m <mask>] [-p <port>] [-a <keepalive>] [-e <0|1>]
+  Configure WireGuard VPN tunnel
+  <private_key>  WireGuard private key (base64)
+  <public_key>   Peer public key (base64)
+  <endpoint>     Peer endpoint host/IP
+  <address>      Tunnel IP address (e.g. 10.0.0.2)
+  -k, --psk      Preshared key (optional)
+  -m, --mask     Tunnel netmask (default: 255.255.255.0)
+  -p, --port     Peer UDP port (default: 51820)
+  -a, --keepalive Persistent keepalive seconds (0 = disabled)
+  -e, --enable   Enable VPN (0 or 1)
+
 remote_console   <action> [<args>]
   Manage remote console (network CLI access)
   remote_console status               - Show status and connection info
   remote_console enable               - Enable remote console
   remote_console disable              - Disable remote console
   remote_console port <port>          - Set TCP port (default: 2323)
-  remote_console bind <both|ap|sta>   - Set interface binding
+  remote_console bind <ap,sta,vpn>    - Set interface binding
   remote_console timeout <seconds>    - Set idle timeout (0=none)
   remote_console kick                 - Disconnect current session
 
@@ -1005,3 +1071,37 @@ All tests used `IPv4` and the `TCP` protocol.
 | `ESP32D0WDQ6` | `iperf3` | `0g` | `160MHz` | `15.2 MBits/s` | `1.4 W` |
 | `ESP32D0WDQ6` | `iperf3` | `0s` | `160MHz` | `14.1 MBits/s` | `1.5 W` |
 
+## Licence
+
+The WireGuard submodul has the following licence_
+```
+Copyright (c) 2021 Kenta Ida (fuga@fugafuga.org)
+
+The original license is below:
+Copyright (c) 2021 Daniel Hope (www.floorsense.nz)
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification,
+are permitted provided that the following conditions are met:
+* Redistributions of source code must retain the above copyright notice, this
+  list of conditions and the following disclaimer.
+* Redistributions in binary form must reproduce the above copyright notice, this
+  list of conditions and the following disclaimer in the documentation and/or
+  other materials provided with the distribution.
+* Neither the name of "Floorsense Ltd", "Agile Workspace Ltd" nor the names of 
+  its contributors may be used to endorse or promote products derived from this
+  software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR
+ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+Author: Daniel Hope <daniel.hope@smartalock.com>
+```
