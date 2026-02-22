@@ -2167,9 +2167,6 @@ static int remote_console_cmd(int argc, char **argv)
         printf("Auth failures:  %lu\n", (unsigned long)status.failed_auths);
 
         printf("\nWARNING: Currently uses plain TCP (not encrypted).\n");
-        printf("Connect: nc %s %d\n",
-               (config.bind & RC_BIND_AP) ? "192.168.4.1" : "<interface_IP>",
-               config.port);
 
     } else if (strcmp(action, "enable") == 0) {
         esp_err_t err = remote_console_enable();
@@ -2208,9 +2205,9 @@ static int remote_console_cmd(int argc, char **argv)
         arg_copy[sizeof(arg_copy) - 1] = '\0';
         char *token = strtok(arg_copy, ",");
         while (token) {
-            if (strcmp(token, "ap") == 0) bind |= RC_BIND_AP;
-            else if (strcmp(token, "sta") == 0) bind |= RC_BIND_STA;
-            else if (strcmp(token, "vpn") == 0) bind |= RC_BIND_VPN;
+            if ((strcmp(token, "ap") == 0)||(strcmp(token, "AP")) == 0) bind |= RC_BIND_AP;
+            else if ((strcmp(token, "sta") == 0)||(strcmp(token, "STA") == 0)) bind |= RC_BIND_STA;
+            else if ((strcmp(token, "vpn") == 0)||(strcmp(token, "VPN")== 0)) bind |= RC_BIND_VPN;
             else {
                 printf("Unknown interface: %s. Use: ap, sta, vpn\n", token);
                 return 1;
