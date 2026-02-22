@@ -56,13 +56,15 @@ A simplified setup page for first-time configuration:
 
 The WiFi Scan page "Connect" buttons link directly to this page with the SSID pre-filled. Click "Save & Reboot" to apply changes.
 
+<img src="https://raw.githubusercontent.com/martin-ger/esp32_nat_router/master/UI_Started.png">
+
 ### WiFi Scan Page (/scan)
 Shows a WiFi network scan and allows for direct connection via the Getting Started page.
 
 <img src="https://raw.githubusercontent.com/martin-ger/esp32_nat_router/master/UI_Scan.png">
 
 ### Configuration Page (/config)
-Configure all router settings:
+Configure all advanced router settings:
 - **Access Point Settings**: Configure the ESP32's access point name, password, IP address, DNS server, and MAC address
 - **Station Settings (Uplink)**: Enter the SSID and password for the upstream WiFi network (leave password blank for open networks), with optional WPA2-Enterprise settings (EAP method, TTLS Phase 2, CA cert bundle, time check) and MAC address customization
 - **Static IP Settings**: Optionally configure a static IP for the STA (upstream) interface
@@ -84,7 +86,7 @@ The Configuration page includes a **Config Backup / Restore** section under Devi
 This is useful for cloning settings across multiple devices or for backup before a factory reset.
 
 ### Mappings Page (/mappings)
-Manage network mappings:
+Manage network mappings, i.e. IP addresses via DHCP and ports via port forwarding:
 - **Connected Clients**: Shows all currently connected clients with MAC, IP, and optially name.
 - **DHCP Reservations**: Assign fixed IP addresses to specific MAC addresses (useful for servers/devices that need consistent IPs). Make sure you assign port numbers in the range of the DHCP pool.
 - **Port Forwarding**: Create port mappings to access devices behind the NAT router (e.g., `TCP 8080 -> 192.168.4.2:80`)
@@ -107,6 +109,8 @@ Configure WireGuard VPN tunnel for upstream traffic:
 - **Configuration**: Enable/disable, private key, public key, preshared key (optional), endpoint, port, tunnel IP, netmask, keepalive
 
 When VPN is enabled, all NATed traffic from AP clients is routed through the WireGuard tunnel. MSS clamping (1380) and Path MTU (1440) are automatically applied. The VPN auto-reconnects when the STA interface goes down and comes back up.
+
+<img src="https://raw.githubusercontent.com/martin-ger/esp32_nat_router/master/UI_VPN.png">
 
 ### Web Interface Security
 
@@ -188,7 +192,7 @@ portmap add TCP 8080 192.168.4.2 80
                   ↑ exposed port in the local router's network
 ```
 
-Assuming the esp32NAT's IP address in your `local router` is `192.168.0.57`, you can access the server by typing `192.168.0.57:8080` into your browser.
+Assuming the esp32NAT's IP address in your `local router` is `192.168.0.57`, you can access the server by typing `192.168.0.57:8080` into your browser. Be aware that you can't forward to the routers port 80 as long as the conig webserver runs here. If you absolutly need that, either turn off the web server or recompile the sources with a different config port.
 
 **Tip:** When you assign a name to a DHCP reservation, you can use that name instead of the IP address when creating firewall (ACL) rules. For example, after creating a reservation with `-n MyPhone`, you can use `MyPhone` as source or destination in ACL rules.
 
