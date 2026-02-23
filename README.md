@@ -632,6 +632,7 @@ The router supports an optional WireGuard VPN tunnel for upstream traffic. When 
 
 ### Features
 
+- **Kill Switch**: Blocks all non-local AP client traffic when VPN is enabled but not connected, preventing data leakage outside the tunnel (enabled by default, configurable via `-K` flag or web UI)
 - **Automatic MSS/PMTU**: MSS clamping (1380) and Path MTU (1440) are automatically enabled when VPN is active
 - **Auto-reconnect**: VPN reconnects automatically when the STA interface goes down and comes back up
 - **Web Configuration**: Full configuration via the `/vpn` page
@@ -662,6 +663,7 @@ show vpn
 | Port | `-p` | 51820 | Peer UDP port |
 | Keepalive | `-a` | 0 | Persistent keepalive (seconds, 0=disabled) |
 | Enabled | `-e` | 0 | Enable VPN (0 or 1) |
+| Kill Switch | `-K` | 1 | Block AP client internet when VPN is down (0 or 1) |
 
 All settings are persisted in NVS and applied after restart.
 
@@ -833,7 +835,7 @@ Add the bridge to your Claude Code MCP settings (`~/.claude/claude_desktop_confi
 | Category | Tools | Description |
 |----------|-------|-------------|
 | **Status** | `show_status`, `show_config`, `show_mappings`, `show_acl` | View router state and configuration |
-| **Info** | `get_heap_info`, `get_version`, `get_byte_counts`, `wifi_scan` | System info and diagnostics |
+| **Info** | `get_heap_info`, `get_version`, `get_byte_counts`, `wifi_scan`, `ping` | System info and diagnostics |
 | **WiFi STA** | `set_sta`, `set_sta_static`, `set_sta_mac` | Upstream WiFi configuration (incl. WPA2-Enterprise) |
 | **WiFi AP** | `set_ap`, `set_ap_ip`, `set_ap_dns`, `set_ap_mac`, `set_ap_hidden` | Access point configuration |
 | **DHCP** | `add_dhcp_reservation`, `delete_dhcp_reservation` | Fixed IP assignments by MAC |
@@ -891,7 +893,15 @@ log_level  [<level>] [-t <tag>]
        <level>  Log level: none/error/warn/info/debug/verbose (or 0-5)
   -t, --tag=<tag>  Set level for specific tag only
 
-tasks 
+ping  <host> [-c <n>] [-i <ms>] [-W <ms>] [-s <bytes>]
+  Send ICMP echo requests to a network host
+        <host>  Host address or IP to ping
+  -c, --count=<n>  Number of pings (default 5)
+  -i, --interval=<ms>  Interval in ms (default 1000)
+  -W, --timeout=<ms>  Timeout in ms (default 1000)
+  -s, --size=<bytes>  Payload size (default 64)
+
+tasks
   Get information about running tasks
 
 show  [status|config|mappings|acl|vpn]
@@ -1006,7 +1016,7 @@ set_led_lowactive
 set_ttl
   Set TTL override for upstream STA packets (0 = disabled)
 
-set_vpn  <private_key> <public_key> <endpoint> <address> [-k <psk>] [-m <mask>] [-p <port>] [-a <keepalive>] [-e <0|1>]
+set_vpn  <private_key> <public_key> <endpoint> <address> [-k <psk>] [-m <mask>] [-p <port>] [-a <keepalive>] [-e <0|1>] [-K <0|1>]
   Configure WireGuard VPN tunnel
   <private_key>  WireGuard private key (base64)
   <public_key>   Peer public key (base64)
@@ -1017,6 +1027,7 @@ set_vpn  <private_key> <public_key> <endpoint> <address> [-k <psk>] [-m <mask>] 
   -p, --port     Peer UDP port (default: 51820)
   -a, --keepalive Persistent keepalive seconds (0 = disabled)
   -e, --enable   Enable VPN (0 or 1)
+  -K, --killswitch Block AP client internet when VPN down (default: 1)
 
 remote_console   <action> [<args>]
   Manage remote console (network CLI access)

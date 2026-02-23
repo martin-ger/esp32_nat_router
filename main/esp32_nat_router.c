@@ -92,6 +92,7 @@ char* vpn_endpoint = NULL;
 char* vpn_address = NULL;
 char* vpn_netmask = NULL;
 bool vpn_connected = false;
+int32_t vpn_killswitch = 1;         // Kill switch default on
 
 // WireGuard context (module-private)
 static wireguard_config_t wg_config = ESP_WIREGUARD_CONFIG_DEFAULT();
@@ -1071,6 +1072,22 @@ static err_t ap_netif_input_hook(struct pbuf *p, struct netif *netif) {
         }
     }
 
+    // VPN kill switch: block non-local traffic when VPN is enabled but not connected
+    // Allow traffic within the AP subnet (client-to-client and client-to-router)
+    if (vpn_enabled && vpn_killswitch && !vpn_is_connected()) {
+        if (p != NULL && p->len >= 14 + sizeof(struct ip_hdr)) {
+            uint8_t *payload = (uint8_t *)p->payload;
+            if (payload[12] == 0x08 && payload[13] == 0x00) {  // IPv4
+                struct ip_hdr *iphdr = (struct ip_hdr *)(payload + 14);
+                uint32_t ap_subnet = my_ap_ip & htonl(0xFFFFFF00);
+                if (IPH_V(iphdr) == 4 && (iphdr->dest.addr & htonl(0xFFFFFF00)) != ap_subnet) {
+                    pbuf_free(p);
+                    return ERR_OK;
+                }
+            }
+        }
+    }
+
     // PMTU: send ICMP Fragmentation Needed if client sends a DF packet larger than path MTU
     if (ap_pmtu > 0) {
         send_icmp_frag_needed(p, netif, ap_pmtu);
@@ -1825,6 +1842,10 @@ void app_main(void)
     int vpn_ka_setting = 0;
     if (get_config_param_int("vpn_ka", &vpn_ka_setting) == ESP_OK) {
         vpn_keepalive = (int32_t)vpn_ka_setting;
+    }
+    int vpn_ks_setting = 1;  // Default on
+    if (get_config_param_int("vpn_ks", &vpn_ks_setting) == ESP_OK) {
+        vpn_killswitch = (int32_t)vpn_ks_setting;
     }
     // Pre-set MSS/PMTU when VPN is enabled (before WiFi connects)
     if (vpn_enabled) {

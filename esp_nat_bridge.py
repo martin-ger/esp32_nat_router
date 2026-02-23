@@ -693,6 +693,45 @@ async def set_ttl(ttl: int) -> str:
 
 
 @mcp.tool()
+async def ping(host: str) -> str:
+    """Ping a host from the router to check connectivity and measure latency. Sends 5 ICMP echo requests.
+
+    Args:
+        host: Hostname or IP address to ping (e.g. "8.8.8.8", "google.com").
+    """
+    _require(host, "host")
+    # Ping sends 5 packets at 1s interval with 1s timeout = ~12s max
+    conn = _get_conn()
+    async with conn._lock:
+        if not conn.writer or not conn.reader:
+            await conn.connect()
+        try:
+            try:
+                while True:
+                    chunk = await asyncio.wait_for(conn.reader.read(4096), timeout=0.2)
+                    if not chunk:
+                        break
+            except asyncio.TimeoutError:
+                pass
+
+            conn.writer.write(f"ping {host}\r\n")
+            response = await conn._read_until_prompt(timeout=15)
+
+            lines = response.splitlines()
+            if lines and f"ping {host}" in lines[0]:
+                lines = lines[1:]
+            while lines and (
+                lines[-1].strip() in ("esp32>", ">", "")
+                or lines[-1].strip().endswith(">")
+            ):
+                lines.pop()
+            return "\n".join(lines).strip()
+        except (ConnectionError, OSError, EOFError) as e:
+            await conn.disconnect()
+            raise RuntimeError(f"Connection lost during ping: {e}")
+
+
+@mcp.tool()
 async def restart() -> str:
     """Reboot the router. All connected clients will be temporarily disconnected.
 

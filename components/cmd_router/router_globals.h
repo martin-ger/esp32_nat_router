@@ -115,6 +115,7 @@ extern char* vpn_endpoint;          // Peer endpoint host/IP
 extern char* vpn_address;           // Tunnel IP (e.g. "10.0.0.2")
 extern char* vpn_netmask;           // Tunnel netmask (e.g. "255.255.255.0")
 extern bool vpn_connected;          // Runtime state: tunnel is up
+extern int32_t vpn_killswitch;      // Kill switch: block AP client internet when VPN is down (default on)
 
 void preprocess_string(char* str);
 int set_sta(int argc, char **argv);

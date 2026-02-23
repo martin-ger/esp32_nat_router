@@ -26,6 +26,11 @@
 #include "freertos/task.h"
 #include "cmd_system.h"
 #include "sdkconfig.h"
+#include "lwip/inet.h"
+#include "lwip/netdb.h"
+#include "lwip/sockets.h"
+#include "ping/ping_sock.h"
+#include "freertos/semphr.h"
 
 #ifdef CONFIG_FREERTOS_USE_STATS_FORMATTING_FUNCTIONS
 #define WITH_TASKS_INFO 1
@@ -56,6 +61,7 @@ static void register_factory_reset(void);
 static void register_deep_sleep(void);
 static void register_light_sleep(void);
 static void register_log_level(void);
+static void register_ping(void);
 #if WITH_TASKS_INFO
 static void register_tasks(void);
 #endif
@@ -69,6 +75,7 @@ void register_system(void)
     register_deep_sleep();
     register_light_sleep();
     register_log_level();
+    register_ping();
 #if WITH_TASKS_INFO
     register_tasks();
 #endif
@@ -504,6 +511,140 @@ static void register_log_level(void)
         .hint = NULL,
         .func = &log_level_cmd,
         .argtable = &log_level_args
+    };
+    ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
+}
+
+/** 'ping' command sends ICMP echo requests to a host */
+
+static struct {
+    struct arg_str *host;
+    struct arg_int *count;
+    struct arg_int *interval;
+    struct arg_int *timeout;
+    struct arg_int *size;
+    struct arg_end *end;
+} ping_args;
+
+static SemaphoreHandle_t ping_done_sem;
+
+static void ping_on_success(esp_ping_handle_t hdl, void *args)
+{
+    uint8_t ttl;
+    uint16_t seqno;
+    uint32_t elapsed_time, recv_len;
+    ip_addr_t target_addr;
+
+    esp_ping_get_profile(hdl, ESP_PING_PROF_SEQNO, &seqno, sizeof(seqno));
+    esp_ping_get_profile(hdl, ESP_PING_PROF_TTL, &ttl, sizeof(ttl));
+    esp_ping_get_profile(hdl, ESP_PING_PROF_IPADDR, &target_addr, sizeof(target_addr));
+    esp_ping_get_profile(hdl, ESP_PING_PROF_SIZE, &recv_len, sizeof(recv_len));
+    esp_ping_get_profile(hdl, ESP_PING_PROF_TIMEGAP, &elapsed_time, sizeof(elapsed_time));
+    printf("%lu bytes from %s icmp_seq=%d ttl=%d time=%lu ms\n",
+           (unsigned long)recv_len, ipaddr_ntoa(&target_addr), seqno, ttl, (unsigned long)elapsed_time);
+}
+
+static void ping_on_timeout(esp_ping_handle_t hdl, void *args)
+{
+    uint16_t seqno;
+    ip_addr_t target_addr;
+
+    esp_ping_get_profile(hdl, ESP_PING_PROF_SEQNO, &seqno, sizeof(seqno));
+    esp_ping_get_profile(hdl, ESP_PING_PROF_IPADDR, &target_addr, sizeof(target_addr));
+    printf("From %s icmp_seq=%d timeout\n", ipaddr_ntoa(&target_addr), seqno);
+}
+
+static void ping_on_end(esp_ping_handle_t hdl, void *args)
+{
+    uint32_t transmitted, received, total_time;
+
+    esp_ping_get_profile(hdl, ESP_PING_PROF_REQUEST, &transmitted, sizeof(transmitted));
+    esp_ping_get_profile(hdl, ESP_PING_PROF_REPLY, &received, sizeof(received));
+    esp_ping_get_profile(hdl, ESP_PING_PROF_DURATION, &total_time, sizeof(total_time));
+    printf("\n--- ping statistics ---\n");
+    printf("%lu packets transmitted, %lu received, %lu%% packet loss, time %lu ms\n",
+           (unsigned long)transmitted, (unsigned long)received,
+           transmitted > 0 ? (unsigned long)(((transmitted - received) * 100) / transmitted) : 0,
+           (unsigned long)total_time);
+
+    esp_ping_delete_session(hdl);
+    xSemaphoreGive(ping_done_sem);
+}
+
+static int ping_cmd(int argc, char **argv)
+{
+    int nerrors = arg_parse(argc, argv, (void **) &ping_args);
+    if (nerrors != 0) {
+        arg_print_errors(stderr, ping_args.end, argv[0]);
+        return 1;
+    }
+
+    const char *host = ping_args.host->sval[0];
+
+    // Resolve hostname or parse IP
+    ip_addr_t target_addr;
+    struct addrinfo hint = { .ai_family = AF_INET };
+    struct addrinfo *res = NULL;
+
+    if (getaddrinfo(host, NULL, &hint, &res) != 0 || res == NULL) {
+        printf("ping: unknown host %s\n", host);
+        return 1;
+    }
+    struct in_addr addr = ((struct sockaddr_in *)(res->ai_addr))->sin_addr;
+    inet_addr_to_ip4addr(ip_2_ip4(&target_addr), &addr);
+    IP_SET_TYPE_VAL(target_addr, IPADDR_TYPE_V4);
+    freeaddrinfo(res);
+
+    esp_ping_config_t config = ESP_PING_DEFAULT_CONFIG();
+    config.target_addr = target_addr;
+    config.count = ping_args.count->count > 0 ? ping_args.count->ival[0] : 5;
+    if (ping_args.interval->count > 0) config.interval_ms = ping_args.interval->ival[0];
+    if (ping_args.timeout->count > 0) config.timeout_ms = ping_args.timeout->ival[0];
+    if (ping_args.size->count > 0) config.data_size = ping_args.size->ival[0];
+
+    esp_ping_callbacks_t cbs = {
+        .on_ping_success = ping_on_success,
+        .on_ping_timeout = ping_on_timeout,
+        .on_ping_end = ping_on_end,
+    };
+
+    esp_ping_handle_t ping_handle;
+    esp_err_t err = esp_ping_new_session(&config, &cbs, &ping_handle);
+    if (err != ESP_OK) {
+        printf("Failed to create ping session: %s\n", esp_err_to_name(err));
+        return 1;
+    }
+
+    printf("PING %s (%s) %lu bytes of data\n", host, ipaddr_ntoa(&target_addr),
+           (unsigned long)config.data_size);
+
+    ping_done_sem = xSemaphoreCreateBinary();
+    esp_ping_start(ping_handle);
+
+    // Wait for ping to finish
+    uint32_t wait_ms = config.count * (config.interval_ms + config.timeout_ms) + 2000;
+    xSemaphoreTake(ping_done_sem, pdMS_TO_TICKS(wait_ms));
+    vSemaphoreDelete(ping_done_sem);
+    ping_done_sem = NULL;
+
+    return 0;
+}
+
+static void register_ping(void)
+{
+    ping_args.host = arg_str1(NULL, NULL, "<host>", "Host address or IP to ping");
+    ping_args.count = arg_int0("c", "count", "<n>", "Number of pings (default 5)");
+    ping_args.interval = arg_int0("i", "interval", "<ms>", "Interval in ms (default 1000)");
+    ping_args.timeout = arg_int0("W", "timeout", "<ms>", "Timeout in ms (default 1000)");
+    ping_args.size = arg_int0("s", "size", "<bytes>", "Payload size (default 64)");
+    ping_args.end = arg_end(5);
+
+    const esp_console_cmd_t cmd = {
+        .command = "ping",
+        .help = "Send ICMP echo requests to a network host",
+        .hint = NULL,
+        .func = &ping_cmd,
+        .argtable = &ping_args
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }

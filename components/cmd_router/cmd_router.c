@@ -1220,16 +1220,16 @@ static int show(int argc, char **argv)
         } else {
             printf("Status: disabled\n");
         }
-        bool hide_pw = remote_console_is_capturing();
         printf("Tunnel IP: %s\n", (vpn_address && vpn_address[0]) ? vpn_address : "<not set>");
         printf("Netmask: %s\n", (vpn_netmask && vpn_netmask[0]) ? vpn_netmask : "255.255.255.0");
         printf("Endpoint: %s:%ld\n", (vpn_endpoint && vpn_endpoint[0]) ? vpn_endpoint : "<not set>", (long)vpn_port);
         printf("Keepalive: %ld sec\n", (long)vpn_keepalive);
-        printf("Private Key: %s\n", (vpn_private_key && vpn_private_key[0]) ? (hide_pw ? "***" : vpn_private_key) : "<not set>");
+        printf("Private Key: %s\n", (vpn_private_key && vpn_private_key[0]) ? "<set>" : "<not set>");
         printf("Public Key: %s\n", (vpn_public_key && vpn_public_key[0]) ? vpn_public_key : "<not set>");
-        printf("Preshared Key: %s\n", (vpn_preshared_key && vpn_preshared_key[0]) ? (hide_pw ? "***" : "set") : "<not set>");
+        printf("Preshared Key: %s\n", (vpn_preshared_key && vpn_preshared_key[0]) ? "<set>" : "<not set>");
         printf("MSS Clamp: %u\n", ap_mss_clamp);
         printf("Path MTU: %u\n", ap_pmtu);
+        printf("Kill Switch: %s\n", vpn_killswitch ? "on" : "off");
 
     } else {
         printf("Invalid parameter. Use: show <status|config|mappings|acl|vpn>\n");
@@ -2442,6 +2442,7 @@ static struct {
     struct arg_int *port;
     struct arg_int *keepalive;
     struct arg_int *enable;
+    struct arg_int *killswitch;
     struct arg_end *end;
 } set_vpn_args;
 
@@ -2487,6 +2488,9 @@ static int set_vpn_cmd(int argc, char **argv)
     if (set_vpn_args.enable->count > 0) {
         nvs_set_i32(nvs, "vpn_enabled", set_vpn_args.enable->ival[0]);
     }
+    if (set_vpn_args.killswitch->count > 0) {
+        nvs_set_i32(nvs, "vpn_ks", set_vpn_args.killswitch->ival[0]);
+    }
 
     nvs_commit(nvs);
     nvs_close(nvs);
@@ -2505,6 +2509,7 @@ static void register_set_vpn(void)
     set_vpn_args.port      = arg_int0("p", "port", "<port>", "Peer UDP port (default 51820)");
     set_vpn_args.keepalive = arg_int0("a", "keepalive", "<seconds>", "Persistent keepalive (0=disabled)");
     set_vpn_args.enable    = arg_int0("e", "enable", "<0|1>", "Enable/disable VPN");
+    set_vpn_args.killswitch = arg_int0("K", "killswitch", "<0|1>", "Kill switch: block internet when VPN down (default on)");
     set_vpn_args.end       = arg_end(4);
 
     const esp_console_cmd_t cmd = {
