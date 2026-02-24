@@ -2444,6 +2444,9 @@ static esp_err_t vpn_get_handler(httpd_req_t *req)
                     if (httpd_query_key_value(buf, "vpn_ks", param, sizeof(param)) == ESP_OK) {
                         nvs_set_i32(nvs, "vpn_ks", atoi(param));
                     }
+                    if (httpd_query_key_value(buf, "vpn_rall", param, sizeof(param)) == ESP_OK) {
+                        nvs_set_i32(nvs, "vpn_rall", atoi(param));
+                    }
 
                     nvs_commit(nvs);
                     nvs_close(nvs);
@@ -2511,6 +2514,10 @@ static esp_err_t vpn_get_handler(httpd_req_t *req)
              vpn_killswitch ? "#4caf50" : "#888", vpn_killswitch ? "On" : "Off");
     httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
 
+    snprintf(row, VPN_BUF_SIZE, "<tr><td>Route All:</td><td><strong style='color:%s;'>%s</strong></td></tr>",
+             vpn_route_all ? "#4caf50" : "#2196f3", vpn_route_all ? "Yes" : "No (split tunnel)");
+    httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
+
     httpd_resp_send_chunk(req, "</table></div>", HTTPD_RESP_USE_STRLEN);
 
     /* Form - streamed field by field to avoid large snprintf */
@@ -2556,6 +2563,13 @@ static esp_err_t vpn_get_handler(httpd_req_t *req)
         "<option value='1' %s>On</option><option value='0' %s>Off</option>"
         "</select></td></tr>",
         vpn_killswitch ? "selected" : "", vpn_killswitch ? "" : "selected");
+    httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
+
+    snprintf(row, VPN_BUF_SIZE,
+        "<tr><td>Route All</td><td><select name='vpn_rall'>"
+        "<option value='1' %s>Yes (all traffic)</option><option value='0' %s>No (split tunnel)</option>"
+        "</select></td></tr>",
+        vpn_route_all ? "selected" : "", vpn_route_all ? "" : "selected");
     httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
 
     httpd_resp_send_chunk(req, VPN_CHUNK_FORM_CLOSE, HTTPD_RESP_USE_STRLEN);

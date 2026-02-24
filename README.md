@@ -628,15 +628,16 @@ remote_console kick                # Disconnect current session
 
 ## WireGuard VPN
 
-The router supports an optional WireGuard VPN tunnel for upstream traffic. When enabled, all NATed traffic from AP clients is routed through the WireGuard tunnel while the physical STA WiFi link remains unchanged.
+The router supports an optional WireGuard VPN tunnel for upstream traffic. When enabled, traffic from AP clients is routed through the WireGuard tunnel while the physical STA WiFi link remains unchanged.
 
 ### Features
 
-- **Kill Switch**: Blocks all non-local AP client traffic when VPN is enabled but not connected, preventing data leakage outside the tunnel (enabled by default, configurable via `-K` flag or web UI)
-- **Automatic MSS/PMTU**: MSS clamping (1380) and Path MTU (1440) are automatically enabled when VPN is active
 - **Auto-reconnect**: VPN reconnects automatically when the STA interface goes down and comes back up
 - **Web Configuration**: Full configuration via the `/vpn` page
 - **CLI Configuration**: Use `set_vpn` command for console-based setup
+- **Split Tunneling**: Route all traffic through VPN (default) or only VPN-subnet traffic, letting internet traffic go direct via STA (configurable via `-R` flag or web UI)
+- **Kill Switch**: Blocks non-local AP client traffic when VPN is enabled but not connected, preventing data leakage outside the tunnel. In route-all mode, blocks all non-local traffic; in split tunnel mode, blocks only VPN-subnet-destined traffic (enabled by default, configurable via `-K` flag or web UI)
+- **Automatic MSS/PMTU**: MSS clamping (1380) and Path MTU (1440) are automatically enabled when VPN is active
 
 ### Quick Start
 
@@ -664,6 +665,7 @@ show vpn
 | Keepalive | `-a` | 0 | Persistent keepalive (seconds, 0=disabled) |
 | Enabled | `-e` | 0 | Enable VPN (0 or 1) |
 | Kill Switch | `-K` | 1 | Block AP client internet when VPN is down (0 or 1) |
+| Route All | `-R` | 1 | Route all traffic through VPN (1) or only VPN subnet (0, split tunnel) |
 
 All settings are persisted in NVS and applied after restart.
 
@@ -1016,7 +1018,7 @@ set_led_lowactive
 set_ttl
   Set TTL override for upstream STA packets (0 = disabled)
 
-set_vpn  <private_key> <public_key> <endpoint> <address> [-k <psk>] [-m <mask>] [-p <port>] [-a <keepalive>] [-e <0|1>] [-K <0|1>]
+set_vpn  <private_key> <public_key> <endpoint> <address> [-k <psk>] [-m <mask>] [-p <port>] [-a <keepalive>] [-e <0|1>] [-K <0|1>] [-R <0|1>]
   Configure WireGuard VPN tunnel
   <private_key>  WireGuard private key (base64)
   <public_key>   Peer public key (base64)

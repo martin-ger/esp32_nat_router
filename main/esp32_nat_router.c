@@ -93,6 +93,11 @@ char* vpn_address = NULL;
 char* vpn_netmask = NULL;
 bool vpn_connected = false;
 int32_t vpn_killswitch = 1;         // Kill switch default on
+int32_t vpn_route_all = 1;          // Route all traffic through VPN (default on)
+
+// Cached VPN subnet for kill switch (network byte order)
+static uint32_t vpn_subnet_ip = 0;   // VPN subnet base address
+static uint32_t vpn_subnet_mask = 0; // VPN subnet mask
 
 // WireGuard context (module-private)
 static wireguard_config_t wg_config = ESP_WIREGUARD_CONFIG_DEFAULT();
@@ -1072,17 +1077,30 @@ static err_t ap_netif_input_hook(struct pbuf *p, struct netif *netif) {
         }
     }
 
-    // VPN kill switch: block non-local traffic when VPN is enabled but not connected
-    // Allow traffic within the AP subnet (client-to-client and client-to-router)
+    // VPN kill switch: block traffic when VPN is enabled but not connected
+    // Route-all mode: block all non-AP-subnet traffic (prevents internet leakage)
+    // Split tunnel mode: block only VPN-subnet traffic (internet goes direct via STA)
     if (vpn_enabled && vpn_killswitch && !vpn_is_connected()) {
         if (p != NULL && p->len >= 14 + sizeof(struct ip_hdr)) {
             uint8_t *payload = (uint8_t *)p->payload;
             if (payload[12] == 0x08 && payload[13] == 0x00) {  // IPv4
                 struct ip_hdr *iphdr = (struct ip_hdr *)(payload + 14);
-                uint32_t ap_subnet = my_ap_ip & htonl(0xFFFFFF00);
-                if (IPH_V(iphdr) == 4 && (iphdr->dest.addr & htonl(0xFFFFFF00)) != ap_subnet) {
-                    pbuf_free(p);
-                    return ERR_OK;
+                if (IPH_V(iphdr) == 4) {
+                    uint32_t dest = iphdr->dest.addr;
+                    uint32_t ap_subnet = my_ap_ip & htonl(0xFFFFFF00);
+                    bool is_local = (dest & htonl(0xFFFFFF00)) == ap_subnet;
+                    if (!is_local) {
+                        if (vpn_route_all) {
+                            // Block all non-local traffic
+                            pbuf_free(p);
+                            return ERR_OK;
+                        } else if (vpn_subnet_mask != 0 &&
+                                   (dest & vpn_subnet_mask) == vpn_subnet_ip) {
+                            // Split tunnel: block only VPN-subnet traffic
+                            pbuf_free(p);
+                            return ERR_OK;
+                        }
+                    }
                 }
             }
         }
@@ -1355,15 +1373,18 @@ esp_err_t vpn_connect(void)
         return err;
     }
 
-    err = esp_wireguard_set_default(&wg_ctx);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "WireGuard set_default failed: %s", esp_err_to_name(err));
+    if (vpn_route_all) {
+        err = esp_wireguard_set_default(&wg_ctx);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "WireGuard set_default failed: %s", esp_err_to_name(err));
+        }
     }
 
     ap_mss_clamp = 1380;
     ap_pmtu = 1440;
     vpn_connected = true;
-    ESP_LOGI(TAG, "WireGuard VPN connected, MSS=1380 PMTU=1440");
+    ESP_LOGI(TAG, "WireGuard VPN connected%s, MSS=1380 PMTU=1440",
+             vpn_route_all ? "" : " (split tunnel)");
     return ESP_OK;
 }
 
@@ -1846,6 +1867,19 @@ void app_main(void)
     int vpn_ks_setting = 1;  // Default on
     if (get_config_param_int("vpn_ks", &vpn_ks_setting) == ESP_OK) {
         vpn_killswitch = (int32_t)vpn_ks_setting;
+    }
+    int vpn_rall_setting = 1;  // Default: route all through VPN
+    if (get_config_param_int("vpn_rall", &vpn_rall_setting) == ESP_OK) {
+        vpn_route_all = (int32_t)vpn_rall_setting;
+    }
+    // Cache VPN subnet for kill switch packet filtering
+    if (vpn_address && vpn_address[0]) {
+        ip_addr_t addr, mask;
+        if (ipaddr_aton(vpn_address, &addr) && ipaddr_aton(
+                (vpn_netmask && vpn_netmask[0]) ? vpn_netmask : "255.255.255.0", &mask)) {
+            vpn_subnet_mask = ip_2_ip4(&mask)->addr;
+            vpn_subnet_ip = ip_2_ip4(&addr)->addr & vpn_subnet_mask;
+        }
     }
     // Pre-set MSS/PMTU when VPN is enabled (before WiFi connects)
     if (vpn_enabled) {

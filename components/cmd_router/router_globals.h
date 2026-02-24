@@ -15,7 +15,7 @@ extern "C" {
 
 #define PARAM_NAMESPACE "esp32_nat"
 
-#define ROUTER_VERSION "2.2.0"
+#define ROUTER_VERSION "2.2.1"
 
 #define PROTO_TCP 6
 #define PROTO_UDP 17
@@ -116,6 +116,7 @@ extern char* vpn_address;           // Tunnel IP (e.g. "10.0.0.2")
 extern char* vpn_netmask;           // Tunnel netmask (e.g. "255.255.255.0")
 extern bool vpn_connected;          // Runtime state: tunnel is up
 extern int32_t vpn_killswitch;      // Kill switch: block AP client internet when VPN is down (default on)
+extern int32_t vpn_route_all;       // Route all traffic through VPN (1) or only VPN subnet (0, split tunnel)
 
 void preprocess_string(char* str);
 int set_sta(int argc, char **argv);
