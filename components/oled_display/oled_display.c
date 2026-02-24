@@ -31,6 +31,7 @@ extern char *ap_ssid;
 extern uint64_t sta_bytes_sent;
 extern uint64_t sta_bytes_received;
 extern void resync_connect_count(void);
+extern bool vpn_is_connected(void);
 
 static const char *TAG = "oled";
 
@@ -153,11 +154,12 @@ static void render_status(void)
 
     /* Line 1: STA status with RSSI */
     if (ap_connect) {
+        const char *status = vpn_is_connected() ? "VPN" : "UP";
         wifi_ap_record_t ap_info;
         if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
-            snprintf(line, sizeof(line), "UP %d dBm", ap_info.rssi);
+            snprintf(line, sizeof(line), "%s %ddBm", status, ap_info.rssi);
         } else {
-            snprintf(line, sizeof(line), "UP");
+            snprintf(line, sizeof(line), "%s", status);
         }
         fb_draw_string(1, line);
     } else {

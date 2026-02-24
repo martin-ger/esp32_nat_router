@@ -1370,6 +1370,9 @@ esp_err_t vpn_connect(void)
     err = esp_wireguard_connect(&wg_ctx);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "WireGuard connect failed: %s", esp_err_to_name(err));
+        // Reset so next attempt does a clean init (avoids leaked netif/timers)
+        wg_initialized = false;
+        memset(&wg_ctx, 0, sizeof(wg_ctx));
         return err;
     }
 
@@ -1390,19 +1393,21 @@ esp_err_t vpn_connect(void)
 
 void vpn_disconnect(void)
 {
+    // Set vpn_connected false FIRST to prevent race with vpn_is_connected()
+    // (called from netif hooks and HTTP handlers in other tasks)
+    vpn_connected = false;
+    ap_mss_clamp = 0;
+    ap_pmtu = 0;
     if (wg_initialized) {
         esp_wireguard_disconnect(&wg_ctx);
         wg_initialized = false;
     }
-    ap_mss_clamp = 0;
-    ap_pmtu = 0;
-    vpn_connected = false;
     ESP_LOGI(TAG, "WireGuard VPN disconnected, MSS/PMTU disabled");
 }
 
 bool vpn_is_connected(void)
 {
-    if (!wg_initialized || !vpn_connected) {
+    if (!wg_initialized || !vpn_connected || !wg_ctx.netif) {
         return false;
     }
     return esp_wireguardif_peer_is_up(&wg_ctx) == ESP_OK;
