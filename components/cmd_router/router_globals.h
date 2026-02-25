@@ -60,10 +60,12 @@ struct portmap_table_entry {
 extern struct portmap_table_entry portmap_tab[];
 extern struct dhcp_reservation_entry dhcp_reservations[];
 
+#if !CONFIG_ETH_UPLINK
 extern char* ssid;
 extern char* ent_username;
 extern char* ent_identity;
 extern char* passwd;
+#endif
 extern char* static_ip;
 extern char* subnet_mask;
 extern char* gateway_addr;
@@ -99,11 +101,13 @@ extern uint16_t ap_pmtu;
 // AP SSID hidden (0 = visible, 1 = hidden)
 extern uint8_t ap_ssid_hidden;
 
+#if !CONFIG_ETH_UPLINK
 // WPA2-Enterprise settings
 extern int32_t eap_method;          // 0=Auto, 1=PEAP, 2=TTLS, 3=TLS
 extern int32_t ttls_phase2;         // 0=MSCHAPv2, 1=MSCHAP, 2=PAP, 3=CHAP
 extern int32_t use_cert_bundle;     // 0=off, 1=on
 extern int32_t disable_time_check;  // 0=off, 1=on
+#endif
 
 // WireGuard VPN settings (persisted in NVS)
 extern int32_t vpn_enabled;         // 0=off, 1=on
@@ -121,9 +125,11 @@ extern int32_t vpn_killswitch;      // Kill switch: block AP client internet whe
 extern int32_t vpn_route_all;       // Route all traffic through VPN (1) or only VPN subnet (0, split tunnel)
 
 void preprocess_string(char* str);
+#if !CONFIG_ETH_UPLINK
 int set_sta(int argc, char **argv);
-int set_sta_static(int argc, char **argv);
 int set_sta_mac(int argc, char **argv);
+#endif
+int set_sta_static(int argc, char **argv);
 int set_ap(int argc, char **argv);
 int set_ap_mac(int argc, char **argv);
 int set_ap_ip(int argc, char **argv);

@@ -46,9 +46,13 @@
 
 static const char *TAG = "cmd_router";
 
+#if !CONFIG_ETH_UPLINK
 static void register_set_sta(void);
-static void register_set_sta_static(void);
 static void register_set_mac(void);
+#else
+static void register_set_ap_mac_only(void);
+#endif
+static void register_set_sta_static(void);
 static void register_set_ap(void);
 static void register_set_ap_ip(void);
 static void register_set_ap_dns(void);
@@ -69,7 +73,9 @@ static void register_remote_console_cmd(void);
 static void register_set_oled(void);
 static void register_set_oled_gpio(void);
 #endif
+#if !CONFIG_ETH_UPLINK
 static void register_scan(void);
+#endif
 static void register_set_vpn(void);
 
 /* ACL helper functions (forward declarations) */
@@ -212,10 +218,14 @@ esp_err_t get_config_param_blob(char* name, uint8_t** blob, size_t blob_len)
 void register_router(void)
 {
     register_show();
+#if !CONFIG_ETH_UPLINK
     register_set_sta();
-    register_set_sta_static();
     register_set_mac();
     register_scan();
+#else
+    register_set_ap_mac_only();
+#endif
+    register_set_sta_static();
     register_set_ap();
     register_set_ap_ip();
     register_set_ap_dns();
@@ -238,6 +248,7 @@ void register_router(void)
 #endif
 }
 
+#if !CONFIG_ETH_UPLINK
 /** Arguments used by 'set_sta' function */
 static struct {
     struct arg_str* ssid;
@@ -342,6 +353,7 @@ static void register_set_sta(void)
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }
+#endif
 
 
 /** Arguments used by 'set_sta_static' function */
@@ -445,14 +457,17 @@ esp_err_t set_mac(const char *key, const char *interface, int argc, char **argv)
     return err;
 }
 
+#if !CONFIG_ETH_UPLINK
 int set_sta_mac(int argc, char **argv) {
     return set_mac("mac", "STA", argc, argv);
 }
+#endif
 
 int set_ap_mac(int argc, char **argv) {
     return set_mac("ap_mac", "AP", argc, argv);
 }
 
+#if !CONFIG_ETH_UPLINK
 static void register_set_mac(void)
 {
     set_mac_arg.mac0 = arg_int1(NULL, NULL, "<octet>", "First octet");
@@ -481,6 +496,27 @@ static void register_set_mac(void)
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd_ap) );
 }
+#else
+static void register_set_ap_mac_only(void)
+{
+    set_mac_arg.mac0 = arg_int1(NULL, NULL, "<octet>", "First octet");
+    set_mac_arg.mac1 = arg_int1(NULL, NULL, "<octet>", "Second octet");
+    set_mac_arg.mac2 = arg_int1(NULL, NULL, "<octet>", "Third octet");
+    set_mac_arg.mac3 = arg_int1(NULL, NULL, "<octet>", "Fourth octet");
+    set_mac_arg.mac4 = arg_int1(NULL, NULL, "<octet>", "Fifth octet");
+    set_mac_arg.mac5 = arg_int1(NULL, NULL, "<octet>", "Sixth octet");
+    set_mac_arg.end = arg_end(6);
+
+    const esp_console_cmd_t cmd_ap = {
+        .command = "set_ap_mac",
+        .help = "Set MAC address of the AP interface",
+        .hint = NULL,
+        .func = &set_ap_mac,
+        .argtable = &set_mac_arg
+    };
+    ESP_ERROR_CHECK( esp_console_cmd_register(&cmd_ap) );
+}
+#endif
 
 /** Arguments used by 'set_ap' function */
 static struct {
@@ -1061,6 +1097,13 @@ static int show(int argc, char **argv)
         printf("Uptime: %s (since %s)\n", uptime_str, boot_time_str);
 
         // Connection status
+#if CONFIG_ETH_UPLINK
+        if (ap_connect) {
+            printf("Uplink ETH: connected\n");
+        } else {
+            printf("Uplink ETH: not connected\n");
+        }
+#else
         if (ap_connect) {
             wifi_ap_record_t ap_info;
             if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
@@ -1071,6 +1114,7 @@ static int show(int argc, char **argv)
         } else {
             printf("Uplink AP: not connected\n");
         }
+#endif
         if (ap_connect) {
             ip4_addr_t addr;
             addr.addr = my_ip;
@@ -1117,20 +1161,12 @@ static int show(int argc, char **argv)
         
     } else if (strcmp(type, "config") == 0) {
         // Show config
-        char* ssid = NULL;
-        char* ent_username = NULL;
-        char* ent_identity = NULL;
-        char* passwd = NULL;
         char* static_ip = NULL;
         char* subnet_mask = NULL;
         char* gateway_addr = NULL;
         char* ap_ssid = NULL;
         char* ap_passwd = NULL;
 
-        get_config_param_str("ssid", &ssid);
-        get_config_param_str("ent_username", &ent_username);
-        get_config_param_str("ent_identity", &ent_identity);
-        get_config_param_str("passwd", &passwd);
         get_config_param_str("static_ip", &static_ip);
         get_config_param_str("subnet_mask", &subnet_mask);
         get_config_param_str("gateway_addr", &gateway_addr);
@@ -1139,8 +1175,20 @@ static int show(int argc, char **argv)
 
         printf("Router Configuration:\n");
         printf("====================\n");
-        
+
         bool hide_pw = remote_console_is_capturing();
+#if CONFIG_ETH_UPLINK
+        printf("Uplink: Ethernet (LAN8720)\n");
+#else
+        char* ssid = NULL;
+        char* ent_username = NULL;
+        char* ent_identity = NULL;
+        char* passwd = NULL;
+        get_config_param_str("ssid", &ssid);
+        get_config_param_str("ent_username", &ent_username);
+        get_config_param_str("ent_identity", &ent_identity);
+        get_config_param_str("passwd", &passwd);
+
         printf("STA Settings:\n");
         printf("  SSID: %s\n", ssid != NULL ? ssid : "<undef>");
         printf("  Password: %s\n", passwd == NULL ? "<undef>" : hide_pw ? "***" : passwd);
@@ -1158,15 +1206,21 @@ static int show(int argc, char **argv)
         } else {
             printf("  Enterprise: <not active>\n");
         }
-        
-        if (static_ip != NULL) {
+
+        if (ssid != NULL) free(ssid);
+        if (ent_username != NULL) free(ent_username);
+        if (ent_identity != NULL) free(ent_identity);
+        if (passwd != NULL) free(passwd);
+#endif
+
+        if (static_ip != NULL && strlen(static_ip) > 0) {
             printf("  Static IP: %s\n", static_ip);
             printf("  Subnet Mask: %s\n", subnet_mask != NULL ? subnet_mask : "<undef>");
             printf("  Gateway: %s\n", gateway_addr != NULL ? gateway_addr : "<undef>");
         } else {
             printf("  Static IP: <not configured>\n");
         }
-        
+
         printf("\nAP Settings:\n");
         printf("  SSID: %s\n", ap_ssid != NULL ? ap_ssid : "<undef>");
         printf("  Password: %s\n", ap_passwd == NULL ? "<undef>" : hide_pw ? "***" : ap_passwd);
@@ -1182,10 +1236,6 @@ static int show(int argc, char **argv)
         if (web_lock != NULL) free(web_lock);
 
         // Cleanup
-        if (ssid != NULL) free(ssid);
-        if (ent_username != NULL) free(ent_username);
-        if (ent_identity != NULL) free(ent_identity);
-        if (passwd != NULL) free(passwd);
         if (static_ip != NULL) free(static_ip);
         if (subnet_mask != NULL) free(subnet_mask);
         if (gateway_addr != NULL) free(gateway_addr);
@@ -2369,6 +2419,7 @@ static void register_set_oled_gpio(void)
 
 #endif /* CONFIG_IDF_TARGET_ESP32C3 */
 
+#if !CONFIG_ETH_UPLINK
 /* Helper function to convert auth mode to string */
 static const char* auth_mode_to_str(wifi_auth_mode_t authmode)
 {
@@ -2443,6 +2494,7 @@ static void register_scan(void)
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }
+#endif
 
 /** Arguments used by 'set_vpn' function */
 static struct {

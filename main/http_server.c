@@ -617,7 +617,14 @@ static esp_err_t index_get_handler(httpd_req_t *req)
     snprintf(row, sizeof(row), "<tr><td>AP Clients:</td><td>%d</td></tr>", connect_count);
     httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
 
-    /* Stream Uplink row (with RSSI if connected) */
+    /* Stream Uplink row */
+#if CONFIG_ETH_UPLINK
+    if (ap_connect) {
+        httpd_resp_send_chunk(req, "<tr><td>Uplink:</td><td><strong>Ethernet Connected</strong></td></tr>", HTTPD_RESP_USE_STRLEN);
+    } else {
+        httpd_resp_send_chunk(req, "<tr><td>Uplink:</td><td><strong>Ethernet Disconnected</strong></td></tr>", HTTPD_RESP_USE_STRLEN);
+    }
+#else
     if (ap_connect) {
         wifi_ap_record_t ap_info;
         if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
@@ -629,14 +636,23 @@ static esp_err_t index_get_handler(httpd_req_t *req)
     } else {
         httpd_resp_send_chunk(req, "<tr><td>Uplink:</td><td><strong>Disconnected</strong></td></tr>", HTTPD_RESP_USE_STRLEN);
     }
+#endif
 
-    /* Stream STA IP row */
+    /* Stream uplink IP row */
     if (ap_connect) {
         esp_ip4_addr_t addr;
         addr.addr = my_ip;
+#if CONFIG_ETH_UPLINK
+        snprintf(row, sizeof(row), "<tr><td>ETH IP:</td><td>" IPSTR "</td></tr>", IP2STR(&addr));
+#else
         snprintf(row, sizeof(row), "<tr><td>STA IP:</td><td>" IPSTR "</td></tr>", IP2STR(&addr));
+#endif
     } else {
+#if CONFIG_ETH_UPLINK
+        snprintf(row, sizeof(row), "<tr><td>ETH IP:</td><td>N/A</td></tr>");
+#else
         snprintf(row, sizeof(row), "<tr><td>STA IP:</td><td>N/A</td></tr>");
+#endif
     }
     httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
 
@@ -911,6 +927,7 @@ static esp_err_t config_get_handler(httpd_req_t *req)
                 }
             }
 
+#if !CONFIG_ETH_UPLINK
             /* Handle STA settings with optional MAC */
             if (httpd_query_key_value(buf, "ssid", param1, sizeof(param1)) == ESP_OK) {
                 ESP_LOGI(TAG, "Found URL query parameter => ssid=%s", param1);
@@ -1016,6 +1033,7 @@ static esp_err_t config_get_handler(httpd_req_t *req)
                     }
                 }
             }
+#endif
 
             /* Handle static IP settings */
             if (httpd_query_key_value(buf, "staticip", param1, sizeof(param1)) == ESP_OK) {
@@ -1122,6 +1140,7 @@ static esp_err_t config_get_handler(httpd_req_t *req)
         free(buf);
     }
 
+#if !CONFIG_ETH_UPLINK
     /* Check for SSID pre-fill from scan page */
     char prefill_ssid[64] = "";
     buf_len = httpd_req_get_url_query_len(req) + 1;
@@ -1137,10 +1156,11 @@ static esp_err_t config_get_handler(httpd_req_t *req)
     }
 
     /* Escape values for HTML */
-    char* safe_ap_ssid = html_escape(ap_ssid);
     char* safe_ssid = html_escape(prefill_ssid[0] ? prefill_ssid : ssid);
     char* safe_ent_username = html_escape(ent_username);
     char* safe_ent_identity = html_escape(ent_identity);
+#endif
+    char* safe_ap_ssid = html_escape(ap_ssid);
 
     // Get current AP IP address
     char* ap_ip_str = NULL;
@@ -1153,14 +1173,19 @@ static esp_err_t config_get_handler(httpd_req_t *req)
     }
 
     // Check if any html_escape failed
-    if (safe_ap_ssid == NULL || safe_ssid == NULL ||
+    if (safe_ap_ssid == NULL ||
+#if !CONFIG_ETH_UPLINK
+        safe_ssid == NULL ||
         safe_ent_username == NULL || safe_ent_identity == NULL ||
+#endif
         ap_ip_str == NULL) {
         ESP_LOGE(TAG, "Failed to escape HTML strings");
         free(safe_ap_ssid);
+#if !CONFIG_ETH_UPLINK
         free(safe_ssid);
         free(safe_ent_username);
         free(safe_ent_identity);
+#endif
         free(ap_ip_str);
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
         return ESP_ERR_NO_MEM;
@@ -1168,16 +1193,18 @@ static esp_err_t config_get_handler(httpd_req_t *req)
 
     // Get MAC addresses as strings
     char ap_mac_str[18] = "";
-    char sta_mac_str[18] = "";
     uint8_t mac[6];
     if (esp_wifi_get_mac(ESP_IF_WIFI_AP, mac) == ESP_OK) {
         sprintf(ap_mac_str, "%02X:%02X:%02X:%02X:%02X:%02X",
                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     }
+#if !CONFIG_ETH_UPLINK
+    char sta_mac_str[18] = "";
     if (esp_wifi_get_mac(ESP_IF_WIFI_STA, mac) == ESP_OK) {
         sprintf(sta_mac_str, "%02X:%02X:%02X:%02X:%02X:%02X",
                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     }
+#endif
 
     // Remote Console state
     remote_console_config_t rc_config;
@@ -1260,6 +1287,12 @@ static esp_err_t config_get_handler(httpd_req_t *req)
         safe_ap_ssid, ap_ip_str, ap_dns ? ap_dns : "", ap_mac_str, ap_open_checked, ap_hidden_checked);
     httpd_resp_send_chunk(req, section, HTTPD_RESP_USE_STRLEN);
 
+#if CONFIG_ETH_UPLINK
+    /* Chunk 5: ETH info */
+    httpd_resp_send_chunk(req,
+        "<h2>Uplink Settings</h2><table><tr><td>Mode:</td><td>Ethernet (LAN8720)</td></tr></table>",
+        HTTPD_RESP_USE_STRLEN);
+#else
     /* Chunk 5: STA Settings */
     snprintf(section, sizeof(section), CONFIG_CHUNK_STA,
         safe_ssid, safe_ent_username, safe_ent_identity,
@@ -1270,6 +1303,7 @@ static esp_err_t config_get_handler(httpd_req_t *req)
         use_cert_bundle ? "checked" : "", disable_time_check ? "checked" : "",
         sta_mac_str);
     httpd_resp_send_chunk(req, section, HTTPD_RESP_USE_STRLEN);
+#endif
 
     /* Chunk 6: Static IP Settings */
     snprintf(section, sizeof(section), CONFIG_CHUNK_STATIC,
@@ -1307,9 +1341,11 @@ static esp_err_t config_get_handler(httpd_req_t *req)
 
     /* Cleanup */
     free(safe_ap_ssid);
+#if !CONFIG_ETH_UPLINK
     free(safe_ssid);
     free(safe_ent_username);
     free(safe_ent_identity);
+#endif
     free(ap_ip_str);
 
     return ESP_OK;
@@ -2113,6 +2149,7 @@ static void url_encode(const char *src, char *dst, size_t dst_len)
     dst[i] = '\0';
 }
 
+#if !CONFIG_ETH_UPLINK
 /* WiFi Scan page GET handler - NOT password protected */
 static esp_err_t scan_get_handler(httpd_req_t *req)
 {
@@ -2286,6 +2323,7 @@ static httpd_uri_t scanp = {
     .method    = HTTP_GET,
     .handler   = scan_get_handler,
 };
+#endif
 
 /* Getting Started page GET handler */
 static esp_err_t setup_get_handler(httpd_req_t *req)
@@ -2323,6 +2361,7 @@ static esp_err_t setup_get_handler(httpd_req_t *req)
                 }
             }
 
+#if !CONFIG_ETH_UPLINK
             /* Handle STA settings */
             if (httpd_query_key_value(buf, "ssid", param1, sizeof(param1)) == ESP_OK) {
                 preprocess_string(param1);
@@ -2340,10 +2379,12 @@ static esp_err_t setup_get_handler(httpd_req_t *req)
                     esp_timer_start_once(restart_timer, 500000);
                 }
             }
+#endif
         }
         free(buf);
     }
 
+#if !CONFIG_ETH_UPLINK
     /* Check for SSID pre-fill from scan page */
     char prefill_ssid[64] = "";
     buf_len = httpd_req_get_url_query_len(req) + 1;
@@ -2356,6 +2397,7 @@ static esp_err_t setup_get_handler(httpd_req_t *req)
         }
         if (buf) free(buf);
     }
+#endif
 
     /* Render page */
     httpd_resp_set_type(req, "text/html");
@@ -2363,8 +2405,16 @@ static esp_err_t setup_get_handler(httpd_req_t *req)
     httpd_resp_send_chunk(req, SETUP_CHUNK_HEAD, HTTPD_RESP_USE_STRLEN);
 
     char* safe_ap_ssid = html_escape(ap_ssid);
-    char* safe_ssid = html_escape(prefill_ssid[0] ? prefill_ssid : ssid);
     if (safe_ap_ssid == NULL) safe_ap_ssid = strdup("");
+
+#if CONFIG_ETH_UPLINK
+    char section[1024];
+    snprintf(section, sizeof(section), SETUP_CHUNK_FORM,
+        safe_ap_ssid, "");
+    httpd_resp_send_chunk(req, section, HTTPD_RESP_USE_STRLEN);
+    free(safe_ap_ssid);
+#else
+    char* safe_ssid = html_escape(prefill_ssid[0] ? prefill_ssid : ssid);
     if (safe_ssid == NULL) safe_ssid = strdup("");
 
     char section[1024];
@@ -2374,6 +2424,7 @@ static esp_err_t setup_get_handler(httpd_req_t *req)
 
     free(safe_ap_ssid);
     free(safe_ssid);
+#endif
 
     httpd_resp_send_chunk(req, NULL, 0);
     return ESP_OK;
@@ -2616,19 +2667,23 @@ httpd_handle_t start_webserver(void)
         httpd_register_uri_handler(server, &configp);
         httpd_register_uri_handler(server, &mappingsp);
         httpd_register_uri_handler(server, &firewallp);
+#if !CONFIG_ETH_UPLINK
         httpd_register_uri_handler(server, &scanp);
+#endif
         httpd_register_uri_handler(server, &vpnp);
         httpd_register_uri_handler(server, &setupp);
         httpd_register_uri_handler(server, &favicon_uri);
         httpd_register_uri_handler(server, &config_exportp);
         httpd_register_uri_handler(server, &config_importp);
 
+#if !CONFIG_ETH_UPLINK
         // Start captive portal DNS only when no upstream WiFi is configured
         if (ssid == NULL || strlen(ssid) == 0) {
             ESP_LOGI(TAG, "No STA configured, starting captive portal DNS");
             httpd_register_err_handler(server, HTTPD_404_NOT_FOUND, captive_redirect_handler);
             web_server_start_captive_dns();
         }
+#endif
 
         return server;
     }

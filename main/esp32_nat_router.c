@@ -28,7 +28,12 @@
 
 #include "freertos/event_groups.h"
 #include "esp_wifi.h"
+#if !CONFIG_ETH_UPLINK
 #include "esp_eap_client.h"
+#endif
+#if CONFIG_ETH_UPLINK
+#include "esp_eth.h"
+#endif
 
 #include "lwip/opt.h"
 #include "lwip/err.h"
@@ -75,11 +80,13 @@ uint16_t ap_pmtu = 0;
 // AP SSID hidden (0 = visible, 1 = hidden)
 uint8_t ap_ssid_hidden = 0;
 
+#if !CONFIG_ETH_UPLINK
 // WPA2-Enterprise settings
 int32_t eap_method = 0;          // 0=Auto, 1=PEAP, 2=TTLS, 3=TLS
 int32_t ttls_phase2 = 0;         // 0=MSCHAPv2, 1=MSCHAP, 2=PAP, 3=CHAP
 int32_t use_cert_bundle = 0;     // 0=off, 1=on
 int32_t disable_time_check = 0;  // 0=off, 1=on
+#endif
 
 // WireGuard VPN settings
 int32_t vpn_enabled = 0;
@@ -140,7 +147,12 @@ struct portmap_table_entry portmap_tab[IP_PORTMAP_MAX];
 struct dhcp_reservation_entry dhcp_reservations[MAX_DHCP_RESERVATIONS];
 
 esp_netif_t* wifiAP;
+#if CONFIG_ETH_UPLINK
+esp_netif_t* ethNetif = NULL;
+esp_eth_handle_t eth_handle = NULL;
+#else
 esp_netif_t* wifiSTA;
+#endif
 
 httpd_handle_t start_webserver(void);
 
@@ -853,6 +865,19 @@ static err_t netif_linkoutput_hook(struct netif *netif, struct pbuf *p) {
 }
 
 void init_byte_counter(void) {
+#if CONFIG_ETH_UPLINK
+    if (ethNetif != NULL && original_netif_input == NULL) {
+        extern struct netif *esp_netif_get_netif_impl(esp_netif_t *esp_netif);
+        sta_netif = esp_netif_get_netif_impl(ethNetif);
+        if (sta_netif != NULL) {
+            original_netif_input = sta_netif->input;
+            sta_netif->input = netif_input_hook;
+            original_netif_linkoutput = sta_netif->linkoutput;
+            sta_netif->linkoutput = netif_linkoutput_hook;
+            ESP_LOGI(TAG, "Byte counter initialized for ETH interface (input & output)");
+        }
+    }
+#else
     if (wifiSTA != NULL && original_netif_input == NULL) {
         // Get the underlying lwIP netif structure
         esp_netif_t *sta_netif_handle = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
@@ -860,20 +885,21 @@ void init_byte_counter(void) {
             // Access internal lwIP netif - this is internal API but necessary for hooking
             extern struct netif *esp_netif_get_netif_impl(esp_netif_t *esp_netif);
             sta_netif = esp_netif_get_netif_impl(sta_netif_handle);
-            
+
             if (sta_netif != NULL) {
                 // Store and hook input function
                 original_netif_input = sta_netif->input;
                 sta_netif->input = netif_input_hook;
-                
+
                 // Store and hook linkoutput function
                 original_netif_linkoutput = sta_netif->linkoutput;
                 sta_netif->linkoutput = netif_linkoutput_hook;
-                
+
                 ESP_LOGI(TAG, "Byte counter initialized for STA interface (input & output)");
             }
         }
     }
+#endif
 }
 
 uint64_t get_sta_bytes_sent(void) {
@@ -1303,10 +1329,12 @@ static void initialize_console(void)
 
 void * led_status_thread(void * p)
 {
-    // Always init boot button for factory reset detection
+#if !CONFIG_ETH_UPLINK
+    // Init boot button for factory reset detection (GPIO0 used by ETH clock on WT32-ETH01)
     gpio_reset_pin(BOOT_BUTTON_GPIO);
     gpio_set_direction(BOOT_BUTTON_GPIO, GPIO_MODE_INPUT);
     gpio_set_pull_mode(BOOT_BUTTON_GPIO, GPIO_PULLUP_ONLY);
+#endif
 
     bool led_enabled = (led_gpio >= 0);
     if (led_enabled) {
@@ -1330,6 +1358,7 @@ void * led_status_thread(void * p)
         for (int t = 0; t < 1000 / POLL_INTERVAL_MS; t++) {
             vTaskDelay(pdMS_TO_TICKS(POLL_INTERVAL_MS));
 
+#if !CONFIG_ETH_UPLINK
             if (gpio_get_level(BOOT_BUTTON_GPIO) == 0) {
                 held_ms += POLL_INTERVAL_MS;
                 // Rapid LED toggle for visual feedback during hold
@@ -1349,6 +1378,7 @@ void * led_status_thread(void * p)
             } else {
                 held_ms = 0;
             }
+#endif
         }
     }
 }
@@ -1483,6 +1513,91 @@ static void vpn_connect_task(void *pvParameters)
     vTaskDelete(NULL);
 }
 
+#if CONFIG_ETH_UPLINK
+static void eth_event_handler(void* arg, esp_event_base_t event_base,
+                               int32_t event_id, void* event_data)
+{
+    if (event_base == ETH_EVENT) {
+        if (event_id == ETHERNET_EVENT_CONNECTED) {
+            ESP_LOGI(TAG, "Ethernet link up");
+        } else if (event_id == ETHERNET_EVENT_DISCONNECTED) {
+            ESP_LOGI(TAG, "Ethernet link down");
+            if (vpn_connected) {
+                vpn_disconnect();
+            }
+            ap_connect = false;
+            xEventGroupClearBits(wifi_event_group, WIFI_CONNECTED_BIT);
+        } else if (event_id == ETHERNET_EVENT_START) {
+            ESP_LOGI(TAG, "Ethernet started");
+        }
+    } else if (event_base == IP_EVENT && event_id == IP_EVENT_ETH_GOT_IP) {
+        ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
+        ESP_LOGI(TAG, "ETH got ip:" IPSTR, IP2STR(&event->ip_info.ip));
+        ap_connect = true;
+        my_ip = event->ip_info.ip.addr;
+        delete_portmap_tab();
+        apply_portmap_tab();
+
+        // Copy DNS from ETH to AP
+        esp_netif_dns_info_t dns;
+        if (!(ap_dns && ap_dns[0])) {
+            if (esp_netif_get_dns_info(ethNetif, ESP_NETIF_DNS_MAIN, &dns) == ESP_OK) {
+                esp_netif_set_dns_info(wifiAP, ESP_NETIF_DNS_MAIN, &dns);
+                ESP_LOGI(TAG, "set dns to:" IPSTR, IP2STR(&(dns.ip.u_addr.ip4)));
+            }
+        }
+
+        init_byte_counter();
+
+        if (!esp_sntp_enabled()) {
+            init_sntp();
+        }
+        if (vpn_enabled) {
+            xTaskCreate(vpn_connect_task, "vpn_connect", 4096, NULL, 5, NULL);
+        }
+        xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);
+    }
+}
+
+static void wifi_ap_event_handler(void* arg, esp_event_base_t event_base,
+                                   int32_t event_id, void* event_data)
+{
+    if (event_id == WIFI_EVENT_AP_START) {
+        ESP_LOGI(TAG, "AP started");
+        init_ap_netif_hooks();
+    } else if (event_id == WIFI_EVENT_AP_STACONNECTED) {
+        wifi_event_ap_staconnected_t* event = (wifi_event_ap_staconnected_t*) event_data;
+        connect_count++;
+        const char* name = lookup_device_name_by_mac(event->mac);
+        if (name) {
+            ESP_LOGI(TAG, "Client connected: %02X:%02X:%02X:%02X:%02X:%02X (%s) - %d total",
+                     event->mac[0], event->mac[1], event->mac[2],
+                     event->mac[3], event->mac[4], event->mac[5],
+                     name, connect_count);
+        } else {
+            ESP_LOGI(TAG, "Client connected: %02X:%02X:%02X:%02X:%02X:%02X - %d total",
+                     event->mac[0], event->mac[1], event->mac[2],
+                     event->mac[3], event->mac[4], event->mac[5],
+                     connect_count);
+        }
+    } else if (event_id == WIFI_EVENT_AP_STADISCONNECTED) {
+        wifi_event_ap_stadisconnected_t* event = (wifi_event_ap_stadisconnected_t*) event_data;
+        connect_count--;
+        const char* name = lookup_device_name_by_mac(event->mac);
+        if (name) {
+            ESP_LOGI(TAG, "Client disconnected: %02X:%02X:%02X:%02X:%02X:%02X (%s) - %d remain",
+                     event->mac[0], event->mac[1], event->mac[2],
+                     event->mac[3], event->mac[4], event->mac[5],
+                     name, connect_count);
+        } else {
+            ESP_LOGI(TAG, "Client disconnected: %02X:%02X:%02X:%02X:%02X:%02X - %d remain",
+                     event->mac[0], event->mac[1], event->mac[2],
+                     event->mac[3], event->mac[4], event->mac[5],
+                     connect_count);
+        }
+    }
+}
+#else
 static void wifi_event_handler(void* arg, esp_event_base_t event_base,
                                 int32_t event_id, void* event_data)
 {
@@ -1518,7 +1633,7 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
                 ESP_LOGI(TAG, "set dns to:" IPSTR, IP2STR(&(dns.ip.u_addr.ip4)));
             }
         }
-        
+
         // Initialize byte counter after getting IP (interface is ready)
         init_byte_counter();
 
@@ -1579,18 +1694,133 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
         }
     }
 }
+#endif
 
 const int CONNECTED_BIT = BIT0;
 #define JOIN_TIMEOUT_MS (2000)
 
 
+#if CONFIG_ETH_UPLINK
+void eth_init(const char* static_ip, const char* subnet_mask, const char* gateway_addr,
+              const uint8_t* ap_mac, const char* ap_ssid, const char* ap_passwd, const char* ap_ip)
+{
+    esp_netif_dns_info_t dnsserver;
+
+    wifi_event_group = xEventGroupCreate();
+
+    esp_netif_init();
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
+
+    // --- Ethernet uplink ---
+    // Power on LAN8720 PHY via GPIO16 before EMAC init (WT32-ETH01)
+#if CONFIG_ETH_PHY_POWER_GPIO >= 0
+    gpio_config_t phy_power_cfg = {
+        .pin_bit_mask = (1ULL << CONFIG_ETH_PHY_POWER_GPIO),
+        .mode = GPIO_MODE_OUTPUT,
+    };
+    gpio_config(&phy_power_cfg);
+    gpio_set_level(CONFIG_ETH_PHY_POWER_GPIO, 1);
+    vTaskDelay(pdMS_TO_TICKS(20));  // Let PHY power stabilize
+#endif
+
+    eth_mac_config_t mac_config = ETH_MAC_DEFAULT_CONFIG();
+    eth_esp32_emac_config_t emac_config = ETH_ESP32_EMAC_DEFAULT_CONFIG();
+    emac_config.smi_gpio.mdc_num = CONFIG_ETH_MDC_GPIO;
+    emac_config.smi_gpio.mdio_num = CONFIG_ETH_MDIO_GPIO;
+    esp_eth_mac_t *mac = esp_eth_mac_new_esp32(&emac_config, &mac_config);
+
+    eth_phy_config_t phy_config = ETH_PHY_DEFAULT_CONFIG();
+    phy_config.phy_addr = CONFIG_ETH_PHY_ADDR;
+    // phy_config.reset_gpio_num = CONFIG_ETH_PHY_POWER_GPIO; 
+    phy_config.reset_gpio_num = -1;  // Don't use PHY reset - we handle power via GPIO above
+    esp_eth_phy_t *phy = esp_eth_phy_new_lan87xx(&phy_config);
+
+    esp_eth_config_t config = ETH_DEFAULT_CONFIG(mac, phy);
+    ESP_ERROR_CHECK(esp_eth_driver_install(&config, &eth_handle));
+
+    esp_netif_config_t netif_cfg = ESP_NETIF_DEFAULT_ETH();
+    ethNetif = esp_netif_new(&netif_cfg);
+    esp_netif_attach(ethNetif, esp_eth_new_netif_glue(eth_handle));
+
+    // Static IP on ETH if configured
+    if (strlen(static_ip) > 0 && strlen(subnet_mask) > 0 && strlen(gateway_addr) > 0) {
+        has_static_ip = true;
+        esp_netif_ip_info_t ipInfo;
+        ipInfo.ip.addr = esp_ip4addr_aton(static_ip);
+        ipInfo.gw.addr = esp_ip4addr_aton(gateway_addr);
+        ipInfo.netmask.addr = esp_ip4addr_aton(subnet_mask);
+        esp_netif_dhcpc_stop(ethNetif);
+        esp_netif_set_ip_info(ethNetif, &ipInfo);
+        apply_portmap_tab();
+    }
+
+    // Register ETH events
+    ESP_ERROR_CHECK(esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID, &eth_event_handler, NULL));
+    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP, &eth_event_handler, NULL));
+
+    // --- WiFi AP only ---
+    wifiAP = esp_netif_create_default_wifi_ap();
+
+    my_ap_ip = esp_ip4addr_aton(ap_ip);
+    esp_netif_ip_info_t ipInfo_ap;
+    ipInfo_ap.ip.addr = my_ap_ip;
+    ipInfo_ap.gw.addr = my_ap_ip;
+    esp_netif_set_ip4_addr(&ipInfo_ap.netmask, 255,255,255,0);
+    esp_netif_dhcps_stop(wifiAP);
+    esp_netif_set_ip_info(wifiAP, &ipInfo_ap);
+    esp_netif_dhcps_start(wifiAP);
+
+    // WiFi AP-only event handler
+    ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_ap_event_handler, NULL));
+
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+
+    wifi_config_t ap_config = {
+        .ap = {
+            .channel = 0,
+            .authmode = WIFI_AUTH_WPA2_WPA3_PSK,
+            .ssid_hidden = ap_ssid_hidden,
+            .max_connection = AP_MAX_CONNECTIONS,
+            .beacon_interval = 100,
+        }
+    };
+    strlcpy((char*)ap_config.ap.ssid, ap_ssid, sizeof(ap_config.ap.ssid));
+    if (strlen(ap_passwd) < 8) {
+        ap_config.ap.authmode = WIFI_AUTH_OPEN;
+    } else {
+        strlcpy((char*)ap_config.ap.password, ap_passwd, sizeof(ap_config.ap.password));
+    }
+
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
+    ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &ap_config));
+    if (ap_mac != NULL) {
+        ESP_ERROR_CHECK(esp_wifi_set_mac(ESP_IF_WIFI_AP, ap_mac));
+    }
+
+    // Enable DNS (offer) for dhcp server
+    dhcps_offer_t dhcps_dns_value = OFFER_DNS;
+    esp_netif_dhcps_option(wifiAP, ESP_NETIF_OP_SET, ESP_NETIF_DOMAIN_NAME_SERVER, &dhcps_dns_value, sizeof(dhcps_dns_value));
+
+    // DNS server for DHCP clients
+    const char *dns_src = (ap_dns && ap_dns[0]) ? ap_dns : "1.1.1.1";
+    dnsserver.ip.u_addr.ip4.addr = esp_ip4addr_aton(dns_src);
+    dnsserver.ip.type = ESP_IPADDR_TYPE_V4;
+    esp_netif_set_dns_info(wifiAP, ESP_NETIF_DNS_MAIN, &dnsserver);
+
+    ESP_ERROR_CHECK(esp_wifi_start());
+    ESP_ERROR_CHECK(esp_eth_start(eth_handle));
+
+    ESP_LOGI(TAG, "Ethernet-to-WiFi NAT Router initialized");
+}
+#else
 void wifi_init(const uint8_t* mac, const char* ssid, const char* ent_username, const char* ent_identity, const char* passwd, const char* static_ip, const char* subnet_mask, const char* gateway_addr, const uint8_t* ap_mac, const char* ap_ssid, const char* ap_passwd, const char* ap_ip)
 {
     esp_netif_dns_info_t dnsserver;
     // esp_netif_dns_info_t dnsinfo;
 
     wifi_event_group = xEventGroupCreate();
-  
+
     esp_netif_init();
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     wifiAP = esp_netif_create_default_wifi_ap();
@@ -1733,15 +1963,18 @@ void wifi_init(const uint8_t* mac, const char* ssid, const char* ent_username, c
         ESP_LOGI(TAG, "wifi_init_apsta finished.");
         ESP_LOGI(TAG, "connect to ap SSID: %s ", ssid);
     } else {
-        ESP_LOGI(TAG, "wifi_init_ap with default finished.");      
+        ESP_LOGI(TAG, "wifi_init_ap with default finished.");
     }
 }
+#endif
 
+#if !CONFIG_ETH_UPLINK
 uint8_t* mac = NULL;
 char* ssid = NULL;
 char* ent_username = NULL;
 char* ent_identity = NULL;
 char* passwd = NULL;
+#endif
 char* static_ip = NULL;
 char* subnet_mask = NULL;
 char* gateway_addr = NULL;
@@ -1773,6 +2006,7 @@ void app_main(void)
     ESP_LOGI(TAG, "Command history disabled");
 #endif
 
+#if !CONFIG_ETH_UPLINK
     get_config_param_blob("mac", &mac, 6);
     get_config_param_str("ssid", &ssid);
     if (ssid == NULL) {
@@ -1790,6 +2024,7 @@ void app_main(void)
     if (passwd == NULL) {
         passwd = param_set_default("");
     }
+#endif
     get_config_param_str("static_ip", &static_ip);
     if (static_ip == NULL) {
         static_ip = param_set_default("");
@@ -1860,6 +2095,7 @@ void app_main(void)
         ESP_LOGI(TAG, "AP SSID hidden enabled");
     }
 
+#if !CONFIG_ETH_UPLINK
     // Load WPA2-Enterprise settings from NVS (defaults: 0)
     int eap_setting = 0;
     if (get_config_param_int("eap_method", &eap_setting) == ESP_OK) {
@@ -1877,6 +2113,7 @@ void app_main(void)
     if (get_config_param_int("no_time_chk", &time_check_setting) == ESP_OK) {
         disable_time_check = (int32_t)time_check_setting;
     }
+#endif
 
     // Load WireGuard VPN settings from NVS
     int vpn_setting = 0;
@@ -1927,8 +2164,11 @@ void app_main(void)
         ESP_LOGI(TAG, "VPN enabled, MSS=1380 PMTU=1440 pre-set");
     }
 
-    // Setup WIFI
+#if CONFIG_ETH_UPLINK
+    eth_init(static_ip, subnet_mask, gateway_addr, ap_mac, ap_ssid, ap_passwd, ap_ip);
+#else
     wifi_init(mac, ssid, ent_username, ent_identity, passwd, static_ip, subnet_mask, gateway_addr, ap_mac, ap_ssid, ap_passwd, ap_ip);
+#endif
 
     pthread_t t1;
     pthread_create(&t1, NULL, led_status_thread, NULL);
@@ -1974,11 +2214,16 @@ void app_main(void)
            "Use UP/DOWN arrows to navigate through command history.\n"
            "Press TAB when typing command name to auto-complete.\n");
 
+#if CONFIG_ETH_UPLINK
+    printf("\nESP32 Ethernet-to-WiFi NAT Router\n"
+           "Configure AP using 'set_ap' and restart.\n");
+#else
     if (strlen(ssid) == 0) {
          printf("\n"
                "Unconfigured WiFi\n"
-               "Configure using 'set_sta' and 'set_ap' and restart.\n");       
+               "Configure using 'set_sta' and 'set_ap' and restart.\n");
     }
+#endif
 
     /* Figure out if the terminal supports escape sequences */
     int probe_status = linenoiseProbe();

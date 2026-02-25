@@ -1,0 +1,12 @@
+# WT32-ETH01 Ethernet uplink variant
+# Use with: idf.py -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.wt32_eth01" build
+
+# Ethernet uplink mode
+CONFIG_ETH_UPLINK=y
+CONFIG_ETH_MDC_GPIO=23
+CONFIG_ETH_MDIO_GPIO=18
+CONFIG_ETH_PHY_ADDR=1
+CONFIG_ETH_PHY_POWER_GPIO=16
+
+# Ethernet driver
+CONFIG_ETH_USE_ESP32_EMAC=y

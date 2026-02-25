@@ -272,6 +272,7 @@ setTimeout(\"location.href = '/'\", 10000);\
 </table>\
 </form>"
 
+#if !CONFIG_ETH_UPLINK
 /* STA Settings section - uses %s for: ssid, ent_username, ent_identity,
    eap_method selected x4, ttls_phase2 selected x4, cert_bundle checked, no_time_chk checked, sta_mac */
 #define CONFIG_CHUNK_STA "\
@@ -303,6 +304,7 @@ setTimeout(\"location.href = '/'\", 10000);\
 <tr><td></td><td><input type='submit' value='Save &amp; Reboot' class='ok-button'/></td></tr>\
 </table>\
 </form>"
+#endif
 
 /* Static IP section - uses %s for: static_ip, subnet_mask, gateway */
 #define CONFIG_CHUNK_STATIC "\
@@ -811,6 +813,7 @@ setTimeout(\"location.href = '/'\", 10000);\
 </body>\
 </html>"
 
+#if !CONFIG_ETH_UPLINK
 /* WiFi Scan Page */
 #define SCAN_PAGE "<html>\
 <head>\
@@ -875,3 +878,4 @@ h1 { font-size: 1.5rem; font-weight: 600; color: #00d9ff; margin-bottom: 1rem; t
 </body>\
 </html>\
 "
+#endif /* !CONFIG_ETH_UPLINK */

@@ -9,3 +9,36 @@ menu "Example Configuration"
             and uses it to store command history.
 
 endmenu
+
+menu "NAT Router Uplink"
+
+    choice UPLINK_TYPE
+        prompt "Uplink interface"
+        default WIFI_STA_UPLINK
+        config WIFI_STA_UPLINK
+            bool "WiFi STA"
+        config ETH_UPLINK
+            bool "Ethernet (LAN8720)"
+    endchoice
+
+    config ETH_MDC_GPIO
+        int "ETH MDC GPIO"
+        default 23
+        depends on ETH_UPLINK
+
+    config ETH_MDIO_GPIO
+        int "ETH MDIO GPIO"
+        default 18
+        depends on ETH_UPLINK
+
+    config ETH_PHY_ADDR
+        int "ETH PHY address"
+        default 1
+        depends on ETH_UPLINK
+
+    config ETH_PHY_POWER_GPIO
+        int "ETH PHY power GPIO (-1 for none)"
+        default 16
+        depends on ETH_UPLINK
+
+endmenu
