@@ -915,6 +915,7 @@ static struct {
     struct arg_int *ext_port;
     struct arg_str *int_ip;
     struct arg_int *int_port;
+    struct arg_str *iface;
     struct arg_end *end;
 } portmap_args;
 
@@ -982,7 +983,17 @@ int portmap(int argc, char **argv)
             }
         }
 
-        add_portmap(tcp_udp, ext_port, int_ip, int_port);
+        uint8_t iface = 0;  // Default: STA
+        if (portmap_args.iface->count > 0) {
+            if (strcasecmp(portmap_args.iface->sval[0], "VPN") == 0) {
+                iface = 1;
+            } else if (strcasecmp(portmap_args.iface->sval[0], "STA") != 0) {
+                printf("Interface must be 'STA' or 'VPN'\n");
+                return 1;
+            }
+        }
+
+        add_portmap(tcp_udp, ext_port, int_ip, int_port, iface);
     } else {
         del_portmap(tcp_udp, ext_port);
     }
@@ -997,7 +1008,8 @@ static void register_portmap(void)
     portmap_args.ext_port = arg_int1(NULL, NULL, "<ext_portno>", "external port number");
     portmap_args.int_ip = arg_str1(NULL, NULL, "<int_ip>", "internal IP or device name");
     portmap_args.int_port = arg_int1(NULL, NULL, "<int_portno>", "internal port number");
-    portmap_args.end = arg_end(5);
+    portmap_args.iface = arg_str0(NULL, NULL, "[STA|VPN]", "interface (default: STA)");
+    portmap_args.end = arg_end(6);
 
     const esp_console_cmd_t cmd = {
         .command = "portmap",

@@ -89,7 +89,7 @@ This is useful for cloning settings across multiple devices or for backup before
 Manage network mappings, i.e. IP addresses via DHCP and ports via port forwarding:
 - **Connected Clients**: Shows all currently connected clients with MAC, IP, and optially name.
 - **DHCP Reservations**: Assign fixed IP addresses to specific MAC addresses (useful for servers/devices that need consistent IPs). Make sure you assign port numbers in the range of the DHCP pool.
-- **Port Forwarding**: Create port mappings to access devices behind the NAT router (e.g., `TCP 8080 -> 192.168.4.2:80`)
+- **Port Forwarding**: Create port mappings to access devices behind the NAT router (e.g., `TCP 8080 -> 192.168.4.2:80`). Each mapping can be bound to the **STA** (upstream WiFi) or **VPN** (WireGuard tunnel) interface.
 
 <img src="https://raw.githubusercontent.com/martin-ger/esp32_nat_router/master/UI_Mappings.png">
 
@@ -193,6 +193,17 @@ portmap add TCP 8080 192.168.4.2 80
 ```
 
 Assuming the esp32NAT's IP address in your `local router` is `192.168.0.57`, you can access the server by typing `192.168.0.57:8080` into your browser. Be aware that you can't forward to the routers port 80 as long as the conig webserver runs here. If you absolutly need that, either turn off the web server or recompile the sources with a different config port.
+
+#### Interface Selection (STA / VPN)
+Each port mapping can be bound to either the **STA** (upstream WiFi) or **VPN** (WireGuard tunnel) interface. This controls which external IP the mapping is exposed on:
+
+- **STA** (default): The port is forwarded on the router's upstream WiFi IP. Use this for standard port forwarding.
+- **VPN**: The port is forwarded on the WireGuard tunnel IP. Use this to expose services through the VPN. VPN port mappings are only active while the VPN tunnel is connected.
+
+Via the serial console, append `VPN` to bind a mapping to the VPN interface:
+```
+portmap add TCP 8080 192.168.4.2 80 VPN
+```
 
 **Tip:** When you assign a name to a DHCP reservation, you can use that name instead of the IP address when creating firewall (ACL) rules. For example, after creating a reservation with `-n MyPhone`, you can use `MyPhone` as source or destination in ACL rules.
 
@@ -841,7 +852,7 @@ Add the bridge to your Claude Code MCP settings (`~/.claude/claude_desktop_confi
 | **WiFi STA** | `set_sta`, `set_sta_static`, `set_sta_mac` | Upstream WiFi configuration (incl. WPA2-Enterprise) |
 | **WiFi AP** | `set_ap`, `set_ap_ip`, `set_ap_dns`, `set_ap_mac`, `set_ap_hidden` | Access point configuration |
 | **DHCP** | `add_dhcp_reservation`, `delete_dhcp_reservation` | Fixed IP assignments by MAC |
-| **Port Forwarding** | `add_portmap`, `delete_portmap` | NAT port mapping rules |
+| **Port Forwarding** | `add_portmap`, `delete_portmap` | NAT port mapping rules (STA or VPN interface) |
 | **Firewall** | `acl_add`, `acl_delete`, `acl_clear`, `acl_clear_stats` | ACL rule management |
 | **PCAP** | `pcap_set_mode`, `pcap_status`, `pcap_set_snaplen` | Packet capture control |
 | **Network Trace** | `network_trace` | Live capture with local tcpdump analysis |
@@ -971,13 +982,14 @@ dhcp_reserve  [add|del] <mac> [<ip>] [-- <name>]
           <ip>  IP address (required for add)
   --, -n, ----name=<name>  optional device name
 
-portmap  [add|del] [TCP|UDP] <ext_portno> <int_ip> <int_portno>
+portmap  [add|del] [TCP|UDP] <ext_portno> <int_ip> <int_portno> [STA|VPN]
   Add or delete a portmapping to the router
      [add|del]  add or delete portmapping
      [TCP|UDP]  TCP or UDP port
   <ext_portno>  external port number
       <int_ip>  internal IP or device name
   <int_portno>  internal port number
+     [STA|VPN]  interface to bind to (default: STA)
 
 acl   <list> <proto> <src> [<s_port>] <dst> [<d_port>] <action>
   Manage firewall ACL rules

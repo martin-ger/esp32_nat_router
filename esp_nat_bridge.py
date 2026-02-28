@@ -475,7 +475,8 @@ async def delete_dhcp_reservation(mac: str) -> str:
 
 @mcp.tool()
 async def add_portmap(
-    proto: str, external_port: int, internal_ip: str, internal_port: int
+    proto: str, external_port: int, internal_ip: str, internal_port: int,
+    iface: str = "STA"
 ) -> str:
     """Forward an incoming port from the internet to a device on the hotspot network.
 
@@ -487,13 +488,20 @@ async def add_portmap(
         external_port: Port number visible from the internet side.
         internal_ip: Device IP on the hotspot network, or its DHCP reservation name.
         internal_port: Port number on the device.
+        iface: Interface to bind to - "STA" (default, upstream WiFi) or "VPN" (WireGuard tunnel).
     """
     _require(proto, "proto")
     _require(internal_ip, "internal_ip")
     proto = proto.upper()
     if proto not in ("TCP", "UDP"):
         raise ValueError("Protocol must be TCP or UDP")
-    return await _cmd(f"portmap add {proto} {external_port} {internal_ip} {internal_port}")
+    iface = iface.upper()
+    if iface not in ("STA", "VPN"):
+        raise ValueError("Interface must be STA or VPN")
+    cmd = f"portmap add {proto} {external_port} {internal_ip} {internal_port}"
+    if iface == "VPN":
+        cmd += " VPN"
+    return await _cmd(cmd)
 
 
 @mcp.tool()

@@ -451,6 +451,7 @@ h2 { font-size: 1.15rem; font-weight: 500; color: #00d9ff; margin: 1.5rem 0 0.75
 .data-table thead { background: rgba(0, 217, 255, 0.1); }\
 .data-table th { padding: 0.75rem 0.5rem; text-align: left; font-weight: 600; color: #00d9ff; font-size: 0.9rem; }\
 .data-table td { padding: 0.75rem 0.5rem; border-bottom: 1px solid rgba(255, 255, 255, 0.05); font-size: 0.9rem; }\
+.data-table td:first-child { color: #e0e0e0; text-align: left; width: auto; }\
 .data-table tbody tr:last-child td { border-bottom: none; }\
 .data-table tbody tr:hover { background: rgba(0, 217, 255, 0.05); }\
 table { width: 100%; border-collapse: collapse; }\
@@ -548,9 +549,10 @@ document.getElementById('dhcp_mac').scrollIntoView({behavior: 'smooth', block: '
 </div>\
 <div class='section'>\
 <h2>Port Forwarding</h2>\
-<table class='data-table'>\
+<table class='data-table' style='table-layout:fixed;'>\
 <thead>\
 <tr>\
+<th>Interface</th>\
 <th>Protocol</th>\
 <th>Ext. Port</th>\
 <th>Internal IP</th>\
@@ -567,6 +569,7 @@ document.getElementById('dhcp_mac').scrollIntoView({behavior: 'smooth', block: '
 <h2>Add Port Forwards</h2>\
 <form action='/mappings' method='GET'>\
 <table>\
+<tr><td>Interface</td><td><select name='iface'><option value='STA'>STA (WiFi)</option><option value='VPN'>VPN</option></select></td></tr>\
 <tr><td>Protocol</td><td><select name='proto'><option value='TCP'>TCP</option><option value='UDP'>UDP</option></select></td></tr>\
 <tr><td>External Port</td><td><input type='number' name='ext_port' min='1' max='65535' placeholder='8080'/></td></tr>\
 <tr><td>Internal IP</td><td><input type='text' name='int_ip' placeholder='IP or device name'/></td></tr>\

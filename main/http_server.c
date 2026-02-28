@@ -1485,8 +1485,14 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
                         }
 
                         if (err_msg == NULL) {
-                            add_portmap(proto, ext_port, int_ip, int_port);
-                            ESP_LOGI(TAG, "Added port mapping: %s %d -> %s:%d", param1, ext_port, param3, int_port);
+                            uint8_t iface = 0;  // Default: STA
+                            char iface_param[8];
+                            if (httpd_query_key_value(buf, "iface", iface_param, sizeof(iface_param)) == ESP_OK) {
+                                if (strcmp(iface_param, "VPN") == 0) iface = 1;
+                            }
+                            add_portmap(proto, ext_port, int_ip, int_port, iface);
+                            ESP_LOGI(TAG, "Added port mapping: %s %s %d -> %s:%d",
+                                     iface ? "VPN" : "STA", param1, ext_port, param3, int_port);
                         } else {
                             /* Redirect back with error parameter */
                             char redirect_url[128];
@@ -1683,11 +1689,13 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
             snprintf(row, sizeof(row),
                 "<tr>"
                 "<td>%s</td>"
+                "<td>%s</td>"
                 "<td>%d</td>"
                 "<td>%s</td>"
                 "<td>%d</td>"
                 "<td><a href='/mappings?del_proto=%s&del_port=%d' class='red-button'>Delete</a></td>"
                 "</tr>",
+                portmap_tab[i].iface == 1 ? "VPN" : "STA",
                 portmap_tab[i].proto == PROTO_TCP ? "TCP" : "UDP",
                 portmap_tab[i].mport,
                 ip_or_name,
@@ -1701,7 +1709,7 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
 
     if (!has_mappings) {
         httpd_resp_send_chunk(req,
-            "<tr><td colspan='5' style='text-align:center; color:#888;'>No port mappings configured</td></tr>",
+            "<tr><td colspan='6' style='text-align:center; color:#888;'>No port mappings configured</td></tr>",
             HTTPD_RESP_USE_STRLEN);
     }
 
@@ -2550,7 +2558,7 @@ static esp_err_t vpn_get_handler(httpd_req_t *req)
         "<tr><td>Port</td><td><input type='number' name='vpn_port' value='%d' min='1' max='65535'/></td></tr>"
         "<tr><td>Tunnel IP</td><td><input type='text' name='vpn_ip' value='%s' placeholder='e.g. 10.0.0.2'/></td></tr>"
         "<tr><td>Netmask</td><td><input type='text' name='vpn_mask' value='%s' placeholder='255.255.255.0'/></td></tr>"
-        "<tr><td>Keepalive</td><td><input type='number' name='vpn_ka' value='%d' min='0' max='65535'/> sec</td></tr>",
+        "<tr><td>Keepalive (sec)</td><td><input type='number' name='vpn_ka' value='%d' min='0' max='65535'/></td></tr>",
         vpn_endpoint ? vpn_endpoint : "",
         (int)vpn_port,
         vpn_address ? vpn_address : "",

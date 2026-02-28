@@ -15,7 +15,7 @@ extern "C" {
 
 #define PARAM_NAMESPACE "esp32_nat"
 
-#define ROUTER_VERSION "2.2.1"
+#define ROUTER_VERSION "2.2.2"
 
 #define PROTO_TCP 6
 #define PROTO_UDP 17
@@ -54,6 +54,7 @@ struct portmap_table_entry {
     uint16_t dport;
     uint8_t proto;
     uint8_t valid;
+    uint8_t iface;       // 0=STA, 1=VPN
 };
 
 extern struct portmap_table_entry portmap_tab[];
@@ -115,6 +116,7 @@ extern char* vpn_endpoint;          // Peer endpoint host/IP
 extern char* vpn_address;           // Tunnel IP (e.g. "10.0.0.2")
 extern char* vpn_netmask;           // Tunnel netmask (e.g. "255.255.255.0")
 extern bool vpn_connected;          // Runtime state: tunnel is up
+extern uint32_t vpn_tunnel_ip;      // Cached VPN tunnel IP (network byte order, 0 if not connected)
 extern int32_t vpn_killswitch;      // Kill switch: block AP client internet when VPN is down (default on)
 extern int32_t vpn_route_all;       // Route all traffic through VPN (1) or only VPN subnet (0, split tunnel)
 
@@ -131,7 +133,7 @@ esp_err_t get_config_param_int(char* name, int* param);
 esp_err_t get_config_param_str(char* name, char** param);
 
 void print_portmap_tab();
-esp_err_t add_portmap(uint8_t proto, uint16_t mport, uint32_t daddr, uint16_t dport);
+esp_err_t add_portmap(uint8_t proto, uint16_t mport, uint32_t daddr, uint16_t dport, uint8_t iface);
 esp_err_t del_portmap(uint8_t proto, uint16_t mport);
 esp_err_t clear_all_portmaps();
 

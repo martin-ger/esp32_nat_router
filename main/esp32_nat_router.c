@@ -92,6 +92,7 @@ char* vpn_endpoint = NULL;
 char* vpn_address = NULL;
 char* vpn_netmask = NULL;
 bool vpn_connected = false;
+uint32_t vpn_tunnel_ip = 0;         // Cached VPN tunnel IP (network byte order)
 int32_t vpn_killswitch = 1;         // Kill switch default on
 int32_t vpn_route_all = 1;          // Route all traffic through VPN (default on)
 
@@ -182,7 +183,14 @@ static void initialize_nvs(void)
 esp_err_t apply_portmap_tab() {
     for (int i = 0; i<IP_PORTMAP_MAX; i++) {
         if (portmap_tab[i].valid) {
-            ip_portmap_add(portmap_tab[i].proto, my_ip, portmap_tab[i].mport, portmap_tab[i].daddr, portmap_tab[i].dport);
+            uint32_t bind_ip;
+            if (portmap_tab[i].iface == 1) {
+                if (vpn_tunnel_ip == 0) continue;  // VPN not connected, skip
+                bind_ip = vpn_tunnel_ip;
+            } else {
+                bind_ip = my_ip;
+            }
+            ip_portmap_add(portmap_tab[i].proto, bind_ip, portmap_tab[i].mport, portmap_tab[i].daddr, portmap_tab[i].dport);
         }
     }
     return ESP_OK;
@@ -200,9 +208,10 @@ esp_err_t delete_portmap_tab() {
 void print_portmap_tab() {
     for (int i = 0; i<IP_PORTMAP_MAX; i++) {
         if (portmap_tab[i].valid) {
-            printf ("%s", portmap_tab[i].proto == PROTO_TCP?"TCP ":"UDP ");
+            const char *iface_name = portmap_tab[i].iface == 1 ? "VPN" : "STA";
+            printf ("%s %s ", iface_name, portmap_tab[i].proto == PROTO_TCP?"TCP":"UDP");
             ip4_addr_t addr;
-            addr.addr = my_ip;
+            addr.addr = portmap_tab[i].iface == 1 ? vpn_tunnel_ip : my_ip;
             printf (IPSTR":%d -> ", IP2STR(&addr), portmap_tab[i].mport);
 
             /* Try to look up device name for destination IP */
@@ -239,10 +248,17 @@ esp_err_t get_portmap_tab() {
     }
     nvs_close(nvs);
 
+    /* Sanitize iface field (backward compat with old NVS blobs) */
+    for (int i = 0; i < IP_PORTMAP_MAX; i++) {
+        if (portmap_tab[i].valid && portmap_tab[i].iface > 1) {
+            portmap_tab[i].iface = 0;
+        }
+    }
+
     return err;
 }
 
-esp_err_t add_portmap(u8_t proto, u16_t mport, u32_t daddr, u16_t dport) {
+esp_err_t add_portmap(u8_t proto, u16_t mport, u32_t daddr, u16_t dport, u8_t iface) {
     esp_err_t err;
     nvs_handle_t nvs;
 
@@ -253,6 +269,7 @@ esp_err_t add_portmap(u8_t proto, u16_t mport, u32_t daddr, u16_t dport) {
             portmap_tab[i].daddr = daddr;
             portmap_tab[i].dport = dport;
             portmap_tab[i].valid = 1;
+            portmap_tab[i].iface = iface;
 
             err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
             if (err != ESP_OK) {
@@ -267,7 +284,10 @@ esp_err_t add_portmap(u8_t proto, u16_t mport, u32_t daddr, u16_t dport) {
             }
             nvs_close(nvs);
 
-            ip_portmap_add(proto, my_ip, mport, daddr, dport);
+            uint32_t bind_ip = (iface == 1) ? vpn_tunnel_ip : my_ip;
+            if (bind_ip != 0) {
+                ip_portmap_add(proto, bind_ip, mport, daddr, dport);
+            }
 
             return ESP_OK;
         }
@@ -1386,6 +1406,14 @@ esp_err_t vpn_connect(void)
     ap_mss_clamp = 1380;
     ap_pmtu = 1440;
     vpn_connected = true;
+
+    /* Cache VPN tunnel IP and activate VPN-bound port mappings */
+    if (wg_ctx.netif) {
+        vpn_tunnel_ip = ip_2_ip4(&wg_ctx.netif->ip_addr)->addr;
+    }
+    delete_portmap_tab();
+    apply_portmap_tab();
+
     ESP_LOGI(TAG, "WireGuard VPN connected%s, MSS=1380 PMTU=1440",
              vpn_route_all ? "" : " (split tunnel)");
     return ESP_OK;
@@ -1396,8 +1424,14 @@ void vpn_disconnect(void)
     // Set vpn_connected false FIRST to prevent race with vpn_is_connected()
     // (called from netif hooks and HTTP handlers in other tasks)
     vpn_connected = false;
+    vpn_tunnel_ip = 0;
     ap_mss_clamp = 0;
     ap_pmtu = 0;
+
+    /* Deactivate VPN portmaps, keep STA ones */
+    delete_portmap_tab();
+    apply_portmap_tab();
+
     if (wg_initialized) {
         esp_wireguard_disconnect(&wg_ctx);
         wg_initialized = false;
