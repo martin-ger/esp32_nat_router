@@ -258,6 +258,13 @@ setTimeout(\"location.href = '/'\", 10000);\
 </script>"
 
 /* AP Settings section - uses %s for: ap_ssid, ap_ip, ap_dns, ap_mac, open_checked, hidden_checked */
+/* ETH_UPLINK builds add an extra %d for ap_channel */
+#if CONFIG_ETH_UPLINK
+#define CONFIG_CHUNK_AP_CHANNEL_ROW \
+"<tr><td>Channel</td><td><input type='number' name='ap_channel' min='0' max='13' value='%d' style='width:4em'/> <span style='color:#888;font-size:0.85rem;'>(0 = auto)</span></td></tr>"
+#else
+#define CONFIG_CHUNK_AP_CHANNEL_ROW ""
+#endif
 #define CONFIG_CHUNK_AP "\
 <h2>Access Point Settings</h2>\
 <form action='' method='GET'>\
@@ -267,6 +274,7 @@ setTimeout(\"location.href = '/'\", 10000);\
 <tr><td>AP IP Address</td><td><input type='text' name='ap_ip_addr' value='%s' placeholder='192.168.4.1'/></td></tr>\
 <tr><td>DNS Server</td><td><input type='text' name='ap_dns' value='%s' placeholder='empty = use upstream DNS'/></td></tr>\
 <tr><td>MAC Address</td><td><input type='text' name='ap_mac' value='%s' placeholder='AA:BB:CC:DD:EE:FF'/></td></tr>\
+" CONFIG_CHUNK_AP_CHANNEL_ROW "\
 <tr><td>Options</td><td><input type='checkbox' id='ap_op' name='ap_open' value='1' %s onchange=\"if(this.checked)document.getElementById('ap_pw').value='';\"> <span style='color:#888;font-size:0.85rem;'>Open (no password)</span> &nbsp; <input type='checkbox' name='ap_hidden' value='1' %s> <span style='color:#888;font-size:0.85rem;'>Hidden SSID</span></td></tr>\
 <tr><td></td><td><input type='submit' value='Save &amp; Reboot' class='ok-button'/></td></tr>\
 </table>\

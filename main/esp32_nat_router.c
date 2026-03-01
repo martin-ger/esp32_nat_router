@@ -78,6 +78,11 @@ uint16_t ap_pmtu = 0;
 // AP SSID hidden (0 = visible, 1 = hidden)
 uint8_t ap_ssid_hidden = 0;
 
+#if CONFIG_ETH_UPLINK
+// AP WiFi channel (0 = auto, 1-13 = fixed channel; ETH_UPLINK only)
+uint8_t ap_channel = 0;
+#endif
+
 #if !CONFIG_ETH_UPLINK
 // WPA2-Enterprise settings
 int32_t eap_method = 0;          // 0=Auto, 1=PEAP, 2=TTLS, 3=TLS
@@ -584,7 +589,7 @@ void eth_init(const char* static_ip, const char* subnet_mask, const char* gatewa
 
     wifi_config_t ap_config = {
         .ap = {
-            .channel = 0,
+            .channel = ap_channel,
             .authmode = WIFI_AUTH_WPA2_WPA3_PSK,
             .ssid_hidden = ap_ssid_hidden,
             .max_connection = AP_MAX_CONNECTIONS,
@@ -900,6 +905,17 @@ void app_main(void)
     if (ap_ssid_hidden) {
         ESP_LOGI(TAG, "AP SSID hidden enabled");
     }
+
+#if CONFIG_ETH_UPLINK
+    // Load AP channel setting from NVS (default 0 = auto)
+    int channel_setting = 0;
+    if (get_config_param_int("ap_channel", &channel_setting) == ESP_OK) {
+        if (channel_setting >= 1 && channel_setting <= 13) ap_channel = (uint8_t)channel_setting;
+    }
+    if (ap_channel > 0) {
+        ESP_LOGI(TAG, "AP WiFi channel: %d", ap_channel);
+    }
+#endif
 
 #if !CONFIG_ETH_UPLINK
     // Load WPA2-Enterprise settings from NVS (defaults: 0)

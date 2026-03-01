@@ -67,6 +67,9 @@ static void register_set_led_gpio(void);
 static void register_set_led_lowactive(void);
 static void register_set_ttl(void);
 static void register_set_ap_hidden(void);
+#if CONFIG_ETH_UPLINK
+static void register_set_ap_channel(void);
+#endif
 static void register_acl(void);
 static void register_remote_console_cmd(void);
 #ifdef CONFIG_IDF_TARGET_ESP32C3
@@ -240,6 +243,9 @@ void register_router(void)
     register_set_led_lowactive();
     register_set_ttl();
     register_set_ap_hidden();
+#if CONFIG_ETH_UPLINK
+    register_set_ap_channel();
+#endif
     register_remote_console_cmd();
     register_set_vpn();
 #ifdef CONFIG_IDF_TARGET_ESP32C3
@@ -1237,6 +1243,10 @@ static int show(int argc, char **argv)
         addr.addr = my_ap_ip;
         printf("  IP Address: " IPSTR "\n", IP2STR(&addr));
         printf("  DNS Server: %s\n", (ap_dns && ap_dns[0]) ? ap_dns : "(upstream)");
+#if CONFIG_ETH_UPLINK
+        printf("  Channel: %s", ap_channel > 0 ? "" : "auto\n");
+        if (ap_channel > 0) printf("%d\n", ap_channel);
+#endif
 
         char* web_lock = NULL;
         get_config_param_str("lock", &web_lock);
@@ -1862,6 +1872,64 @@ static void register_set_ap_hidden(void)
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }
+
+#if CONFIG_ETH_UPLINK
+/* 'set_ap_channel' command - set AP WiFi channel (ETH_UPLINK only) */
+static int set_ap_channel_cmd(int argc, char **argv)
+{
+    if (argc < 2) {
+        if (ap_channel == 0) {
+            printf("AP channel: auto\n");
+        } else {
+            printf("AP channel: %d\n", ap_channel);
+        }
+        return 0;
+    }
+
+    int channel_val = atoi(argv[1]);
+    if (channel_val < 0 || channel_val > 13) {
+        printf("Invalid channel. Use 0 (auto) or 1-13.\n");
+        return 1;
+    }
+
+    esp_err_t err;
+    nvs_handle_t nvs;
+    err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err != ESP_OK) {
+        printf("Failed to open NVS\n");
+        return err;
+    }
+
+    err = nvs_set_i32(nvs, "ap_channel", channel_val);
+    if (err == ESP_OK) {
+        err = nvs_commit(nvs);
+        if (err == ESP_OK) {
+            ap_channel = (uint8_t)channel_val;
+            if (channel_val == 0) {
+                printf("AP channel set to: auto\n");
+            } else {
+                printf("AP channel set to: %d\n", channel_val);
+            }
+            printf("Restart the device for changes to take effect.\n");
+        }
+    } else {
+        printf("Failed to save setting\n");
+    }
+    nvs_close(nvs);
+    return err;
+}
+
+static void register_set_ap_channel(void)
+{
+    const esp_console_cmd_t cmd = {
+        .command = "set_ap_channel",
+        .help = "Set AP WiFi channel (0=auto, 1-13=fixed, requires restart)",
+        .hint = NULL,
+        .func = &set_ap_channel_cmd,
+    };
+    ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
+}
+#endif
 
 /**
  * @brief Format IP address with device name for /32 addresses

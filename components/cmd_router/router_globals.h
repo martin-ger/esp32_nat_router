@@ -104,6 +104,11 @@ extern uint16_t ap_pmtu;
 // AP SSID hidden (0 = visible, 1 = hidden)
 extern uint8_t ap_ssid_hidden;
 
+#if CONFIG_ETH_UPLINK
+// AP WiFi channel (0 = auto, 1-13 = fixed channel; ETH_UPLINK only)
+extern uint8_t ap_channel;
+#endif
+
 #if !CONFIG_ETH_UPLINK
 // WPA2-Enterprise settings
 extern int32_t eap_method;          // 0=Auto, 1=PEAP, 2=TTLS, 3=TLS

@@ -928,6 +928,23 @@ static esp_err_t config_get_handler(httpd_req_t *req)
                         }
                     }
 
+#if CONFIG_ETH_UPLINK
+                    // Handle AP channel setting (ETH_UPLINK only)
+                    if (httpd_query_key_value(buf, "ap_channel", param5, sizeof(param5)) == ESP_OK) {
+                        int channel_val = atoi(param5);
+                        if (channel_val >= 0 && channel_val <= 13) {
+                            nvs_handle_t nvs;
+                            if (nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs) == ESP_OK) {
+                                nvs_set_i32(nvs, "ap_channel", channel_val);
+                                nvs_commit(nvs);
+                                nvs_close(nvs);
+                                ap_channel = (uint8_t)channel_val;
+                                ESP_LOGI(TAG, "AP channel set to: %d", channel_val);
+                            }
+                        }
+                    }
+#endif
+
                     esp_timer_start_once(restart_timer, 500000);
                 }
             }
@@ -1289,7 +1306,11 @@ static esp_err_t config_get_handler(httpd_req_t *req)
 
     /* Chunk 4: AP Settings */
     snprintf(section, sizeof(section), CONFIG_CHUNK_AP,
-        safe_ap_ssid, ap_ip_str, ap_dns ? ap_dns : "", ap_mac_str, ap_open_checked, ap_hidden_checked);
+        safe_ap_ssid, ap_ip_str, ap_dns ? ap_dns : "", ap_mac_str,
+#if CONFIG_ETH_UPLINK
+        (int)ap_channel,
+#endif
+        ap_open_checked, ap_hidden_checked);
     httpd_resp_send_chunk(req, section, HTTPD_RESP_USE_STRLEN);
 
 #if CONFIG_ETH_UPLINK
