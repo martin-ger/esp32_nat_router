@@ -36,16 +36,16 @@ static int64_t last_deny_log_time[MAX_ACL_LISTS] = {0};
 
 /* ACL list names for display/parsing */
 static const char* acl_names[MAX_ACL_LISTS] = {
-    "to_sta",    /* 0: Internet -> ESP32 (STA input) */
-    "from_sta",  /* 1: ESP32 -> Internet (STA output) */
+    "to_esp",    /* 0: Internet -> ESP32 (uplink input) */
+    "from_esp",  /* 1: ESP32 -> Internet (uplink output) */
     "to_ap",     /* 2: Clients -> ESP32 (AP input) */
     "from_ap"    /* 3: ESP32 -> Clients (AP output) */
 };
 
 /* ACL list description for display */
 static const char* acl_desc[MAX_ACL_LISTS] = {
-    "Internet -> ESP (to_sta)",
-    "ESP -> Internet (from_sta)",
+    "Internet -> ESP (to_esp)",
+    "ESP -> Internet (from_esp)",
     "Clients -> ESP (to_ap)",
     "ESP -> Clients (from_ap)"
 };

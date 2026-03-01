@@ -1019,12 +1019,17 @@ int portmap(int argc, char **argv)
             }
         }
 
-        uint8_t iface = 0;  // Default: STA
+        uint8_t iface = 0;  // Default: STA/ETH (uplink)
         if (portmap_args.iface->count > 0) {
             if (strcasecmp(portmap_args.iface->sval[0], "VPN") == 0) {
                 iface = 1;
+#if CONFIG_ETH_UPLINK
+            } else if (strcasecmp(portmap_args.iface->sval[0], "ETH") != 0) {
+                printf("Interface must be 'ETH' or 'VPN'\n");
+#else
             } else if (strcasecmp(portmap_args.iface->sval[0], "STA") != 0) {
                 printf("Interface must be 'STA' or 'VPN'\n");
+#endif
                 return 1;
             }
         }
@@ -1044,7 +1049,11 @@ static void register_portmap(void)
     portmap_args.ext_port = arg_int1(NULL, NULL, "<ext_portno>", "external port number");
     portmap_args.int_ip = arg_str1(NULL, NULL, "<int_ip>", "internal IP or device name");
     portmap_args.int_port = arg_int1(NULL, NULL, "<int_portno>", "internal port number");
+#if CONFIG_ETH_UPLINK
+    portmap_args.iface = arg_str0(NULL, NULL, "[ETH|VPN]", "interface (default: ETH)");
+#else
     portmap_args.iface = arg_str0(NULL, NULL, "[STA|VPN]", "interface (default: STA)");
+#endif
     portmap_args.end = arg_end(6);
 
     const esp_console_cmd_t cmd = {
@@ -1992,7 +2001,7 @@ static int acl_cmd(int argc, char **argv)
 {
     if (argc < 2) {
         printf("Usage: acl <list> <action> [params...]\n");
-        printf("Lists: from_sta, to_sta, from_ap, to_ap\n");
+        printf("Lists: from_esp, to_esp, from_ap, to_ap\n");
         printf("\nActions:\n");
         printf("  acl <list> clear              - Clear all rules from list\n");
         printf("  acl <list> clear_stats        - Clear statistics for list\n");
@@ -2003,13 +2012,13 @@ static int acl_cmd(int argc, char **argv)
         printf("Ports:     Port number or '*' for any (TCP/UDP only)\n");
         printf("Actions:   allow, deny, allow_monitor, deny_monitor\n");
         printf("\nExamples:\n");
-        printf("  acl from_sta clear\n");
-        printf("  acl from_sta IP any 255.255.255.255 allow\n");
-        printf("  acl from_sta UDP any any any 53 allow\n");
-        printf("  acl from_sta TCP any 22 192.168.4.0/24 * deny\n");
-        printf("  acl from_sta IP any MyPhone deny      # Use device name\n");
-        printf("  acl from_sta IP any any deny          # Block all at end\n");
-        printf("  acl from_sta del 0                    # Delete first rule\n");
+        printf("  acl from_esp clear\n");
+        printf("  acl from_esp IP any 255.255.255.255 allow\n");
+        printf("  acl from_esp UDP any any any 53 allow\n");
+        printf("  acl from_esp TCP any 22 192.168.4.0/24 * deny\n");
+        printf("  acl from_esp IP any MyPhone deny      # Use device name\n");
+        printf("  acl from_esp IP any any deny          # Block all at end\n");
+        printf("  acl from_esp del 0                    # Delete first rule\n");
         return 0;
     }
 
@@ -2017,7 +2026,7 @@ static int acl_cmd(int argc, char **argv)
     int list_no = acl_parse_name(argv[1]);
     if (list_no < 0) {
         printf("Invalid ACL list: %s\n", argv[1]);
-        printf("Use: from_sta, to_sta, from_ap, to_ap\n");
+        printf("Use: from_esp, to_esp, from_ap, to_ap\n");
         return 1;
     }
 
@@ -2174,7 +2183,7 @@ static void register_acl(void)
                 "  acl <list> del <index>       - Delete rule at index\n"
                 "  acl <list> clear             - Clear all rules from list\n"
                 "  acl <list> clear_stats       - Clear statistics for list\n"
-                "  Lists: to_sta, from_sta, to_ap, from_ap\n"
+                "  Lists: to_esp, from_esp, to_ap, from_ap\n"
                 "  Protocols: IP, TCP, UDP, ICMP\n"
                 "  Actions: allow, deny, allow_monitor, deny_monitor",
         .hint = " <list> <proto> <src> [<s_port>] <dst> [<d_port>] <action>",

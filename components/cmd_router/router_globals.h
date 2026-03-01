@@ -54,7 +54,7 @@ struct portmap_table_entry {
     uint16_t dport;
     uint8_t proto;
     uint8_t valid;
-    uint8_t iface;       // 0=STA, 1=VPN
+    uint8_t iface;       // 0=STA/ETH (uplink), 1=VPN
 };
 
 extern struct portmap_table_entry portmap_tab[];
@@ -88,6 +88,9 @@ extern int led_gpio;
 
 // LED low-active mode (0 = active-high, 1 = active-low/inverted)
 extern uint8_t led_lowactive;
+
+// Shared LED toggle state (packet-driven flicker)
+extern uint8_t led_toggle;
 
 // TTL override for STA upstream (0 = disabled/no change, 1-255 = fixed TTL)
 extern uint8_t sta_ttl_override;
@@ -139,6 +142,9 @@ esp_err_t get_config_param_int(char* name, int* param);
 esp_err_t get_config_param_str(char* name, char** param);
 
 void print_portmap_tab();
+esp_err_t get_portmap_tab();
+esp_err_t apply_portmap_tab();
+esp_err_t delete_portmap_tab();
 esp_err_t add_portmap(uint8_t proto, uint16_t mport, uint32_t daddr, uint16_t dport, uint8_t iface);
 esp_err_t del_portmap(uint8_t proto, uint16_t mport);
 esp_err_t clear_all_portmaps();
@@ -229,6 +235,12 @@ void web_server_start_captive_dns(void);
 esp_err_t vpn_connect(void);
 void vpn_disconnect(void);
 bool vpn_is_connected(void);
+void vpn_connect_task(void *pvParameters);
+void init_sntp_if_needed(void);
+
+// VPN subnet helpers (for kill switch packet filtering)
+void vpn_set_subnet(uint32_t ip, uint32_t mask);
+bool vpn_in_subnet(uint32_t ip);
 
 // Password hashing (SHA-256 + salt)
 // Returns true if a non-empty password is stored in NVS.

@@ -1,11 +1,16 @@
-/* Simple HTTP Server Example
-
-   This example code is in the Public Domain (or CC0 licensed, at your option.)
-
-   Unless required by applicable law or agreed to in writing, this
-   software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-   CONDITIONS OF ANY KIND, either express or implied.
-*/
+/* Web interface (HTTP server) at 192.168.4.1.
+ *
+ * Pages:
+ *   /          - Status dashboard: connection state, clients, heap, uptime, login
+ *   /config    - Router configuration: AP/STA settings, static IP, MAC addresses
+ *   /mappings  - DHCP reservations and port forwarding management
+ *   /firewall  - ACL firewall rules (4 lists, add/delete, hit statistics)
+ *   /vpn       - WireGuard VPN configuration and status
+ *   /scan      - WiFi network scanner (STA uplink only)
+ *
+ * Password-protected pages use cookie-based sessions (30-min timeout).
+ * HTML templates are defined in pages.h as C macro strings.
+ */
 #include "esp_netif.h"
 #include "lwip/ip_addr.h"
 #include "lwip/inet.h"
@@ -1527,8 +1532,13 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
                                 if (strcmp(iface_param, "VPN") == 0) iface = 1;
                             }
                             add_portmap(proto, ext_port, int_ip, int_port, iface);
+#if CONFIG_ETH_UPLINK
+                            ESP_LOGI(TAG, "Added port mapping: %s %s %d -> %s:%d",
+                                     iface ? "VPN" : "ETH", param1, ext_port, param3, int_port);
+#else
                             ESP_LOGI(TAG, "Added port mapping: %s %s %d -> %s:%d",
                                      iface ? "VPN" : "STA", param1, ext_port, param3, int_port);
+#endif
                         } else {
                             /* Redirect back with error parameter */
                             char redirect_url[128];
@@ -1731,7 +1741,11 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
                 "<td>%d</td>"
                 "<td><a href='/mappings?del_proto=%s&del_port=%d' class='red-button'>Delete</a></td>"
                 "</tr>",
+#if CONFIG_ETH_UPLINK
+                portmap_tab[i].iface == 1 ? "VPN" : "ETH",
+#else
                 portmap_tab[i].iface == 1 ? "VPN" : "STA",
+#endif
                 portmap_tab[i].proto == PROTO_TCP ? "TCP" : "UDP",
                 portmap_tab[i].mport,
                 ip_or_name,

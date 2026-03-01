@@ -116,16 +116,16 @@ components/acl/
                           ESP32 NAT Router
                     ┌───────────────────────┐
                     │                       │
-Internet ──to_sta──►│  STA            AP    │◄──to_ap─── Clients
-         ◄─from_sta─│                       │──from_ap──►
+Internet ──to_esp──►│  STA            AP    │◄──to_ap─── Clients
+         ◄─from_esp─│                       │──from_ap──►
                     └───────────────────────┘
 ```
 
 **ACL Lists** (defined in `acl.h`):
 | Index | Name | Direction | Description |
 |-------|------|-----------|-------------|
-| 0 | `to_sta` | STA inbound | Internet → ESP32 |
-| 1 | `from_sta` | STA outbound | ESP32 → Internet |
+| 0 | `to_esp` | Uplink inbound | Internet → ESP32 |
+| 1 | `from_esp` | Uplink outbound | ESP32 → Internet |
 | 2 | `to_ap` | AP inbound | Clients → ESP32 |
 | 3 | `from_ap` | AP outbound | ESP32 → Clients |
 

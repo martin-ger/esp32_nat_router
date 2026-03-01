@@ -489,6 +489,7 @@ async def add_portmap(
         internal_ip: Device IP on the hotspot network, or its DHCP reservation name.
         internal_port: Port number on the device.
         iface: Interface to bind to - "STA" (default, upstream WiFi) or "VPN" (WireGuard tunnel).
+              Use "ETH" instead of "STA" on Ethernet uplink builds.
     """
     _require(proto, "proto")
     _require(internal_ip, "internal_ip")
@@ -496,8 +497,8 @@ async def add_portmap(
     if proto not in ("TCP", "UDP"):
         raise ValueError("Protocol must be TCP or UDP")
     iface = iface.upper()
-    if iface not in ("STA", "VPN"):
-        raise ValueError("Interface must be STA or VPN")
+    if iface not in ("STA", "ETH", "VPN"):
+        raise ValueError("Interface must be STA, ETH, or VPN")
     cmd = f"portmap add {proto} {external_port} {internal_ip} {internal_port}"
     if iface == "VPN":
         cmd += " VPN"

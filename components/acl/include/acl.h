@@ -6,8 +6,8 @@
  *   Internet <---> [STA] ESP32 [AP] <---> Internal Clients
  *
  * ACL naming convention (from the router's interface perspective):
- * - to_sta:   Internet -> ESP32 (incoming on STA interface)
- * - from_sta: ESP32 -> Internet (outgoing on STA interface)
+ * - to_esp:   Internet -> ESP32 (incoming on uplink interface)
+ * - from_esp: ESP32 -> Internet (outgoing on uplink interface)
  * - to_ap:    Clients -> ESP32 (incoming on AP interface)
  * - from_ap:  ESP32 -> Clients (outgoing on AP interface)
  */
@@ -23,8 +23,8 @@ extern "C" {
 #endif
 
 /* ACL list indices */
-#define ACL_TO_STA    0   /* Internet -> ESP32 (STA interface input) */
-#define ACL_FROM_STA  1   /* ESP32 -> Internet (STA interface output) */
+#define ACL_TO_ESP    0   /* Internet -> ESP32 (uplink input) */
+#define ACL_FROM_ESP  1   /* ESP32 -> Internet (uplink output) */
 #define ACL_TO_AP     2   /* Clients -> ESP32 (AP interface input) */
 #define ACL_FROM_AP   3   /* ESP32 -> Clients (AP interface output) */
 #define MAX_ACL_LISTS 4
@@ -184,7 +184,7 @@ const char* acl_get_desc(uint8_t acl_no);
 
 /**
  * @brief Parse ACL list name to index
- * @param name List name ("from_sta", "to_sta", "from_ap", "to_ap")
+ * @param name List name ("from_esp", "to_esp", "from_ap", "to_ap")
  * @return List index (0-3) or -1 if invalid name
  */
 int acl_parse_name(const char* name);

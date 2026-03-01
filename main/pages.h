@@ -564,6 +564,12 @@ document.getElementById('dhcp_mac').scrollIntoView({behavior: 'smooth', block: '
 </thead>\
 <tbody>"
 
+#if CONFIG_ETH_UPLINK
+#define PORTMAP_IFACE_OPTIONS "<option value='STA'>ETH (Ethernet)</option><option value='VPN'>VPN</option>"
+#else
+#define PORTMAP_IFACE_OPTIONS "<option value='STA'>STA (WiFi)</option><option value='VPN'>VPN</option>"
+#endif
+
 /* After portmap tbody to end */
 #define MAPPINGS_CHUNK_TAIL "\
 </tbody>\
@@ -571,7 +577,7 @@ document.getElementById('dhcp_mac').scrollIntoView({behavior: 'smooth', block: '
 <h2>Add Port Forwards</h2>\
 <form action='/mappings' method='GET'>\
 <table>\
-<tr><td>Interface</td><td><select name='iface'><option value='STA'>STA (WiFi)</option><option value='VPN'>VPN</option></select></td></tr>\
+<tr><td>Interface</td><td><select name='iface'>" PORTMAP_IFACE_OPTIONS "</select></td></tr>\
 <tr><td>Protocol</td><td><select name='proto'><option value='TCP'>TCP</option><option value='UDP'>UDP</option></select></td></tr>\
 <tr><td>External Port</td><td><input type='number' name='ext_port' min='1' max='65535' placeholder='8080'/></td></tr>\
 <tr><td>Internal IP</td><td><input type='text' name='int_ip' placeholder='IP or device name'/></td></tr>\
@@ -652,8 +658,8 @@ input:focus, select:focus { outline: none; border-color: #00d9ff; }\
 <form action='/firewall' method='GET'>\
 <table class='form-table'>\
 <tr><td>Direction</td><td><select name='acl_list'>\
-<option value='0'>Internet to ESP (to_sta)</option>\
-<option value='1'>ESP to Internet (from_sta)</option>\
+<option value='0'>Internet to ESP (to_esp)</option>\
+<option value='1'>ESP to Internet (from_esp)</option>\
 <option value='2'>Clients to ESP (to_ap)</option>\
 <option value='3'>ESP to Clients (from_ap)</option>\
 </select></td></tr>\

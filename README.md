@@ -95,7 +95,7 @@ Manage network mappings, i.e. IP addresses via DHCP and ports via port forwardin
 
 ### Firewall Page (/firewall)
 Configure Access Control Lists (ACLs) for packet filtering:
-- **Four ACL Lists**: Control traffic in each direction (to_sta, from_sta, to_ap, from_ap)
+- **Four ACL Lists**: Control traffic in each direction (to_esp, from_esp, to_ap, from_ap)
 - **Rule Management**: Add rules with protocol, source/destination IP, ports, and action (allow/deny)
 - **Device Names**: Use device names from DHCP reservations instead of IP addresses for single-host rules
 - **Monitoring**: Enable packet capture for specific rules with the Monitor flag
@@ -231,23 +231,23 @@ ACLs are named from the perspective of each interface - "to" means traffic arriv
                               ESP32
                         ┌───────────────────────┐
                         │                       │
-   Internet ──to_sta───►│  STA            AP    │◄───to_ap─── Clients
-            ◄──from_sta─│                       │───from_ap──►
+   Internet ──to_esp───►│  STA            AP    │◄───to_ap─── Clients
+            ◄──from_esp─│                       │───from_ap──►
                         │                       │
                         └───────────────────────┘
 ```
 
 | ACL | Interface | Direction | Description |
 |-----|-----------|-----------|-------------|
-| **to_sta** | STA | Inbound | Internet → ESP32 (traffic arriving at STA interface) |
-| **from_sta** | STA | Outbound | ESP32 → Internet (traffic leaving STA interface) |
+| **to_esp** | Uplink | Inbound | Internet → ESP32 (traffic arriving on uplink interface) |
+| **from_esp** | Uplink | Outbound | ESP32 → Internet (traffic leaving on uplink interface) |
 | **to_ap** | AP | Inbound | Clients → ESP32 (traffic arriving at AP interface) |
 | **from_ap** | AP | Outbound | ESP32 → Clients (traffic leaving AP interface) |
 
 ### Use Cases
 
-- **to_sta**: Block unwanted incoming traffic from the Internet
-- **from_sta**: Control what internal clients can access on the Internet
+- **to_esp**: Block unwanted incoming traffic from the Internet
+- **from_esp**: Control what internal clients can access on the Internet
 - **to_ap**: Filter traffic from specific internal clients
 - **from_ap**: Control what traffic reaches internal clients
 
@@ -280,7 +280,7 @@ When displaying rules, device names are shown instead of IP addresses for /32 ru
 **Examples:**
 ```
 # Block incoming traffic from a specific IP
-acl add to_sta IP 203.0.113.50 * any * deny
+acl add to_esp IP 203.0.113.50 * any * deny
 
 # Block a specific device by name (from DHCP reservation)
 acl add from_ap IP any * MyPhone * deny
@@ -289,7 +289,7 @@ acl add from_ap IP any * MyPhone * deny
 acl add to_ap UDP any * any 53 allow
 acl add to_ap TCP any * any 80 allow
 acl add to_ap TCP any * any 443 allow
-acl add from_sta IP any * any * deny
+acl add from_esp IP any * any * deny
 ```
 
 ### Rule Processing
@@ -336,7 +336,7 @@ The STA interface is intentionally excluded from promiscuous capture to avoid a 
 
 ```
 # Capture all DNS queries going to the Internet (for debugging)
-acl add from_sta UDP any * any 53 allow_monitor
+acl add from_esp UDP any * any 53 allow_monitor
 
 # Capture specific client's traffic without blocking (by IP)
 acl add to_ap IP 192.168.4.100 * any * allow_monitor
@@ -998,7 +998,7 @@ acl   <list> <proto> <src> [<s_port>] <dst> [<d_port>] <action>
   acl <list> del <index>       - Delete rule at index
   acl <list> clear             - Clear all rules from list
   acl <list> clear_stats       - Clear statistics for list
-  Lists: to_sta, from_sta, to_ap, from_ap
+  Lists: to_esp, from_esp, to_ap, from_ap
   Protocols: IP, TCP, UDP, ICMP
   Actions: allow, deny, allow_monitor, deny_monitor
 
