@@ -46,7 +46,8 @@
 #include "dhcpserver/dhcpserver.h"
 #include "dhcpserver/dhcpserver_options.h"
 
-#include "cmd_decl.h"
+#include "cmd_system.h"
+#include "cmd_router.h"
 #include <esp_http_server.h>
 
 #if !IP_NAPT
@@ -138,7 +139,7 @@ esp_eth_handle_t eth_handle = NULL;
 esp_netif_t* wifiSTA;
 #endif
 
-httpd_handle_t start_webserver(void);
+#include "http_server.h"
 
 static const char *TAG = "ESP32 NAT router";
 

@@ -10,7 +10,11 @@
 #include "lwip/lwip_napt.h"
 #include "lwip/ip4_addr.h"
 #include "esp_netif.h"
-#include "router_globals.h"
+#include "router_config.h"
+#include "portmap.h"
+#include "vpn_config.h"
+#include "dhcp_reservations.h"
+#include "wifi_config.h"
 
 #define PORTMAP_TAB_SIZE (sizeof(struct portmap_table_entry) * IP_PORTMAP_MAX)
 

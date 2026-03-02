@@ -25,7 +25,10 @@
 #include "lwip/ip4_addr.h"
 
 #include "remote_console.h"
-#include "router_globals.h"
+#include "router_config.h"
+#include "wifi_config.h"
+#include "vpn_config.h"
+#include "web_password.h"
 
 /* MSG_NOSIGNAL may not be defined on all platforms */
 #ifndef MSG_NOSIGNAL

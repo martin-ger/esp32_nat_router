@@ -12,7 +12,9 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lwip/ip_addr.h"
-#include "router_globals.h"
+#include "vpn_config.h"
+#include "router_config.h"
+#include "portmap.h"
 
 static const char *TAG = "vpn_mgr";
 

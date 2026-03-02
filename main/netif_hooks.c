@@ -19,7 +19,9 @@
 #include "lwip/inet_chksum.h"
 #include "acl.h"
 #include "pcap_capture.h"
-#include "router_globals.h"
+#include "router_config.h"
+#include "wifi_config.h"
+#include "vpn_config.h"
 
 #if CONFIG_ETH_UPLINK
 #include "esp_eth.h"

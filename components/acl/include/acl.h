@@ -16,6 +16,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include "esp_err.h"
 #include "lwip/pbuf.h"
 
 #ifdef __cplusplus
@@ -207,6 +208,18 @@ char* acl_format_ip(uint32_t ip, uint32_t mask, char* buf, size_t buf_len);
  * @return true on success, false on parse error
  */
 bool acl_parse_ip(const char* str, uint32_t* ip, uint32_t* mask);
+
+/**
+ * @brief Save all ACL rules to NVS
+ * @return ESP_OK on success
+ */
+esp_err_t save_acl_rules(void);
+
+/**
+ * @brief Load all ACL rules from NVS
+ * @return ESP_OK on success
+ */
+esp_err_t load_acl_rules(void);
 
 #ifdef __cplusplus
 }

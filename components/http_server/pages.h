@@ -1,5 +1,5 @@
 //#include "esp_idf_version.h"
-#include "router_globals.h"
+#include "router_config.h"
 
 /* Index Page - Chunked for streaming */
 #define INDEX_CHUNK_HEAD "<html>\

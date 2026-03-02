@@ -11,7 +11,9 @@
 #include "lwip/ip4_addr.h"
 #include "dhcpserver/dhcpserver.h"
 #include "esp_wifi.h"
-#include "router_globals.h"
+#include "router_config.h"
+#include "dhcp_reservations.h"
+#include "wifi_config.h"
 
 #define DHCP_RES_SIZE (sizeof(struct dhcp_reservation_entry) * MAX_DHCP_RESERVATIONS)
 

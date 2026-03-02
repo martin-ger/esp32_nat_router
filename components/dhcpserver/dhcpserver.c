@@ -19,7 +19,7 @@
 
 #include "dhcpserver/dhcpserver.h"
 #include "dhcpserver/dhcpserver_options.h"
-#include "router_globals.h"
+#include "dhcp_reservations.h"
 
 #if ESP_DHCPS
 

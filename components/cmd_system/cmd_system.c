@@ -14,7 +14,7 @@
 #include "esp_console.h"
 #include "esp_system.h"
 #include "nvs.h"
-#include "router_globals.h"
+#include "router_config.h"
 #include "esp_sleep.h"
 #include "esp_flash.h"
 #include "esp_chip_info.h"

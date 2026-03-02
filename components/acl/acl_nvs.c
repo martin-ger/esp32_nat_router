@@ -8,7 +8,7 @@
 #include "esp_log.h"
 #include "nvs.h"
 #include "acl.h"
-#include "router_globals.h"
+#include "router_config.h"
 
 static const char *TAG = "acl_nvs";
 
