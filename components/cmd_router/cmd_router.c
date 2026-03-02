@@ -734,8 +734,13 @@ static int web_ui_cmd(int argc, char **argv)
         char* lock = NULL;
         get_config_param_str("lock", &lock);
         bool enabled = (lock == NULL || strcmp(lock, "0") == 0);
-        printf("Web interface: %s\n", enabled ? "enabled" : "disabled");
-        printf("\nUsage: web_ui <enable|disable>\n");
+        int port = 80;
+        get_config_param_int("web_port", &port);
+        printf("Web interface: %s (port %d)\n", enabled ? "enabled" : "disabled", port);
+        printf("\nUsage:\n");
+        printf("  web_ui enable           - Enable web interface (after reboot)\n");
+        printf("  web_ui disable          - Disable web interface (after reboot)\n");
+        printf("  web_ui port <port>      - Set web server port (after reboot)\n");
         if (lock != NULL) free(lock);
         return 0;
     }
@@ -769,9 +774,32 @@ static int web_ui_cmd(int argc, char **argv)
                 printf("Use 'web_ui enable' to re-enable it.\n");
             }
         }
+    } else if (strcmp(action, "port") == 0) {
+        if (argc < 3) {
+            int port = 80;
+            get_config_param_int("web_port", &port);
+            printf("Current web server port: %d\n", port);
+            printf("Usage: web_ui port <port>\n");
+            nvs_close(nvs);
+            return 0;
+        }
+        int port = atoi(argv[2]);
+        if (port < 1 || port > 65535) {
+            printf("Invalid port: %s (must be 1-65535)\n", argv[2]);
+            nvs_close(nvs);
+            return 1;
+        }
+        err = nvs_set_i32(nvs, "web_port", port);
+        if (err == ESP_OK) {
+            err = nvs_commit(nvs);
+            if (err == ESP_OK) {
+                ESP_LOGI(TAG, "Web server port set to %d.", port);
+                printf("Web server port set to %d (after reboot).\n", port);
+            }
+        }
     } else {
         printf("Unknown action: %s\n", action);
-        printf("Usage: web_ui <enable|disable>\n");
+        printf("Usage: web_ui <enable|disable|port>\n");
         nvs_close(nvs);
         return 1;
     }
@@ -784,11 +812,12 @@ static void register_web_ui(void)
 {
     const esp_console_cmd_t cmd = {
         .command = "web_ui",
-        .help = "Enable or disable the web interface\n"
+        .help = "Manage the web interface\n"
                 "  web_ui              - Show current status\n"
                 "  web_ui enable       - Enable web interface (after reboot)\n"
-                "  web_ui disable      - Disable web interface (after reboot)",
-        .hint = " <enable|disable>",
+                "  web_ui disable      - Disable web interface (after reboot)\n"
+                "  web_ui port <port>  - Set web server port (after reboot)",
+        .hint = " <enable|disable|port>",
         .func = &web_ui_cmd,
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
@@ -1251,7 +1280,9 @@ static int show(int argc, char **argv)
         char* web_lock = NULL;
         get_config_param_str("lock", &web_lock);
         bool web_enabled = (web_lock == NULL || strcmp(web_lock, "0") == 0);
-        printf("\nWeb Interface: %s\n", web_enabled ? "enabled" : "disabled");
+        int web_port = 80;
+        get_config_param_int("web_port", &web_port);
+        printf("\nWeb Interface: %s (port %d)\n", web_enabled ? "enabled" : "disabled", web_port);
         if (web_lock != NULL) free(web_lock);
 
         // Cleanup

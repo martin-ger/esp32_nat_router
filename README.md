@@ -1012,11 +1012,12 @@ pcap  <action> [<mode>] [<bytes>]
         <mode>  off|acl|promisc
        <bytes>  snaplen value (64-1600)
 
-web_ui   <enable|disable>
-  Enable or disable the web interface
+web_ui   <enable|disable|port>
+  Manage the web interface
   web_ui              - Show current status
   web_ui enable       - Enable web interface (after reboot)
   web_ui disable      - Disable web interface (after reboot)
+  web_ui port <port>  - Set web server port (default 80, after reboot)
 
 set_router_password 
   Set router password for web and remote console (empty string to disable)

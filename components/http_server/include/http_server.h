@@ -10,7 +10,7 @@
 extern "C" {
 #endif
 
-httpd_handle_t start_webserver(void);
+httpd_handle_t start_webserver(uint16_t port);
 
 void web_server_start_captive_dns(void);
 

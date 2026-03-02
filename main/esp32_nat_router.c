@@ -1005,8 +1005,10 @@ void app_main(void)
         web_disabled = param_set_default("0");
     }
     if (strcmp(web_disabled, "0") ==0) {
-        ESP_LOGI(TAG,"Starting web server");
-        start_webserver();
+        int web_port_setting = 80;
+        get_config_param_int("web_port", &web_port_setting);
+        ESP_LOGI(TAG,"Starting web server on port %d", web_port_setting);
+        start_webserver((uint16_t)web_port_setting);
     }
     free(web_disabled);
 

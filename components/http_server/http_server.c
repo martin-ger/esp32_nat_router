@@ -2683,10 +2683,11 @@ static httpd_uri_t vpnp = {
 
 static esp_err_t captive_redirect_handler(httpd_req_t *req, httpd_err_code_t err);
 
-httpd_handle_t start_webserver(void)
+httpd_handle_t start_webserver(uint16_t port)
 {
     httpd_handle_t server = NULL;
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+    config.server_port = port;
     config.stack_size = 16384;  // Large stack needed for mappings page with 3x 2KB HTML buffers
     config.max_uri_handlers = 12;
     config.max_uri_len = 1024;

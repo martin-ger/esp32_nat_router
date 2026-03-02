@@ -29,14 +29,26 @@ pio device monitor     # Serial monitor
 ### Source Structure
 ```
 main/
-├── esp32_nat_router.c   # Entry point: WiFi init, event handling, LED status, port mapping, DHCP reservations
-├── http_server.c        # Web UI server at 192.168.4.1 (pages: /, /config, /mappings)
-├── pages.h              # HTML/CSS for web interface
-└── cmd_decl.h           # Command declarations
+├── esp32_nat_router.c   # Entry point: WiFi init, event handling, LED status
+├── dhcp_manager.c       # DHCP reservation management (add/del/lookup/print)
+├── netif_hooks.c        # Network interface hooks for byte counting and ACL
+├── portmap.c            # Port mapping table management
+└── vpn_manager.c        # VPN/WireGuard configuration and management
+
+include/
+├── router_globals.h     # Global variables and shared state
+├── router_config.h      # NVS namespace and config constants
+├── dhcp_reservations.h  # DHCP reservation API
+├── portmap.h            # Port mapping API
+├── vpn_config.h         # VPN configuration structures
+├── web_password.h       # Web password hashing API
+└── wifi_config.h        # WiFi config parameter helpers
 
 components/
 ├── acl/                 # Stateless packet filtering firewall (4 ACL lists, 16 rules each)
 ├── dhcpserver/          # Custom DHCP server with reservation support (overrides ESP-IDF built-in)
+├── http_server/         # Web UI server at 192.168.4.1 (pages: /, /config, /mappings, /firewall)
+├── oled_display/        # Optional OLED display support
 ├── pcap_capture/        # PCAP packet capture with TCP streaming to Wireshark
 ├── remote_console/      # Network-accessible CLI via TCP (password protected)
 ├── cmd_router/          # CLI commands: set_sta, set_ap, portmap, dhcp_reserve, web_ui, set_web_password, show, acl, remote_console
@@ -249,6 +261,7 @@ dhcp_reserve del <mac>            # Delete DHCP reservation
 set_web_password <password>       # Set web interface password (empty to disable)
 web_ui enable                     # Enable web interface (after reboot)
 web_ui disable                    # Disable web interface (after reboot)
+web_ui port <port>                # Set web server port, default 80 (after reboot)
 show status                       # Show router status (connection, clients, memory)
 show config                       # Show router configuration (AP/STA settings)
 show mappings                     # Show DHCP pool, reservations and port mappings
