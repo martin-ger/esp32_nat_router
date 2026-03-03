@@ -224,9 +224,11 @@ void register_router(void)
 #if !CONFIG_ETH_UPLINK
     register_set_sta();
     register_set_mac();
-    register_scan();
 #else
     register_set_ap_mac_only();
+#endif
+#if !CONFIG_ETH_UPLINK
+    register_scan();
 #endif
     register_set_sta_static();
     register_set_ap();
@@ -376,6 +378,23 @@ int set_sta_static(int argc, char **argv)
     esp_err_t err;
     nvs_handle_t nvs;
 
+    /* "set_sta_static dhcp" clears static IP and reverts to DHCP */
+    if (argc == 2 && strcmp(argv[1], "dhcp") == 0) {
+        err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
+        if (err != ESP_OK) {
+            return err;
+        }
+        nvs_erase_key(nvs, "static_ip");
+        nvs_erase_key(nvs, "subnet_mask");
+        nvs_erase_key(nvs, "gateway_addr");
+        err = nvs_commit(nvs);
+        nvs_close(nvs);
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "Static IP cleared. Will use DHCP after reboot.");
+        }
+        return err;
+    }
+
     int nerrors = arg_parse(argc, argv, (void **) &set_sta_static_arg);
     if (nerrors != 0) {
         arg_print_errors(stderr, set_sta_static_arg.end, argv[0]);
@@ -417,7 +436,7 @@ static void register_set_sta_static(void)
 
     const esp_console_cmd_t cmd = {
         .command = "set_sta_static",
-        .help = "Set Static IP for the STA interface",
+        .help = "Set Static IP for the STA interface, or 'set_sta_static dhcp' to use DHCP",
         .hint = NULL,
         .func = &set_sta_static,
         .argtable = &set_sta_static_arg
@@ -2580,12 +2599,12 @@ static int scan_cmd(int argc, char **argv)
 
     /* Print header */
     printf("\nFound %d networks:\n", ap_count);
-    printf("%-32s  %4s  %-12s\n", "SSID", "RSSI", "Security");
-    printf("--------------------------------  ----  ------------\n");
+    printf("%-32s  %3s  %4s  %-12s\n", "SSID", "Ch", "RSSI", "Security");
+    printf("--------------------------------  ---  ----  ------------\n");
 
     for (int i = 0; i < ap_count; i++) {
         const char *auth = auth_mode_to_str(ap_list[i].authmode);
-        printf("%-32s  %4d  %s\n", ap_list[i].ssid, ap_list[i].rssi, auth);
+        printf("%-32s  %3d  %4d  %s\n", ap_list[i].ssid, ap_list[i].primary, ap_list[i].rssi, auth);
     }
 
     free(ap_list);
@@ -2602,7 +2621,7 @@ static void register_scan(void)
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }
-#endif
+#endif /* !CONFIG_ETH_UPLINK */
 
 /** Arguments used by 'set_vpn' function */
 static struct {

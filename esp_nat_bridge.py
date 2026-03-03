@@ -337,17 +337,22 @@ async def set_sta(
 
 
 @mcp.tool()
-async def set_sta_static(ip: str, subnet: str, gateway: str) -> str:
-    """Set a static IP for the router's internet connection (instead of DHCP). Requires restart.
+async def set_sta_static(ip: str = "", subnet: str = "", gateway: str = "") -> str:
+    """Set a static IP for the router's internet connection, or revert to DHCP. Requires restart.
+
+    To set a static IP, provide all three parameters.
+    To revert to DHCP, call with ip="dhcp" (subnet and gateway are ignored).
 
     CAUTION: Wrong values will disconnect the router from the internet.
 
     Args:
-        ip: Static IP address (e.g. "192.168.0.100").
-        subnet: Subnet mask (e.g. "255.255.255.0").
-        gateway: Gateway/router address (e.g. "192.168.0.1").
+        ip: Static IP address (e.g. "192.168.0.100") or "dhcp" to revert to DHCP.
+        subnet: Subnet mask (e.g. "255.255.255.0"). Not needed for "dhcp".
+        gateway: Gateway/router address (e.g. "192.168.0.1"). Not needed for "dhcp".
     """
     _require(ip, "ip")
+    if ip.lower() == "dhcp":
+        return await _cmd("set_sta_static dhcp")
     _require(subnet, "subnet")
     _require(gateway, "gateway")
     return await _cmd(f"set_sta_static {ip} {subnet} {gateway}")

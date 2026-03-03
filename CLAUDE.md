@@ -253,6 +253,7 @@ Connect at 115200 bps. Key commands:
 ```
 set_sta <ssid> <passwd>           # Set upstream WiFi
 set_sta_static <ip> <subnet> <gw> # Static IP for STA
+set_sta_static dhcp               # Revert to DHCP (requires restart)
 set_ap <ssid> <passwd>            # Configure AP hotspot
 portmap add TCP <ext_port> <int_ip> <int_port>  # Add port mapping
 portmap del TCP <ext_port>        # Delete port mapping

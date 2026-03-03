@@ -1,12 +1,18 @@
 //#include "esp_idf_version.h"
 #include "router_config.h"
 
+#if CONFIG_ETH_UPLINK
+#define INDEX_TITLE "ESP32 NAT Router (LAN)"
+#else
+#define INDEX_TITLE "ESP32 NAT Router"
+#endif
+
 /* Index Page - Chunked for streaming */
 #define INDEX_CHUNK_HEAD "<html>\
 <head>\
 <meta name='viewport' content='width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0'>\
 <meta charset='UTF-8'>\
-<title>ESP32 NAT Router</title>\
+<title>" INDEX_TITLE "</title>\
 <link rel='icon' href='favicon.png'>\
 </head>\
 <style>\
@@ -160,7 +166,7 @@ font-size: 0.8rem;\
 <div style='display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;'>\
 <div style='display: flex; align-items: center;'>\
 <a href='/' style='display: inline-block; margin-right: 1rem;'><img src='/favicon.png' alt='Home' style='width: 64px; height: 64px; border: none;'></a>\
-<h1 style='margin: 0;'>ESP32 NAT Router</h1>\
+<h1 style='margin: 0;'>" INDEX_TITLE "</h1>\
 </div>"
 /* Logout button streamed here */
 
@@ -175,6 +181,7 @@ font-size: 0.8rem;\
 </table>\
 </div>"
 
+#if !CONFIG_ETH_UPLINK
 #define INDEX_CHUNK_BUTTONS "\
 <div class='button-container'>\
 <a href='/setup' class='nav-button'>🚀 Getting Started</a>\
@@ -184,6 +191,15 @@ font-size: 0.8rem;\
 <a href='/firewall' class='nav-button'>🛡️ Firewall</a>\
 <a href='/vpn' class='nav-button'>🔒 VPN</a>\
 </div>"
+#else
+#define INDEX_CHUNK_BUTTONS "\
+<div class='button-container'>\
+<a href='/config' class='nav-button'>⚙️ Configuration</a>\
+<a href='/mappings' class='nav-button'>🔀 Mappings</a>\
+<a href='/firewall' class='nav-button'>🛡️ Firewall</a>\
+<a href='/vpn' class='nav-button'>🔒 VPN</a>\
+</div>"
+#endif
 /* Auth UI streamed here */
 
 #define INDEX_CHUNK_TAIL "\
@@ -765,6 +781,7 @@ setTimeout(\"location.href = '/'\", 10000);\
 </body>\
 </html>"
 
+#if !CONFIG_ETH_UPLINK
 /* Getting Started Page */
 #define SETUP_CHUNK_HEAD "<html>\
 <head>\
@@ -826,6 +843,7 @@ setTimeout(\"location.href = '/'\", 10000);\
 </div>\
 </body>\
 </html>"
+#endif /* !CONFIG_ETH_UPLINK */
 
 #if !CONFIG_ETH_UPLINK
 /* WiFi Scan Page */

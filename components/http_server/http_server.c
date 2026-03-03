@@ -2360,6 +2360,7 @@ static httpd_uri_t scanp = {
 };
 #endif
 
+#if !CONFIG_ETH_UPLINK
 /* Getting Started page GET handler */
 static esp_err_t setup_get_handler(httpd_req_t *req)
 {
@@ -2470,6 +2471,7 @@ static httpd_uri_t setupp = {
     .method    = HTTP_GET,
     .handler   = setup_get_handler,
 };
+#endif /* !CONFIG_ETH_UPLINK */
 
 /* VPN page GET handler */
 static esp_err_t vpn_get_handler(httpd_req_t *req)
@@ -2707,7 +2709,9 @@ httpd_handle_t start_webserver(uint16_t port)
         httpd_register_uri_handler(server, &scanp);
 #endif
         httpd_register_uri_handler(server, &vpnp);
+#if !CONFIG_ETH_UPLINK
         httpd_register_uri_handler(server, &setupp);
+#endif
         httpd_register_uri_handler(server, &favicon_uri);
         httpd_register_uri_handler(server, &config_exportp);
         httpd_register_uri_handler(server, &config_importp);

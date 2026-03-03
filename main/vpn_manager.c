@@ -59,6 +59,9 @@ esp_err_t vpn_connect(void)
     wg_config.endpoint = vpn_endpoint;
     wg_config.port = vpn_port;
     wg_config.persistent_keepalive = vpn_keepalive;
+#if CONFIG_ETH_UPLINK
+    wg_config.netif_key = "ETH_DEF";
+#endif
 
     esp_err_t err;
     if (!wg_initialized) {
@@ -145,22 +148,28 @@ void vpn_connect_task(void *pvParameters)
     // Wait for SNTP time sync before connecting VPN
     // WireGuard uses TAI64N timestamps - needs valid wall clock after reboot
     int retry = 0;
-    const int max_retry = 30;  // 15 seconds max
-    while (sntp_get_sync_status() == SNTP_SYNC_STATUS_RESET && retry < max_retry) {
-        ESP_LOGI(TAG, "Waiting for SNTP time sync... (%d/%d)", retry + 1, max_retry);
+    const int max_retry = 60;  // 30 seconds max
+    time_t now = 0;
+    while (retry < max_retry) {
+        time(&now);
+        // Consider time valid if after 2020-01-01
+        if (now > 1577836800) {
+            break;
+        }
+        if (retry % 4 == 0) {
+            ESP_LOGI(TAG, "Waiting for SNTP time sync... (%d/%ds)", retry / 2, max_retry / 2);
+        }
         vTaskDelay(pdMS_TO_TICKS(500));
         retry++;
     }
-    if (sntp_get_sync_status() != SNTP_SYNC_STATUS_RESET) {
-        time_t now;
+    if (now > 1577836800) {
         struct tm timeinfo;
-        time(&now);
         localtime_r(&now, &timeinfo);
         ESP_LOGI(TAG, "Time synchronized: %04d-%02d-%02d %02d:%02d:%02d",
                  timeinfo.tm_year + 1900, timeinfo.tm_mon + 1, timeinfo.tm_mday,
                  timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
     } else {
-        ESP_LOGW(TAG, "SNTP sync timeout, proceeding with VPN anyway");
+        ESP_LOGW(TAG, "SNTP sync timeout after %ds, proceeding with VPN anyway", max_retry / 2);
     }
     vpn_connect();
     vTaskDelete(NULL);

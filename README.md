@@ -1,10 +1,14 @@
 # ESP32 NAT Router
 
-This is a firmware to use the ESP32 as WiFi NAT router. It can be used as:
+This is a firmware to use the ESP32 as WiFi NAT router. It routes between the network of the AP interface and 
+the STA or ETH interface as uplink network. It can also work as a VPN router using WireGuard as uplink.
+
+Use cases:
 - Simple range extender for an existing WiFi network
 - An additional WiFi network with different SSID/password and restricted access for guests or IOT devices
 - VPN-Router using WireGuard
 - Converter from a corporate (WPA2-Enterprise) network to a regular (WPA-PSK) network for simple devices
+- Classic WiFi router with Ethernet uplink
 - MCP-server to control your network using agentic AI
 - Debugging and monitoring of WiFi devices
 
@@ -17,6 +21,7 @@ This is a firmware to use the ESP32 as WiFi NAT router. It can be used as:
 - **Firewall**: Define ACL to restrict or monitor traffic
 - **PCAP Capture**: Live packet capture can be streamed to Wireshark or other network tools
 - **WPA2-Enterprise Support**: Connect to corporate networks (PEAP, TTLS, TLS) and convert them to WPA2-PSK
+- **Ethernet Support**: Use a W32-ET01 board with LAN8720 PHY to get Ethernet uplink
 - **Web Interface**: Web UI with password protection for easy configuration
 - **Serial Console**: Full CLI for advanced configuration
 - **Remote Console**: Network-accessible CLI via TCP (password protected, per-interface binding)
@@ -938,6 +943,9 @@ set_sta_static  <ip> <subnet> <gw>
       <subnet>  Subnet Mask
           <gw>  Gateway Address
 
+set_sta_static dhcp
+  Clear static IP settings and revert to DHCP (requires restart)
+
 set_sta_mac  <octet> <octet> <octet> <octet> <octet> <octet>
   Set MAC address of the STA interface
        <octet>  First octet
@@ -1172,6 +1180,28 @@ The following are the steps required to compile this project:
 1. Download Visual Studio Code, and the Platform IO extension.
 2. In Platformio, install the ESP-IDF framework.
 3. Build the project and flash it to the ESP32.
+
+### WT32-ETH01 (Ethernet Uplink) Build
+
+The firmware supports the [WT32-ETH01](https://github.com/egnor/wt32-eth01) board, which uses a wired Ethernet (LAN8720) uplink instead of WiFi STA. In this mode the ESP32 receives its upstream connection via the RJ45 Ethernet port and provides a WiFi AP for clients.
+
+To build the Ethernet variant, pass the additional sdkconfig defaults file:
+
+```bash
+idf.py -B build_eth -D 'SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.defaults.wt32_eth01' build
+```
+
+To flash:
+
+```bash
+idf.py -B build_eth -p /dev/ttyUSB0 flash monitor
+```
+
+**Differences from the standard WiFi build:**
+- Upstream connection is wired Ethernet (DHCP or static IP) instead of WiFi STA
+- The `set_sta`, `set_mac`, and `scan` CLI commands are not available
+- The web interface omits the "Getting Started" and "WiFi Scan" pages
+- WireGuard VPN binds to the Ethernet interface automatically
 
 ### Multi-Target Build Scripts
 
