@@ -24,6 +24,7 @@ extern char* gateway_addr;
 extern char* ap_ssid;
 extern char* ap_passwd;
 extern char* ap_dns;
+extern char* hostname;
 
 extern uint16_t connect_count;
 extern bool ap_connect;

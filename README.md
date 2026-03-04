@@ -1036,8 +1036,17 @@ set_led_gpio
 set_led_lowactive 
   Set LED to low-active (inverted) mode for active-low LEDs
 
+set_hostname  <name>
+  Set DHCP client hostname for upstream network (empty to use default)
+        <name>  Hostname (letters, digits, hyphens; max 32 chars)
+
 set_ttl
   Set TTL override for upstream STA packets (0 = disabled)
+
+set_rf_switch_XIAO  <0|1>
+  XIAO ESP32-C6 only: switch between built-in ceramic antenna (0) and external antenna (1)
+  Uses GPIO3 (RF switch enable) and GPIO14 (antenna select). Default: 0 (built-in).
+  Setting is saved to NVS and applied on every boot.
 
 set_vpn  <private_key> <public_key> <endpoint> <address> [-k <psk>] [-m <mask>] [-p <port>] [-a <keepalive>] [-e <0|1>] [-K <0|1>] [-R <0|1>]
   Configure WireGuard VPN tunnel
@@ -1221,7 +1230,19 @@ For automated building across multiple ESP32 targets with esp-idf, use the provi
 ./build_all_targets.sh
 ```
 
-## DNS
+
+## DHCP Hostname
+
+By default, the ESP32 identifies itself as "espressif" when requesting an IP address from the upstream network (DHCP Option 12). You can change this to a custom hostname:
+
+```
+set_hostname myrouter      # Set hostname to "myrouter"
+set_hostname ""            # Clear (reverts to default "espressif")
+```
+
+The hostname appears in your upstream router's DHCP client list. Only letters, digits, and hyphens are allowed (max 32 characters). Changes require a restart.
+
+## Custom DNS Server
 
 By default, the DNS server distributed to AP clients via DHCP is automatically learned from the upstream WiFi connection. Before the first successful STA connection, `1.1.1.1` is used as a fallback.
 

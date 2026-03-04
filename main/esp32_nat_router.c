@@ -554,6 +554,11 @@ void eth_init(const char* static_ip, const char* subnet_mask, const char* gatewa
     ethNetif = esp_netif_new(&netif_cfg);
     esp_netif_attach(ethNetif, esp_eth_new_netif_glue(eth_handle));
 
+    // Set DHCP client hostname (Option 12)
+    if (hostname && hostname[0]) {
+        esp_netif_set_hostname(ethNetif, hostname);
+    }
+
     // Static IP on ETH if configured
     if (strlen(static_ip) > 0 && strlen(subnet_mask) > 0 && strlen(gateway_addr) > 0) {
         has_static_ip = true;
@@ -637,6 +642,11 @@ void wifi_init(const uint8_t* mac, const char* ssid, const char* ent_username, c
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     wifiAP = esp_netif_create_default_wifi_ap();
     wifiSTA = esp_netif_create_default_wifi_sta();
+
+    // Set DHCP client hostname (Option 12)
+    if (hostname && hostname[0]) {
+        esp_netif_set_hostname(wifiSTA, hostname);
+    }
 
     esp_netif_ip_info_t ipInfo_sta;
     if ((strlen(ssid) > 0) && (strlen(static_ip) > 0) && (strlen(subnet_mask) > 0) && (strlen(gateway_addr) > 0)) {
@@ -795,6 +805,7 @@ char* ap_ssid = NULL;
 char* ap_passwd = NULL;
 char* ap_ip = NULL;
 char* ap_dns = NULL;
+char* hostname = NULL;
 
 char* param_set_default(const char* def_val) {
     char * retval = malloc(strlen(def_val)+1);
@@ -866,6 +877,10 @@ void app_main(void)
     if (ap_dns == NULL) {
         ap_dns = param_set_default("");
     }
+    get_config_param_str("hostname", &hostname);
+    if (hostname == NULL) {
+        hostname = param_set_default("");
+    }
 
     get_portmap_tab();
     get_dhcp_reservations();
@@ -886,6 +901,22 @@ void app_main(void)
     if (led_lowactive) {
         ESP_LOGI(TAG, "LED low-active mode enabled");
     }
+
+#if defined(CONFIG_IDF_TARGET_ESP32C6)
+    // XIAO ESP32-C6 RF switch: GPIO3 enables switch, GPIO14 selects antenna
+    int rf_switch_setting = 0;
+    get_config_param_int("rf_switch", &rf_switch_setting);
+    if (rf_switch_setting) {
+        gpio_reset_pin(GPIO_NUM_3);
+        gpio_set_direction(GPIO_NUM_3, GPIO_MODE_OUTPUT);
+        gpio_set_level(GPIO_NUM_3, 0);  // Activate RF switch control
+        vTaskDelay(pdMS_TO_TICKS(10));
+        gpio_reset_pin(GPIO_NUM_14);
+        gpio_set_direction(GPIO_NUM_14, GPIO_MODE_OUTPUT);
+        gpio_set_level(GPIO_NUM_14, 1); // Select external antenna
+        ESP_LOGI(TAG, "XIAO ESP32-C6 RF switch: external antenna enabled");
+    }
+#endif
 
     // Load TTL override setting from NVS (default 0 = disabled)
     int ttl_setting = 0;

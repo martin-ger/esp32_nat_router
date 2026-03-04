@@ -33,6 +33,7 @@
 #include "mbedtls/sha256.h"
 #include "esp_random.h"
 
+#include "driver/gpio.h"
 #include "router_globals.h"
 #include "cmd_router.h"
 #include "pcap_capture.h"
@@ -69,6 +70,10 @@ static void register_set_ttl(void);
 static void register_set_ap_hidden(void);
 #if CONFIG_ETH_UPLINK
 static void register_set_ap_channel(void);
+#endif
+static void register_set_hostname(void);
+#if defined(CONFIG_IDF_TARGET_ESP32C6)
+static void register_set_rf_switch(void);
 #endif
 static void register_acl(void);
 static void register_remote_console_cmd(void);
@@ -247,6 +252,10 @@ void register_router(void)
     register_set_ap_hidden();
 #if CONFIG_ETH_UPLINK
     register_set_ap_channel();
+#endif
+    register_set_hostname();
+#if defined(CONFIG_IDF_TARGET_ESP32C6)
+    register_set_rf_switch();
 #endif
     register_remote_console_cmd();
     register_set_vpn();
@@ -741,6 +750,82 @@ static void register_set_ap_dns(void)
         .hint = NULL,
         .func = &set_ap_dns,
         .argtable = &set_ap_dns_arg
+    };
+    ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
+}
+
+/* 'set_hostname' command */
+static struct {
+    struct arg_str *name;
+    struct arg_end *end;
+} set_hostname_arg;
+
+static int set_hostname_cmd(int argc, char **argv)
+{
+    int nerrors = arg_parse(argc, argv, (void **) &set_hostname_arg);
+    if (nerrors != 0) {
+        arg_print_errors(stderr, set_hostname_arg.end, argv[0]);
+        return 1;
+    }
+
+    const char *name = set_hostname_arg.name->sval[0];
+    preprocess_string((char*)name);
+
+    // Validate: max 32 chars, only alphanumeric and hyphens (RFC 952)
+    size_t len = strlen(name);
+    if (len > 32) {
+        printf("Hostname too long (max 32 characters).\n");
+        return 1;
+    }
+    for (size_t i = 0; i < len; i++) {
+        char c = name[i];
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+              (c >= '0' && c <= '9') || c == '-')) {
+            printf("Invalid character '%c'. Use only letters, digits, and hyphens.\n", c);
+            return 1;
+        }
+    }
+
+    esp_err_t err;
+    nvs_handle_t nvs;
+    err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err != ESP_OK) {
+        printf("Error opening NVS: %s\n", esp_err_to_name(err));
+        return err;
+    }
+
+    err = nvs_set_str(nvs, "hostname", name);
+    if (err == ESP_OK) {
+        err = nvs_commit(nvs);
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "Hostname set to '%s'", name);
+            if (len > 0) {
+                printf("Hostname set to: %s\n", name);
+            } else {
+                printf("Hostname cleared (will use default 'espressif').\n");
+            }
+            printf("Restart to apply.\n");
+        }
+    }
+    nvs_close(nvs);
+
+    free(hostname);
+    hostname = strdup(name);
+
+    return err;
+}
+
+static void register_set_hostname(void)
+{
+    set_hostname_arg.name = arg_str1(NULL, NULL, "<name>", "DHCP hostname (empty to clear)");
+    set_hostname_arg.end = arg_end(1);
+
+    const esp_console_cmd_t cmd = {
+        .command = "set_hostname",
+        .help = "Set DHCP client hostname for upstream network (empty to use default)",
+        .hint = NULL,
+        .func = &set_hostname_cmd,
+        .argtable = &set_hostname_arg
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }
@@ -1283,6 +1368,7 @@ static int show(int argc, char **argv)
         } else {
             printf("  Static IP: <not configured>\n");
         }
+        printf("  Hostname: %s\n", (hostname && hostname[0]) ? hostname : "(default)");
 
         printf("\nAP Settings:\n");
         printf("  SSID: %s\n", ap_ssid != NULL ? ap_ssid : "<undef>");
@@ -1867,6 +1953,77 @@ static void register_set_ttl(void)
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }
+
+#if defined(CONFIG_IDF_TARGET_ESP32C6)
+/* 'set_rf_switch_XIAO' command - XIAO ESP32-C6 antenna selection */
+static int set_rf_switch_cmd(int argc, char **argv)
+{
+    if (argc < 2) {
+        int current = 0;
+        get_config_param_int("rf_switch", &current);
+        printf("XIAO ESP32-C6 RF switch: %s\n", current ? "external antenna" : "built-in antenna (default)");
+        printf("Usage: set_rf_switch_XIAO <0|1>\n");
+        printf("  0 = built-in ceramic antenna (default)\n");
+        printf("  1 = external antenna\n");
+        return 0;
+    }
+
+    int value;
+    if (strcmp(argv[1], "1") == 0) {
+        value = 1;
+    } else if (strcmp(argv[1], "0") == 0) {
+        value = 0;
+    } else {
+        printf("Invalid value. Use 0 (built-in) or 1 (external).\n");
+        return 1;
+    }
+
+    esp_err_t err;
+    nvs_handle_t nvs;
+    err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err != ESP_OK) {
+        printf("Failed to open NVS\n");
+        return err;
+    }
+
+    err = nvs_set_i32(nvs, "rf_switch", value);
+    if (err == ESP_OK) {
+        err = nvs_commit(nvs);
+        if (err == ESP_OK) {
+            // Apply immediately
+            gpio_reset_pin(GPIO_NUM_3);
+            gpio_set_direction(GPIO_NUM_3, GPIO_MODE_OUTPUT);
+            gpio_set_level(GPIO_NUM_3, 0);  // Activate RF switch control
+            vTaskDelay(pdMS_TO_TICKS(10));
+            gpio_reset_pin(GPIO_NUM_14);
+            gpio_set_direction(GPIO_NUM_14, GPIO_MODE_OUTPUT);
+            gpio_set_level(GPIO_NUM_14, value); // 0 = built-in, 1 = external
+
+            if (value) {
+                printf("Switched to external antenna.\n");
+            } else {
+                printf("Switched to built-in ceramic antenna.\n");
+            }
+            printf("Setting saved (persists across reboots).\n");
+        }
+    } else {
+        printf("Failed to save setting\n");
+    }
+    nvs_close(nvs);
+    return err;
+}
+
+static void register_set_rf_switch(void)
+{
+    const esp_console_cmd_t cmd = {
+        .command = "set_rf_switch_XIAO",
+        .help = "XIAO ESP32-C6: switch between built-in (0) and external (1) antenna",
+        .hint = NULL,
+        .func = &set_rf_switch_cmd,
+    };
+    ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
+}
+#endif
 
 /* 'set_ap_hidden' command - hide or show AP SSID */
 static int set_ap_hidden_cmd(int argc, char **argv)
