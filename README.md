@@ -1134,6 +1134,17 @@ esptool.py --chip esp32c3 \
 0x10000 firmware_esp32c3/esp32_nat_router.bin
 ```
 
+For WT32-ETH01 (Ethernet uplink):
+
+```bash
+esptool.py --chip esp32 \
+--before default_reset --after hard_reset write_flash \
+-z --flash_mode dio --flash_freq 40m --flash_size detect \
+0x1000 firmware_wt32_eth01/bootloader.bin \
+0x8000 firmware_wt32_eth01/partition-table.bin \
+0x10000 firmware_wt32_eth01/esp32_nat_router.bin
+```
+
 If especially the ESP32s with the JTAG-USB have problems during the flash process try the --no-stub option of esptool.
 
 For ESP32-S3:
@@ -1201,7 +1212,6 @@ idf.py -B build_eth -p /dev/ttyUSB0 flash monitor
 - Upstream connection is wired Ethernet (DHCP or static IP) instead of WiFi STA
 - The `set_sta`, `set_mac`, and `scan` CLI commands are not available
 - The web interface omits the "Getting Started" and "WiFi Scan" pages
-- WireGuard VPN binds to the Ethernet interface automatically
 
 ### Multi-Target Build Scripts
 
@@ -1227,17 +1237,6 @@ set_ap_dns ""              # Clear custom DNS (use upstream, default)
 ```
 
 The `show config` command displays the current DNS setting under AP Settings. Changes require a restart to take effect.
-
-## Performance
-
-All tests used `IPv4` and the `TCP` protocol.
-
-| Board | Tools | Optimization | CPU Frequency | Throughput | Power |
-| ----- | ----- | ------------ | ------------- | ---------- | ----- |
-| `ESP32D0WDQ6` | `iperf3` | `0g` | `240MHz` | `16.0 MBits/s` | `1.6 W` |
-| `ESP32D0WDQ6` | `iperf3` | `0s` | `240MHz` | `10.0 MBits/s` | `1.8 W` | 
-| `ESP32D0WDQ6` | `iperf3` | `0g` | `160MHz` | `15.2 MBits/s` | `1.4 W` |
-| `ESP32D0WDQ6` | `iperf3` | `0s` | `160MHz` | `14.1 MBits/s` | `1.5 W` |
 
 ## Licence
 

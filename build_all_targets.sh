@@ -6,7 +6,7 @@
 set -e  # Exit on any error
 
 # Build targets in order
-BUILD_ORDER=("esp32" "esp32s3" "esp32c6" "esp32c3")
+BUILD_ORDER=("esp32" "wt32_eth01" "esp32s3" "esp32c6" "esp32c3")
 
 # Target descriptions
 declare -A TARGET_DESC=(
@@ -14,6 +14,26 @@ declare -A TARGET_DESC=(
     ["esp32s3"]="ESP32-S3"
     ["esp32c6"]="ESP32-C6"
     ["esp32c3"]="ESP32-C3"
+    ["wt32_eth01"]="WT32-ETH01 (Ethernet)"
+)
+
+# IDF chip target for each build target
+declare -A TARGET_CHIP=(
+    ["esp32"]="esp32"
+    ["esp32s3"]="esp32s3"
+    ["esp32c6"]="esp32c6"
+    ["esp32c3"]="esp32c3"
+    ["wt32_eth01"]="esp32"
+)
+
+# Extra sdkconfig defaults (semicolon-separated)
+declare -A TARGET_SDKCONFIG=(
+    ["wt32_eth01"]="sdkconfig.defaults;sdkconfig.defaults.wt32_eth01"
+)
+
+# Custom build directory (empty = default "build")
+declare -A TARGET_BUILD_DIR=(
+    ["wt32_eth01"]="build_eth"
 )
 
 # Colors for output
@@ -44,19 +64,33 @@ print_error() {
 build_target() {
     local target=$1
     local description=$2
-    
+    local chip="${TARGET_CHIP[$target]}"
+    local sdkconfig="${TARGET_SDKCONFIG[$target]}"
+    local build_dir="${TARGET_BUILD_DIR[$target]}"
+    local build_args=()
+
     print_status "Building for $description ($target)..."
-    
-    # Set target using idf.py
-    idf.py set-target $target
-    
+
+    # Use custom build directory if specified
+    if [ -n "$build_dir" ]; then
+        build_args+=("-B" "$build_dir")
+    fi
+
+    # Use custom sdkconfig defaults if specified
+    if [ -n "$sdkconfig" ]; then
+        build_args+=("-D" "SDKCONFIG_DEFAULTS=$sdkconfig")
+    fi
+
+    # Set target using idf.py (use build dir args if custom)
+    idf.py "${build_args[@]}" set-target "$chip"
+
     # Clean previous build artifacts
     print_status "Cleaning previous build artifacts..."
-    idf.py clean
-    
+    idf.py "${build_args[@]}" clean
+
     # Build project
     print_status "Starting compilation for $target..."
-    if idf.py build; then
+    if idf.py "${build_args[@]}" build; then
         # Save binary artifacts to separate directory
         save_binary_artifacts "$target" "$description"
         print_success "Build completed successfully for $target"
@@ -74,12 +108,12 @@ save_binary_artifacts() {
     local artifacts_dir="firmware_$target"
     
     print_status "Saving binary artifacts to $artifacts_dir/..."
-    
+
     # Create artifacts directory if it doesn't exist
     mkdir -p "$artifacts_dir"
-    
+
     # Find and copy relevant binary files
-    local build_dir="build"
+    local build_dir="${TARGET_BUILD_DIR[$target]:-build}"
     local files_copied=0
     
     # Main firmware binary

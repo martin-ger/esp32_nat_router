@@ -41,6 +41,8 @@
 
 static const char *TAG = "HTTPServer";
 
+static void web_server_start_captive_dns(void);
+
 esp_timer_handle_t restart_timer;
 
 /* Session management for password protection */
@@ -2716,7 +2718,14 @@ httpd_handle_t start_webserver(uint16_t port)
         httpd_register_uri_handler(server, &config_exportp);
         httpd_register_uri_handler(server, &config_importp);
 
-#if !CONFIG_ETH_UPLINK
+#if CONFIG_ETH_UPLINK
+        // In ETH mode, start captive portal if router appears unconfigured
+        if (strlen(ap_passwd) == 0 && !is_web_password_set()) {
+            ESP_LOGI(TAG, "No AP/web password set, starting captive portal DNS");
+            httpd_register_err_handler(server, HTTPD_404_NOT_FOUND, captive_redirect_handler);
+            web_server_start_captive_dns();
+        }
+#else
         // Start captive portal DNS only when no upstream WiFi is configured
         if (ssid == NULL || strlen(ssid) == 0) {
             ESP_LOGI(TAG, "No STA configured, starting captive portal DNS");
