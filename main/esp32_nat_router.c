@@ -382,6 +382,7 @@ static void wifi_ap_event_handler(void* arg, esp_event_base_t event_base,
     } else if (event_id == WIFI_EVENT_AP_STACONNECTED) {
         wifi_event_ap_staconnected_t* event = (wifi_event_ap_staconnected_t*) event_data;
         connect_count++;
+        client_stats_on_connect(event->mac);
         const char* name = lookup_device_name_by_mac(event->mac);
         if (name) {
             ESP_LOGI(TAG, "Client connected: %02X:%02X:%02X:%02X:%02X:%02X (%s) - %d total",
@@ -397,6 +398,7 @@ static void wifi_ap_event_handler(void* arg, esp_event_base_t event_base,
     } else if (event_id == WIFI_EVENT_AP_STADISCONNECTED) {
         wifi_event_ap_stadisconnected_t* event = (wifi_event_ap_stadisconnected_t*) event_data;
         connect_count--;
+        client_stats_on_disconnect(event->mac);
         const char* name = lookup_device_name_by_mac(event->mac);
         if (name) {
             ESP_LOGI(TAG, "Client disconnected: %02X:%02X:%02X:%02X:%02X:%02X (%s) - %d remain",
@@ -471,6 +473,7 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
     {
         wifi_event_ap_staconnected_t* event = (wifi_event_ap_staconnected_t*) event_data;
         connect_count++;
+        client_stats_on_connect(event->mac);
 
         /* Look up device name from DHCP reservations */
         const char* name = lookup_device_name_by_mac(event->mac);
@@ -490,6 +493,7 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
     {
         wifi_event_ap_stadisconnected_t* event = (wifi_event_ap_stadisconnected_t*) event_data;
         connect_count--;
+        client_stats_on_disconnect(event->mac);
 
         /* Look up device name from DHCP reservations */
         const char* name = lookup_device_name_by_mac(event->mac);

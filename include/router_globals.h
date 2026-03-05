@@ -9,6 +9,7 @@
 #pragma once
 
 #include "router_config.h"
+#include "client_stats.h"
 #include "dhcp_reservations.h"
 #include "portmap.h"
 #include "wifi_config.h"

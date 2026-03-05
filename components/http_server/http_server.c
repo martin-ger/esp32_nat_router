@@ -1633,6 +1633,10 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
     int client_count = get_connected_clients(clients, MAX_DISPLAYED_CLIENTS);
     connect_count = client_count;
 
+    /* Fetch per-client traffic stats */
+    client_stats_entry_t stats[CLIENT_STATS_MAX];
+    int stats_count = client_stats_get_all(stats, CLIENT_STATS_MAX);
+
     if (client_count > 0) {
         for (int i = 0; i < client_count; i++) {
             char ip_str[16] = "-";
@@ -1660,8 +1664,21 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
             }
             js_name[j] = '\0';
 
+            /* Find matching traffic stats by MAC */
+            char traffic_str[32] = "-";
+            for (int s = 0; s < stats_count; s++) {
+                if (memcmp(stats[s].mac, clients[i].mac, 6) == 0) {
+                    char tx_buf[12], rx_buf[12];
+                    format_bytes_human(stats[s].bytes_sent, tx_buf, sizeof(tx_buf));
+                    format_bytes_human(stats[s].bytes_received, rx_buf, sizeof(rx_buf));
+                    snprintf(traffic_str, sizeof(traffic_str), "%s / %s", tx_buf, rx_buf);
+                    break;
+                }
+            }
+
             snprintf(row, sizeof(row),
                 "<tr>"
+                "<td>%s</td>"
                 "<td>%s</td>"
                 "<td>%s</td>"
                 "<td>%s</td>"
@@ -1670,6 +1687,7 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
                 mac_str,
                 ip_str,
                 clients[i].name[0] ? clients[i].name : "-",
+                traffic_str,
                 mac_str,
                 clients[i].has_ip ? ip_str : "",
                 js_name
@@ -1678,7 +1696,7 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
         }
     } else {
         httpd_resp_send_chunk(req,
-            "<tr><td colspan='4' style='text-align:center; color:#888;'>No clients connected</td></tr>",
+            "<tr><td colspan='5' style='text-align:center; color:#888;'>No clients connected</td></tr>",
             HTTPD_RESP_USE_STRLEN);
     }
 

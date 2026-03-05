@@ -5,6 +5,7 @@
  * and AP interfaces to intercept packets for filtering and monitoring.
  */
 
+#include <inttypes.h>
 #include <string.h>
 #include <time.h>
 #include "esp_log.h"
@@ -18,6 +19,7 @@
 #include "lwip/prot/ip4.h"
 #include "lwip/inet_chksum.h"
 #include "acl.h"
+#include "client_stats.h"
 #include "pcap_capture.h"
 #include "router_config.h"
 #include "wifi_config.h"
@@ -42,6 +44,88 @@ static struct netif *sta_netif = NULL;
 static netif_input_fn original_ap_netif_input = NULL;
 static netif_linkoutput_fn original_ap_netif_linkoutput = NULL;
 static struct netif *ap_netif = NULL;
+
+// Per-client traffic statistics for AP clients
+static client_stats_entry_t client_stats[CLIENT_STATS_MAX];
+
+static inline client_stats_entry_t* find_client_stats(const uint8_t *mac) {
+    for (int i = 0; i < CLIENT_STATS_MAX; i++) {
+        if (client_stats[i].active && memcmp(client_stats[i].mac, mac, 6) == 0) {
+            return &client_stats[i];
+        }
+    }
+    return NULL;
+}
+
+void client_stats_on_connect(const uint8_t *mac) {
+    // Keep existing stats on reconnect
+    client_stats_entry_t *existing = find_client_stats(mac);
+    if (existing) {
+        existing->connected = 1;
+        return;
+    }
+    // Find free slot: prefer inactive, then disconnected
+    int free_slot = -1;
+    int disconnected_slot = -1;
+    for (int i = 0; i < CLIENT_STATS_MAX; i++) {
+        if (!client_stats[i].active) {
+            free_slot = i;
+            break;
+        } else if (!client_stats[i].connected && disconnected_slot < 0) {
+            disconnected_slot = i;
+        }
+    }
+    int slot = (free_slot >= 0) ? free_slot : disconnected_slot;
+    if (slot >= 0) {
+        memcpy(client_stats[slot].mac, mac, 6);
+        client_stats[slot].bytes_sent = 0;
+        client_stats[slot].bytes_received = 0;
+        client_stats[slot].packets_sent = 0;
+        client_stats[slot].packets_received = 0;
+        client_stats[slot].active = 1;
+        client_stats[slot].connected = 1;
+    }
+}
+
+void client_stats_on_disconnect(const uint8_t *mac) {
+    client_stats_entry_t *entry = find_client_stats(mac);
+    if (entry) {
+        entry->connected = 0;
+    }
+}
+
+int client_stats_get_all(client_stats_entry_t *out, int max_entries) {
+    int count = 0;
+    for (int i = 0; i < CLIENT_STATS_MAX && count < max_entries; i++) {
+        if (client_stats[i].active) {
+            memcpy(&out[count], &client_stats[i], sizeof(client_stats_entry_t));
+            count++;
+        }
+    }
+    return count;
+}
+
+void client_stats_reset_all(void) {
+    for (int i = 0; i < CLIENT_STATS_MAX; i++) {
+        if (client_stats[i].active) {
+            client_stats[i].bytes_sent = 0;
+            client_stats[i].bytes_received = 0;
+            client_stats[i].packets_sent = 0;
+            client_stats[i].packets_received = 0;
+        }
+    }
+}
+
+void format_bytes_human(uint64_t bytes, char *buf, size_t len) {
+    if (bytes >= 1073741824ULL)
+        snprintf(buf, len, "%.1f GB", (double)bytes / 1073741824.0);
+    else if (bytes >= 1048576ULL)
+        snprintf(buf, len, "%.1f MB", (double)bytes / 1048576.0);
+    else if (bytes >= 1024ULL)
+        snprintf(buf, len, "%.1f KB", (double)bytes / 1024.0);
+    else
+        snprintf(buf, len, "%" PRIu64 " B", bytes);
+}
 
 // Hook function to count received bytes via netif input and ACL check
 static err_t netif_input_hook(struct pbuf *p, struct netif *netif) {
@@ -456,6 +540,16 @@ static err_t ap_netif_input_hook(struct pbuf *p, struct netif *netif) {
     // Clamp TCP MSS on SYN packets from clients
     clamp_tcp_mss(p, ap_mss_clamp);
 
+    // Per-client byte counting: source MAC = client
+    if (p != NULL && p->len >= 14) {
+        const uint8_t *src_mac = ((const uint8_t *)p->payload) + 6;
+        client_stats_entry_t *entry = find_client_stats(src_mac);
+        if (entry) {
+            entry->bytes_received += p->tot_len;
+            entry->packets_received++;
+        }
+    }
+
     // Capture packet based on mode and ACL monitor flag (AP interface = true)
     if (pcap_should_capture(is_acl_monitored, true)) {
         pcap_capture_packet(p);
@@ -491,6 +585,16 @@ static err_t ap_netif_linkoutput_hook(struct netif *netif, struct pbuf *p) {
 
     // Clamp TCP MSS on SYN/SYN-ACK packets to clients
     clamp_tcp_mss(p, ap_mss_clamp);
+
+    // Per-client byte counting: dest MAC = client
+    if (p != NULL && p->len >= 14) {
+        const uint8_t *dst_mac = (const uint8_t *)p->payload;
+        client_stats_entry_t *entry = find_client_stats(dst_mac);
+        if (entry) {
+            entry->bytes_sent += p->tot_len;
+            entry->packets_sent++;
+        }
+    }
 
     // Capture packet based on mode and ACL monitor flag (AP interface = true)
     if (pcap_should_capture(is_acl_monitored, true)) {

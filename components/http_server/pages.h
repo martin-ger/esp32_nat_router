@@ -532,6 +532,7 @@ document.getElementById('dhcp_mac').scrollIntoView({behavior: 'smooth', block: '
 <th>MAC Address</th>\
 <th>IP Address</th>\
 <th>Device Name</th>\
+<th>Traffic (TX / RX)</th>\
 <th>Action</th>\
 </tr>\
 </thead>\

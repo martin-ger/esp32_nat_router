@@ -1283,26 +1283,42 @@ static int show(int argc, char **argv)
         if (connect_count > 0) {
             connected_client_t clients[8];
             int count = get_connected_clients(clients, 8);
-            
+
             if (count > 0) {
+                // Fetch per-client traffic stats
+                client_stats_entry_t stats[CLIENT_STATS_MAX];
+                int stats_count = client_stats_get_all(stats, CLIENT_STATS_MAX);
+
                 printf("\nClient Details:\n");
-                printf("MAC Address       IP Address       Device Name\n");
-                printf("----------------  ---------------  ------------------\n");
-                
+                printf("MAC Address       IP Address       Device Name          TX / RX\n");
+                printf("----------------  ---------------  -------------------  ------------------\n");
+
                 for (int i = 0; i < count; i++) {
                     char mac_str[18];
                     sprintf(mac_str, "%02X:%02X:%02X:%02X:%02X:%02X",
                             clients[i].mac[0], clients[i].mac[1], clients[i].mac[2],
                             clients[i].mac[3], clients[i].mac[4], clients[i].mac[5]);
-                    
+
                     char ip_str[16] = "N/A";
                     if (clients[i].has_ip) {
                         ip4_addr_t addr;
                         addr.addr = clients[i].ip;
                         sprintf(ip_str, IPSTR, IP2STR(&addr));
                     }
-                    
-                    printf("%-17s  %-15s  %s\n", mac_str, ip_str, clients[i].name);
+
+                    // Find matching traffic stats by MAC
+                    char traffic_str[32] = "-";
+                    for (int j = 0; j < stats_count; j++) {
+                        if (memcmp(stats[j].mac, clients[i].mac, 6) == 0) {
+                            char tx_buf[12], rx_buf[12];
+                            format_bytes_human(stats[j].bytes_sent, tx_buf, sizeof(tx_buf));
+                            format_bytes_human(stats[j].bytes_received, rx_buf, sizeof(rx_buf));
+                            snprintf(traffic_str, sizeof(traffic_str), "%s / %s", tx_buf, rx_buf);
+                            break;
+                        }
+                    }
+
+                    printf("%-17s  %-15s  %-19s  %s\n", mac_str, ip_str, clients[i].name, traffic_str);
                 }
             }
         }
