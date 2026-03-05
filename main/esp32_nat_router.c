@@ -61,6 +61,9 @@
 #include "pcap_capture.h"
 #include "remote_console.h"
 #include "oled_display.h"
+#if CONFIG_MQTT_HOMEASSISTANT
+#include "mqtt_ha.h"
+#endif
 
 // Byte counting variables
 uint64_t sta_bytes_sent = 0;
@@ -1055,6 +1058,11 @@ void app_main(void)
 
     // Initialize OLED display (disabled by default, enable via 'set_oled enable')
     oled_display_init();
+
+#if CONFIG_MQTT_HOMEASSISTANT
+    // Initialize MQTT Home Assistant integration (disabled by default)
+    mqtt_ha_init();
+#endif
 
     initialize_console();
 

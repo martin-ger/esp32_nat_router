@@ -42,3 +42,25 @@ menu "NAT Router Uplink"
         depends on ETH_UPLINK
 
 endmenu
+
+menu "MQTT Home Assistant"
+
+    config MQTT_HOMEASSISTANT
+        bool "Enable MQTT Home Assistant integration"
+        default n
+        help
+            Publishes router telemetry to an MQTT broker with
+            Home Assistant auto-discovery. Adds ~15-20 KB RAM usage.
+
+    config MQTT_BUFFER_SIZE
+        int "MQTT buffer size (bytes)"
+        default 1024
+        depends on MQTT_HOMEASSISTANT
+
+    config MQTT_DEFAULT_INTERVAL
+        int "Default publish interval (seconds)"
+        default 30
+        depends on MQTT_HOMEASSISTANT
+        range 5 3600
+
+endmenu
