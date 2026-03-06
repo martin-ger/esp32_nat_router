@@ -47,7 +47,7 @@ menu "MQTT Home Assistant"
 
     config MQTT_HOMEASSISTANT
         bool "Enable MQTT Home Assistant integration"
-        default n
+        default y
         help
             Publishes router telemetry to an MQTT broker with
             Home Assistant auto-discovery. Adds ~58 KB flash.

@@ -36,6 +36,11 @@ declare -A TARGET_BUILD_DIR=(
     ["wt32_eth01"]="build_eth"
 )
 
+# Custom sdkconfig file path (empty = default "sdkconfig")
+declare -A TARGET_SDKCONFIG_FILE=(
+    ["wt32_eth01"]="sdkconfig.eth"
+)
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -67,6 +72,7 @@ build_target() {
     local chip="${TARGET_CHIP[$target]}"
     local sdkconfig="${TARGET_SDKCONFIG[$target]}"
     local build_dir="${TARGET_BUILD_DIR[$target]}"
+    local sdkconfig_file="${TARGET_SDKCONFIG_FILE[$target]}"
     local build_args=()
 
     print_status "Building for $description ($target)..."
@@ -74,6 +80,11 @@ build_target() {
     # Use custom build directory if specified
     if [ -n "$build_dir" ]; then
         build_args+=("-B" "$build_dir")
+    fi
+
+    # Use custom sdkconfig file if specified (avoids conflicts with shared sdkconfig)
+    if [ -n "$sdkconfig_file" ]; then
+        build_args+=("-D" "SDKCONFIG=$sdkconfig_file")
     fi
 
     # Use custom sdkconfig defaults if specified

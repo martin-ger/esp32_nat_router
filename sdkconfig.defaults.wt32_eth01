@@ -1,5 +1,5 @@
 # WT32-ETH01 Ethernet uplink variant
-# Use with: idf.py -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.wt32_eth01" build
+# Use with: idf.py -B build_eth -D SDKCONFIG="sdkconfig.eth" -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.wt32_eth01" build
 
 # Ethernet uplink mode
 CONFIG_ETH_UPLINK=y
