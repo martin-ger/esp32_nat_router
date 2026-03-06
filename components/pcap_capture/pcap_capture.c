@@ -216,15 +216,15 @@ client_disconnect:
     vTaskDelete(NULL);
 }
 
-void pcap_init(void)
+static bool ensure_server_running(void)
 {
-    // Initialize ring buffer synchronization (data buffer allocated on-demand)
+    if (pcap_task_handle != NULL) return true;
+
     if (!ringbuf_init()) {
         ESP_LOGE(TAG, "Failed to initialize ring buffer");
-        return;
+        return false;
     }
 
-    // Create TCP server task
     BaseType_t ret = xTaskCreate(
         pcap_server_task,
         "pcap_server",
@@ -236,11 +236,17 @@ void pcap_init(void)
 
     if (ret != pdPASS) {
         ESP_LOGE(TAG, "Failed to create PCAP server task");
-        return;
+        return false;
     }
 
-    ESP_LOGI(TAG, "PCAP capture initialized (snaplen=%d, buffer=%dKB on-demand)",
+    ESP_LOGI(TAG, "PCAP server started (snaplen=%d, buffer=%dKB on-demand)",
              pcap_snaplen, PCAP_RINGBUF_SIZE / 1024);
+    return true;
+}
+
+void pcap_init(void)
+{
+    ESP_LOGI(TAG, "PCAP capture available (server starts on demand)");
 }
 
 bool pcap_should_capture(bool is_acl_monitored, bool is_ap_interface)
@@ -308,6 +314,13 @@ void pcap_capture_packet(struct pbuf *p)
 void pcap_set_mode(pcap_capture_mode_t mode)
 {
     pcap_capture_mode_t old_mode = capture_mode;
+
+    // Start TCP server on first use
+    if (mode != PCAP_MODE_OFF && !ensure_server_running()) {
+        ESP_LOGE(TAG, "Cannot start capture: server failed to start");
+        return;
+    }
+
     capture_mode = mode;
 
     // Reset counters when enabling capture

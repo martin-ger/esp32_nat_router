@@ -309,14 +309,28 @@ static esp_err_t nvs_import_from_json_robust(const char *json_str)
         return ESP_ERR_INVALID_ARG;
     }
 
+    /* Validate all entries before touching NVS */
+    int valid_count = 0;
+    cJSON *item;
+    cJSON_ArrayForEach(item, arr) {
+        cJSON *jkey = cJSON_GetObjectItem(item, "key");
+        cJSON *jtype = cJSON_GetObjectItem(item, "type");
+        cJSON *jval = cJSON_GetObjectItem(item, "val");
+        if (!jkey || !cJSON_IsString(jkey) || !jtype || !cJSON_IsNumber(jtype) || !jval) continue;
+        valid_count++;
+    }
+    if (valid_count == 0) {
+        cJSON_Delete(arr);
+        return ESP_ERR_INVALID_ARG;
+    }
+
     nvs_handle_t nvs;
     esp_err_t err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
     if (err != ESP_OK) { cJSON_Delete(arr); return err; }
 
-    /* Erase all existing keys first so removed entries don't persist */
+    /* Erase all existing keys — safe now that JSON is validated */
     nvs_erase_all(nvs);
 
-    cJSON *item;
     cJSON_ArrayForEach(item, arr) {
         cJSON *jkey = cJSON_GetObjectItem(item, "key");
         cJSON *jtype = cJSON_GetObjectItem(item, "type");
