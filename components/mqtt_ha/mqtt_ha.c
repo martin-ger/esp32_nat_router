@@ -24,10 +24,12 @@
 #include "argtable3/argtable3.h"
 #include "nvs.h"
 
+#include "esp_netif_ip_addr.h"
 #include "router_config.h"
 #include "client_stats.h"
 #include "dhcp_reservations.h"
 #include "wifi_config.h"
+#include "remote_console.h"
 
 static const char *TAG = "mqtt_ha";
 
@@ -43,6 +45,8 @@ static const char *TAG = "mqtt_ha";
 #define TOPIC_STATE        TOPIC_PREFIX "/state"
 #define TOPIC_AVAILABILITY TOPIC_PREFIX "/availability"
 #define TOPIC_CMD_RESTART  TOPIC_PREFIX "/command/restart"
+#define TOPIC_CMD_WEBUI    TOPIC_PREFIX "/command/web_ui"
+#define TOPIC_CMD_RC       TOPIC_PREFIX "/command/remote_console"
 #define TOPIC_CLIENTS      TOPIC_PREFIX "/clients/"
 
 /* ---------- Config limits ---------- */
@@ -87,12 +91,16 @@ static void build_device_id(void)
 /* Shared device JSON fragment (embedded in every discovery payload). */
 static int device_json(char *buf, size_t len)
 {
+    char ip_str[16] = "192.168.4.1";
+    if (my_ip != 0) {
+        snprintf(ip_str, sizeof(ip_str), IPSTR, IP2STR((esp_ip4_addr_t *)&my_ip));
+    }
     return snprintf(buf, len,
         "\"dev\":{\"ids\":[\"%s\"],"
-        "\"name\":\"ESP32 NAT Router\","
+        "\"name\":\"%s\","
         "\"sw\":\"%s\","
-        "\"cu\":\"http://192.168.4.1\"}",
-        s_device_id, ROUTER_VERSION);
+        "\"cu\":\"http://%s\"}",
+        s_device_id, ap_ssid, ROUTER_VERSION, ip_str);
 }
 
 /* ================================================================
@@ -258,6 +266,36 @@ static void publish_discovery(void)
         "%s}", s_device_id, dev);
     esp_mqtt_client_publish(s_client, topic, payload, 0, 1, 1);
 
+    /* sensor: Uplink RSSI */
+    snprintf(topic, sizeof(topic),
+        "homeassistant/sensor/%s/rssi/config", s_device_id);
+    snprintf(payload, sizeof(payload),
+        "{\"name\":\"Uplink RSSI\","
+        "\"uniq_id\":\"%s_rssi\","
+        "\"stat_t\":\"" TOPIC_STATE "\","
+        "\"val_tpl\":\"{{value_json.rssi}}\","
+        "\"dev_cla\":\"signal_strength\","
+        "\"stat_cla\":\"measurement\","
+        "\"unit_of_meas\":\"dBm\","
+        "\"entity_category\":\"diagnostic\","
+        "\"avty_t\":\"" TOPIC_AVAILABILITY "\","
+        "%s}", s_device_id, dev);
+    esp_mqtt_client_publish(s_client, topic, payload, 0, 1, 1);
+
+    /* sensor: Uplink SSID */
+    snprintf(topic, sizeof(topic),
+        "homeassistant/sensor/%s/uplink_ssid/config", s_device_id);
+    snprintf(payload, sizeof(payload),
+        "{\"name\":\"Uplink SSID\","
+        "\"uniq_id\":\"%s_uplink_ssid\","
+        "\"stat_t\":\"" TOPIC_STATE "\","
+        "\"val_tpl\":\"{{value_json.ssid}}\","
+        "\"ic\":\"mdi:wifi-settings\","
+        "\"entity_category\":\"diagnostic\","
+        "\"avty_t\":\"" TOPIC_AVAILABILITY "\","
+        "%s}", s_device_id, dev);
+    esp_mqtt_client_publish(s_client, topic, payload, 0, 1, 1);
+
     /* button: Restart */
     snprintf(topic, sizeof(topic),
         "homeassistant/button/%s/restart/config", s_device_id);
@@ -266,6 +304,36 @@ static void publish_discovery(void)
         "\"uniq_id\":\"%s_restart\","
         "\"cmd_t\":\"" TOPIC_CMD_RESTART "\","
         "\"dev_cla\":\"restart\","
+        "\"entity_category\":\"config\","
+        "\"avty_t\":\"" TOPIC_AVAILABILITY "\","
+        "%s}", s_device_id, dev);
+    esp_mqtt_client_publish(s_client, topic, payload, 0, 1, 1);
+
+    /* switch: Web UI */
+    snprintf(topic, sizeof(topic),
+        "homeassistant/switch/%s/web_ui/config", s_device_id);
+    snprintf(payload, sizeof(payload),
+        "{\"name\":\"Web UI\","
+        "\"uniq_id\":\"%s_web_ui\","
+        "\"stat_t\":\"" TOPIC_STATE "\","
+        "\"val_tpl\":\"{{value_json.web_ui}}\","
+        "\"cmd_t\":\"" TOPIC_CMD_WEBUI "\","
+        "\"ic\":\"mdi:web\","
+        "\"entity_category\":\"config\","
+        "\"avty_t\":\"" TOPIC_AVAILABILITY "\","
+        "%s}", s_device_id, dev);
+    esp_mqtt_client_publish(s_client, topic, payload, 0, 1, 1);
+
+    /* switch: Remote Console */
+    snprintf(topic, sizeof(topic),
+        "homeassistant/switch/%s/remote_console/config", s_device_id);
+    snprintf(payload, sizeof(payload),
+        "{\"name\":\"Remote Console\","
+        "\"uniq_id\":\"%s_remote_console\","
+        "\"stat_t\":\"" TOPIC_STATE "\","
+        "\"val_tpl\":\"{{value_json.remote_console}}\","
+        "\"cmd_t\":\"" TOPIC_CMD_RC "\","
+        "\"ic\":\"mdi:console\","
         "\"entity_category\":\"config\","
         "\"avty_t\":\"" TOPIC_AVAILABILITY "\","
         "%s}", s_device_id, dev);
@@ -331,6 +399,21 @@ static void publish_discovery(void)
             "\"avty_t\":\"" TOPIC_AVAILABILITY "\","
             "%s}", name, s_device_id, cmac, client_state_topic, dev);
         esp_mqtt_client_publish(s_client, topic, payload, 0, 1, 1);
+
+        /* sensor: RSSI */
+        snprintf(topic, sizeof(topic),
+            "homeassistant/sensor/%s/%s_rssi/config", s_device_id, cmac);
+        snprintf(payload, sizeof(payload),
+            "{\"name\":\"%s RSSI\","
+            "\"uniq_id\":\"%s_%s_rssi\","
+            "\"stat_t\":\"%s\","
+            "\"val_tpl\":\"{{value_json.rssi}}\","
+            "\"dev_cla\":\"signal_strength\","
+            "\"stat_cla\":\"measurement\","
+            "\"unit_of_meas\":\"dBm\","
+            "\"avty_t\":\"" TOPIC_AVAILABILITY "\","
+            "%s}", name, s_device_id, cmac, client_state_topic, dev);
+        esp_mqtt_client_publish(s_client, topic, payload, 0, 1, 1);
     }
 
     ESP_LOGI(TAG, "Discovery configs published");
@@ -340,23 +423,50 @@ static void publish_discovery(void)
  *  Periodic state publish
  * ================================================================ */
 
+static bool is_web_ui_enabled(void)
+{
+    char *lock = NULL;
+    get_config_param_str("lock", &lock);
+    bool enabled = (lock == NULL || strcmp(lock, "0") == 0);
+    if (lock) free(lock);
+    return enabled;
+}
+
 static void publish_state(void *arg)
 {
     if (!s_connected) return;
 
+    /* Get uplink info (RSSI + SSID) */
+    wifi_ap_record_t ap_info;
+    int8_t rssi = 0;
+    char uplink_ssid[33] = "";
+    if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+        rssi = ap_info.rssi;
+        strncpy(uplink_ssid, (const char *)ap_info.ssid, sizeof(uplink_ssid) - 1);
+    }
+
     /* Router-level state */
-    char payload[256];
+    char payload[384];
     snprintf(payload, sizeof(payload),
         "{\"uplink\":\"%s\",\"clients\":%u,"
         "\"bytes_tx\":%" PRIu64 ",\"bytes_rx\":%" PRIu64 ","
-        "\"free_heap\":%" PRIu32 ",\"uptime\":%" PRIu32 "}",
+        "\"free_heap\":%" PRIu32 ",\"uptime\":%" PRIu32 ","
+        "\"rssi\":%d,\"ssid\":\"%s\","
+        "\"web_ui\":\"%s\",\"remote_console\":\"%s\"}",
         ap_connect ? "ON" : "OFF",
         connect_count,
         get_sta_bytes_sent(),
         get_sta_bytes_received(),
         (uint32_t)esp_get_free_heap_size(),
-        get_uptime_seconds());
+        get_uptime_seconds(),
+        rssi, uplink_ssid,
+        is_web_ui_enabled() ? "ON" : "OFF",
+        remote_console_is_enabled() ? "ON" : "OFF");
     esp_mqtt_client_publish(s_client, TOPIC_STATE, payload, 0, 0, 1);
+
+    /* Get AP station list for per-client RSSI */
+    wifi_sta_list_t sta_list;
+    esp_wifi_ap_get_sta_list(&sta_list);
 
     /* Per-client state (DHCP reservations only) */
     client_stats_entry_t stats[CLIENT_STATS_MAX];
@@ -383,11 +493,20 @@ static void publish_state(void *arg)
             }
         }
 
+        /* Find RSSI from AP station list */
+        int8_t client_rssi = 0;
+        for (int j = 0; j < sta_list.num; j++) {
+            if (memcmp(sta_list.sta[j].mac, r->mac, 6) == 0) {
+                client_rssi = sta_list.sta[j].rssi;
+                break;
+            }
+        }
+
         char topic[64];
         snprintf(topic, sizeof(topic), TOPIC_CLIENTS "%s", cmac);
         snprintf(payload, sizeof(payload),
-            "{\"present\":\"%s\",\"tx\":%" PRIu64 ",\"rx\":%" PRIu64 "}",
-            present ? "ON" : "OFF", tx, rx);
+            "{\"present\":\"%s\",\"tx\":%" PRIu64 ",\"rx\":%" PRIu64 ",\"rssi\":%d}",
+            present ? "ON" : "OFF", tx, rx, client_rssi);
         esp_mqtt_client_publish(s_client, topic, payload, 0, 0, 1);
     }
 }
@@ -409,6 +528,8 @@ static void mqtt_event_handler(void *arg, esp_event_base_t base,
         esp_mqtt_client_publish(s_client, TOPIC_AVAILABILITY, "online", 0, 1, 1);
         /* Subscribe to command topics */
         esp_mqtt_client_subscribe(s_client, TOPIC_CMD_RESTART, 1);
+        esp_mqtt_client_subscribe(s_client, TOPIC_CMD_WEBUI, 1);
+        esp_mqtt_client_subscribe(s_client, TOPIC_CMD_RC, 1);
         /* Publish HA discovery */
         publish_discovery();
         /* Publish initial state */
@@ -426,6 +547,32 @@ static void mqtt_event_handler(void *arg, esp_event_base_t base,
                 memcmp(event->topic, TOPIC_CMD_RESTART, event->topic_len) == 0) {
                 ESP_LOGW(TAG, "Restart command received via MQTT");
                 esp_restart();
+            }
+            if (event->topic_len == (int)strlen(TOPIC_CMD_WEBUI) &&
+                memcmp(event->topic, TOPIC_CMD_WEBUI, event->topic_len) == 0) {
+                bool on = (event->data_len >= 2 &&
+                           strncasecmp(event->data, "ON", 2) == 0);
+                ESP_LOGI(TAG, "Web UI %s via MQTT", on ? "enabled" : "disabled");
+                nvs_handle_t h;
+                if (nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &h) == ESP_OK) {
+                    nvs_set_str(h, "lock", on ? "0" : "1");
+                    nvs_commit(h);
+                    nvs_close(h);
+                }
+                /* Publish updated state immediately */
+                publish_state(NULL);
+            }
+            if (event->topic_len == (int)strlen(TOPIC_CMD_RC) &&
+                memcmp(event->topic, TOPIC_CMD_RC, event->topic_len) == 0) {
+                bool on = (event->data_len >= 2 &&
+                           strncasecmp(event->data, "ON", 2) == 0);
+                ESP_LOGI(TAG, "Remote console %s via MQTT", on ? "enabled" : "disabled");
+                if (on) {
+                    remote_console_enable();
+                } else {
+                    remote_console_disable();
+                }
+                publish_state(NULL);
             }
         }
         break;

@@ -50,7 +50,8 @@ menu "MQTT Home Assistant"
         default n
         help
             Publishes router telemetry to an MQTT broker with
-            Home Assistant auto-discovery. Adds ~15-20 KB RAM usage.
+            Home Assistant auto-discovery. Adds ~58 KB flash.
+            RAM is only used when a broker is configured and enabled.
 
     config MQTT_BUFFER_SIZE
         int "MQTT buffer size (bytes)"

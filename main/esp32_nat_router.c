@@ -1059,17 +1059,16 @@ void app_main(void)
     // Initialize OLED display (disabled by default, enable via 'set_oled enable')
     oled_display_init();
 
-#if CONFIG_MQTT_HOMEASSISTANT
-    // Initialize MQTT Home Assistant integration (disabled by default)
-    mqtt_ha_init();
-#endif
-
     initialize_console();
 
     /* Register commands */
     esp_console_register_help_command();
     register_system();
     register_router();
+
+#if CONFIG_MQTT_HOMEASSISTANT
+    mqtt_ha_init();
+#endif
 
     /* Prompt to be printed before each line.
      * This can be customized, made dynamic, etc.
