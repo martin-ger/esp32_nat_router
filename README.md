@@ -4,11 +4,12 @@ This is a firmware to use the ESP32 as WiFi NAT router. It routes between the ne
 
 **Use cases:**
 - Simple range extender for an existing WiFi network
-- An additional WiFi network with different SSID/password and restricted access for guests or IOT devices
+- An additional WiFi network with different SSID/password and restricted access for guests or IoT devices
 - VPN-Router using WireGuard
 - Converter from a corporate (WPA2-Enterprise) network to a regular (WPA-PSK) network for simple devices
 - Classic WiFi router with Ethernet uplink
 - MCP-server to control your network using agentic AI
+- Presence detection and network monitoring in a Home Assistant IoT network
 - Debugging and monitoring of WiFi devices
 
 ## Key Features
@@ -29,7 +30,7 @@ This is a firmware to use the ESP32 as WiFi NAT router. It routes between the ne
 - **MQTT Home Assistant**: Publish telemetry and per-client stats to MQTT with HA auto-discovery
 - **MCP Bridge (AI-Ready)**: BETA - Control the router from AI assistants (Claude, etc.) via the Model Context Protocol
 
-The maximum number of simultaniously connected WiFi clients is 8 (5 on the ESP32c3) due to RAM limitations.
+The maximum number of simultaniously connected WiFi clients is 8 (5 on the ESP32c3) due to RAM limitations (uses about 5KB per client). Each of the features: Web Interface, PCAP Capture, Wireguard VPN, Remote Console, WPA Enterprise and MQTT Home Assistant require several KB of additional RAM. So using all of them at once will probably burst the ESP32's ressources. Have a look at remaining heap size if in doubt.
 
 The code is originally based on the [Console Component](https://docs.espressif.com/projects/esp-idf/en/latest/api-guides/console.html#console) and the [esp-idf-nat-example](https://github.com/jonask1337/esp-idf-nat-example).
 
