@@ -40,6 +40,8 @@
 #include "acl.h"
 #include "remote_console.h"
 #include "oled_display.h"
+#include "esp_ota_ops.h"
+#include "esp_app_desc.h"
 
 #ifdef CONFIG_FREERTOS_USE_STATS_FORMATTING_FUNCTIONS
 #define WITH_TASKS_INFO 1
@@ -1221,7 +1223,7 @@ static int show(int argc, char **argv)
     }
 
     if (show_args.type->count == 0) {
-        printf("Usage: show <status|config|mappings|acl|vpn>\n");
+        printf("Usage: show <status|config|mappings|acl|vpn|ota>\n");
         printf("  status   - Show router status (connection, clients, memory)\n");
         printf("  config   - Show router configuration (AP/STA settings)\n");
         printf("  mappings - Show DHCP pool, reservations and port mappings\n");
@@ -1465,8 +1467,46 @@ static int show(int argc, char **argv)
         printf("Kill Switch: %s\n", vpn_killswitch ? "on" : "off");
         printf("Route All: %s\n", vpn_route_all ? "yes (all traffic)" : "no (split tunnel)");
 
+    } else if (strcmp(type, "ota") == 0) {
+        const esp_partition_t *running = esp_ota_get_running_partition();
+        const esp_app_desc_t *app_desc = esp_app_get_description();
+        const esp_partition_t *next = esp_ota_get_next_update_partition(NULL);
+        const esp_partition_t *last = esp_ota_get_last_invalid_partition();
+
+        printf("Running partition: %s (0x%lx, %luK)\n",
+            running ? running->label : "unknown",
+            running ? (unsigned long)running->address : 0,
+            running ? (unsigned long)running->size / 1024 : 0);
+        printf("Firmware version: %s\n", app_desc ? app_desc->version : "unknown");
+        printf("Built: %s %s\n",
+            app_desc ? app_desc->date : "unknown",
+            app_desc ? app_desc->time : "");
+        printf("IDF version: %s\n", app_desc ? app_desc->idf_ver : "unknown");
+        printf("Next OTA partition: %s (0x%lx, %luK)\n",
+            next ? next->label : "none",
+            next ? (unsigned long)next->address : 0,
+            next ? (unsigned long)next->size / 1024 : 0);
+
+        if (last) {
+            printf("Last invalid partition: %s\n", last->label);
+        }
+
+        esp_ota_img_states_t ota_state;
+        if (running && esp_ota_get_state_partition(running, &ota_state) == ESP_OK) {
+            const char *state_str = "unknown";
+            switch (ota_state) {
+                case ESP_OTA_IMG_NEW:             state_str = "new (first boot pending)"; break;
+                case ESP_OTA_IMG_PENDING_VERIFY:  state_str = "pending verify"; break;
+                case ESP_OTA_IMG_VALID:           state_str = "valid"; break;
+                case ESP_OTA_IMG_INVALID:         state_str = "invalid"; break;
+                case ESP_OTA_IMG_ABORTED:         state_str = "aborted"; break;
+                default: break;
+            }
+            printf("Image state: %s\n", state_str);
+        }
+
     } else {
-        printf("Invalid parameter. Use: show <status|config|mappings|acl|vpn>\n");
+        printf("Invalid parameter. Use: show <status|config|mappings|acl|vpn|ota>\n");
         return 1;
     }
 
@@ -1475,12 +1515,12 @@ static int show(int argc, char **argv)
 
 static void register_show(void)
 {
-    show_args.type = arg_str1(NULL, NULL, "[status|config|mappings|acl|vpn]", "Type of information");
+    show_args.type = arg_str1(NULL, NULL, "[status|config|mappings|acl|vpn|ota]", "Type of information");
     show_args.end = arg_end(1);
 
     const esp_console_cmd_t cmd = {
         .command = "show",
-        .help = "Show router status, config, mappings, ACL rules or VPN",
+        .help = "Show router status, config, mappings, ACL rules, VPN or OTA info",
         .hint = NULL,
         .func = &show,
         .argtable = &show_args

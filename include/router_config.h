@@ -14,8 +14,6 @@ extern "C" {
 
 #define PARAM_NAMESPACE "esp32_nat"
 
-#define ROUTER_VERSION "2.3.0"
-
 #define PROTO_TCP 6
 #define PROTO_UDP 17
 

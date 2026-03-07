@@ -204,9 +204,7 @@ font-size: 0.8rem;\
 
 #define INDEX_CHUNK_TAIL "\
 <div style='margin-top: 2rem; padding-top: 1rem; border-top: 1px solid rgba(255, 255, 255, 0.1); text-align: center;'>\
-<span style='color: #666; font-size: 0.75rem; font-family: monospace;'>v"\
-ROUTER_VERSION\
-" | Build: "\
+<span style='color: #666; font-size: 0.75rem; font-family: monospace;'>v%s | Build: "\
 __DATE__\
 " | ESP-IDF: "\
 IDF_VER\
@@ -390,7 +388,26 @@ setTimeout(\"location.href = '/'\", 10000);\
 #define CONFIG_CHUNK_TAIL "\
 <h2>Device Management</h2>\
 <div id='mainContent'>\
-<h3 style='font-size:1rem;color:#aaa;margin:1rem 0 0.5rem;'>Config Backup / Restore</h3>\
+<h3 style='font-size:1rem;color:#aaa;margin:1rem 0 0.5rem;'>Firmware Update (OTA)</h3>"
+
+/* OTA info (running partition, version) is streamed dynamically here */
+#define CONFIG_CHUNK_TAIL2 "\
+<table>\
+<tr><td>Upload</td><td>\
+<label style='display:inline-block;padding:0.6rem 1rem;background:rgba(22,33,62,0.6);border:1px solid rgba(0,217,255,0.2);border-radius:8px;color:#e0e0e0;font-size:0.9rem;cursor:pointer;transition:all 0.3s;margin-bottom:0.5rem;'>\
+<input type='file' id='otaFile' accept='.bin' style='display:none;'/>\
+<span id='otaFileName'>Choose .bin file...</span>\
+</label><br/>\
+<button type='button' onclick='uploadOTA()' class='ok-button'>Upload Firmware</button>\
+<div id='otaProgress' style='margin-top:0.5rem;'>\
+<div id='otaBar' style='display:none;height:6px;background:rgba(0,217,255,0.2);border-radius:3px;overflow:hidden;'>\
+<div id='otaBarFill' style='height:100%;width:0;background:#00d9ff;transition:width 0.3s;'></div>\
+</div>\
+</div>\
+<div id='otaStatus' style='margin-top:0.5rem;font-size:0.9rem;'></div>\
+</td></tr>\
+</table>\
+<h3 style='font-size:1rem;color:#aaa;margin:1.5rem 0 0.5rem;'>Config Backup / Restore</h3>\
 <table>\
 <tr><td>Export</td><td><a href='/api/config-export' class='ok-button' style='display:inline-block;text-align:center;text-decoration:none;'>Write Config</a></td></tr>\
 <tr><td>Import</td><td>\
@@ -410,12 +427,39 @@ setTimeout(\"location.href = '/'\", 10000);\
 </form>\
 </div>\
 <div id='rebootScreen' style='display:none;text-align:center;padding:2rem 0;'>\
-<h2 style='color:#4caf50;margin-bottom:1rem;'>Config Imported Successfully</h2>\
-<p style='font-size:1.1rem;margin-bottom:0.5rem;'>The device is rebooting to apply the new configuration.</p>\
+<h2 style='color:#4caf50;margin-bottom:1rem;' id='rebootTitle'>Success</h2>\
+<p style='font-size:1.1rem;margin-bottom:0.5rem;' id='rebootMsg'>The device is rebooting...</p>\
 <p style='font-size:1.5rem;font-weight:bold;color:#00d9ff;' id='countdown'>5</p>\
 <p style='color:#888;font-size:0.9rem;'>Redirecting to home page...</p>\
 </div>\
 <script>\
+document.getElementById('otaFile').addEventListener('change',function(){document.getElementById('otaFileName').textContent=this.files[0]?this.files[0].name:'Choose .bin file...';});\
+function uploadOTA(){\
+var f=document.getElementById('otaFile').files[0];\
+if(!f){document.getElementById('otaStatus').textContent='Select a firmware file first.';return;}\
+if(!f.name.endsWith('.bin')){document.getElementById('otaStatus').innerHTML='<span style=\"color:#ff5252;\">Please select a .bin file</span>';return;}\
+document.getElementById('otaStatus').textContent='Uploading...';\
+document.getElementById('otaBar').style.display='block';\
+var xhr=new XMLHttpRequest();\
+xhr.open('POST','/api/ota-upload',true);\
+xhr.upload.onprogress=function(e){if(e.lengthComputable){var pct=Math.round(e.loaded/e.total*100);document.getElementById('otaBarFill').style.width=pct+'%';document.getElementById('otaStatus').textContent='Uploading... '+pct+'%';}};\
+xhr.onload=function(){\
+try{var d=JSON.parse(xhr.responseText);\
+if(d.ok){\
+document.getElementById('mainContent').style.display='none';\
+document.getElementById('rebootScreen').style.display='block';\
+document.getElementById('rebootTitle').textContent='Firmware Updated';\
+document.getElementById('rebootMsg').textContent='The device is rebooting with new firmware.';\
+var c=10;var el=document.getElementById('countdown');\
+var t=setInterval(function(){c--;el.textContent=c;if(c<=0){clearInterval(t);window.location.href='/';}},1000);\
+}else{\
+document.getElementById('otaBarFill').style.width='0';document.getElementById('otaBar').style.display='none';\
+document.getElementById('otaStatus').innerHTML='<span style=\"color:#ff5252;\">'+d.msg+'</span>';\
+}}catch(e){document.getElementById('otaStatus').innerHTML='<span style=\"color:#ff5252;\">Upload failed</span>';}\
+};\
+xhr.onerror=function(){document.getElementById('otaStatus').innerHTML='<span style=\"color:#ff5252;\">Connection error</span>';};\
+xhr.send(f);\
+}\
 document.getElementById('cfgFile').addEventListener('change',function(){document.getElementById('cfgFileName').textContent=this.files[0]?this.files[0].name:'Choose file...';});\
 function uploadConfig(){\
 var f=document.getElementById('cfgFile').files[0];\
@@ -429,6 +473,8 @@ fetch('/api/config-import',{method:'POST',body:r.result,headers:{'Content-Type':
 if(d.ok){\
 document.getElementById('mainContent').style.display='none';\
 document.getElementById('rebootScreen').style.display='block';\
+document.getElementById('rebootTitle').textContent='Config Imported';\
+document.getElementById('rebootMsg').textContent='The device is rebooting to apply the new configuration.';\
 var c=5;var el=document.getElementById('countdown');\
 var t=setInterval(function(){c--;el.textContent=c;if(c<=0){clearInterval(t);window.location.href='/';}},1000);\
 }else{\

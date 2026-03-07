@@ -38,6 +38,9 @@
 #include "acl.h"
 #include "remote_console.h"
 #include "cJSON.h"
+#include "esp_ota_ops.h"
+#include "esp_app_format.h"
+#include "esp_app_desc.h"
 
 static const char *TAG = "HTTPServer";
 
@@ -465,6 +468,148 @@ static httpd_uri_t config_importp = {
     .handler   = config_import_handler,
 };
 
+/* --- OTA Firmware Upload handler --- */
+
+static esp_err_t ota_upload_handler(httpd_req_t *req)
+{
+    bool password_protection_enabled = is_web_password_set();
+    if (password_protection_enabled && !is_authenticated(req)) {
+        httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "Not authenticated");
+        return ESP_FAIL;
+    }
+
+    const esp_partition_t *update_partition = esp_ota_get_next_update_partition(NULL);
+    if (update_partition == NULL) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"ok\":false,\"msg\":\"No OTA partition found\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    if (req->content_len == 0) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"ok\":false,\"msg\":\"Empty request\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    if (req->content_len > update_partition->size) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"ok\":false,\"msg\":\"Firmware too large for partition\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    ESP_LOGI(TAG, "OTA upload: %d bytes -> partition '%s' at 0x%lx",
+             req->content_len, update_partition->label, (unsigned long)update_partition->address);
+
+    esp_ota_handle_t ota_handle;
+    esp_err_t err = esp_ota_begin(update_partition, OTA_WITH_SEQUENTIAL_WRITES, &ota_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_ota_begin failed: %s", esp_err_to_name(err));
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"ok\":false,\"msg\":\"OTA begin failed\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    char *buf = malloc(4096);
+    if (buf == NULL) {
+        esp_ota_abort(ota_handle);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+        return ESP_FAIL;
+    }
+
+    int remaining = req->content_len;
+    bool header_checked = false;
+
+    while (remaining > 0) {
+        int recv_len = httpd_req_recv(req, buf, MIN(remaining, 4096));
+        if (recv_len <= 0) {
+            free(buf);
+            esp_ota_abort(ota_handle);
+            if (recv_len == HTTPD_SOCK_ERR_TIMEOUT) {
+                httpd_resp_send_408(req);
+            }
+            return ESP_FAIL;
+        }
+
+        /* Validate firmware header on first chunk */
+        if (!header_checked) {
+            if (recv_len < (int)sizeof(esp_image_header_t)) {
+                free(buf);
+                esp_ota_abort(ota_handle);
+                httpd_resp_set_type(req, "application/json");
+                httpd_resp_send(req, "{\"ok\":false,\"msg\":\"File too small to be firmware\"}", HTTPD_RESP_USE_STRLEN);
+                return ESP_OK;
+            }
+            esp_image_header_t *hdr = (esp_image_header_t *)buf;
+            if (hdr->magic != ESP_IMAGE_HEADER_MAGIC) {
+                free(buf);
+                esp_ota_abort(ota_handle);
+                httpd_resp_set_type(req, "application/json");
+                httpd_resp_send(req, "{\"ok\":false,\"msg\":\"Invalid firmware file (bad magic)\"}", HTTPD_RESP_USE_STRLEN);
+                return ESP_OK;
+            }
+            if (hdr->chip_id != CONFIG_IDF_FIRMWARE_CHIP_ID) {
+                char msg[128];
+                snprintf(msg, sizeof(msg),
+                    "{\"ok\":false,\"msg\":\"Wrong chip type (firmware: 0x%04X, this device: 0x%04X)\"}",
+                    hdr->chip_id, CONFIG_IDF_FIRMWARE_CHIP_ID);
+                free(buf);
+                esp_ota_abort(ota_handle);
+                httpd_resp_set_type(req, "application/json");
+                httpd_resp_send(req, msg, HTTPD_RESP_USE_STRLEN);
+                return ESP_OK;
+            }
+            header_checked = true;
+        }
+
+        err = esp_ota_write(ota_handle, buf, recv_len);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "esp_ota_write failed: %s", esp_err_to_name(err));
+            free(buf);
+            esp_ota_abort(ota_handle);
+            httpd_resp_set_type(req, "application/json");
+            httpd_resp_send(req, "{\"ok\":false,\"msg\":\"OTA write failed\"}", HTTPD_RESP_USE_STRLEN);
+            return ESP_OK;
+        }
+
+        remaining -= recv_len;
+    }
+
+    free(buf);
+
+    err = esp_ota_end(ota_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_ota_end failed: %s", esp_err_to_name(err));
+        char msg[128];
+        snprintf(msg, sizeof(msg),
+            "{\"ok\":false,\"msg\":\"Firmware validation failed: %s\"}",
+            esp_err_to_name(err));
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, msg, HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    err = esp_ota_set_boot_partition(update_partition);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_ota_set_boot_partition failed: %s", esp_err_to_name(err));
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"ok\":false,\"msg\":\"Failed to set boot partition\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    ESP_LOGI(TAG, "OTA update successful, rebooting in 3 seconds...");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, "{\"ok\":true,\"msg\":\"Firmware updated! Rebooting...\"}", HTTPD_RESP_USE_STRLEN);
+
+    esp_timer_start_once(restart_timer, 3000000);
+    return ESP_OK;
+}
+
+static httpd_uri_t ota_uploadp = {
+    .uri       = "/api/ota-upload",
+    .method    = HTTP_POST,
+    .handler   = ota_upload_handler,
+};
+
 esp_err_t http_404_error_handler(httpd_req_t *req, httpd_err_code_t err)
 {
     httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "Page not found");
@@ -784,7 +929,13 @@ static esp_err_t index_get_handler(httpd_req_t *req)
     }
 
     /* Footer */
-    httpd_resp_send_chunk(req, INDEX_CHUNK_TAIL, HTTPD_RESP_USE_STRLEN);
+    {
+        const esp_app_desc_t *app_desc = esp_app_get_description();
+        char footer[512];
+        snprintf(footer, sizeof(footer), INDEX_CHUNK_TAIL,
+                 app_desc ? app_desc->version : "unknown");
+        httpd_resp_send_chunk(req, footer, HTTPD_RESP_USE_STRLEN);
+    }
 
     /* End chunked response */
     httpd_resp_send_chunk(req, NULL, 0);
@@ -1375,8 +1526,27 @@ static esp_err_t config_get_handler(httpd_req_t *req)
         current_snaplen, sta_ip_str);
     httpd_resp_send_chunk(req, section, HTTPD_RESP_USE_STRLEN);
 
-    /* Chunk 9: Device management (includes config backup/restore) and footer */
+    /* Chunk 9: Device management heading */
     httpd_resp_send_chunk(req, CONFIG_CHUNK_TAIL, HTTPD_RESP_USE_STRLEN);
+
+    /* Chunk 9a: Dynamic OTA info (running partition, version) */
+    {
+        const esp_partition_t *running = esp_ota_get_running_partition();
+        const esp_app_desc_t *app_desc = esp_app_get_description();
+        snprintf(section, sizeof(section),
+            "<table>"
+            "<tr><td>Running</td><td>%s</td></tr>"
+            "<tr><td>Version</td><td>%s</td></tr>"
+            "<tr><td>Built</td><td>%s %s</td></tr>"
+            "</table>",
+            running ? running->label : "unknown",
+            app_desc ? app_desc->version : "unknown",
+            app_desc ? app_desc->date : "", app_desc ? app_desc->time : "");
+        httpd_resp_send_chunk(req, section, HTTPD_RESP_USE_STRLEN);
+    }
+
+    /* Chunk 9b: OTA upload form, config backup/restore, and footer */
+    httpd_resp_send_chunk(req, CONFIG_CHUNK_TAIL2, HTTPD_RESP_USE_STRLEN);
 
     /* End chunked response */
     httpd_resp_send_chunk(req, NULL, 0);
@@ -2725,7 +2895,7 @@ httpd_handle_t start_webserver(uint16_t port)
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = port;
     config.stack_size = 16384;  // Large stack needed for mappings page with 3x 2KB HTML buffers
-    config.max_uri_handlers = 12;
+    config.max_uri_handlers = 13;
     config.max_uri_len = 1024;
 
     esp_timer_create(&restart_timer_args, &restart_timer);
@@ -2749,6 +2919,7 @@ httpd_handle_t start_webserver(uint16_t port)
         httpd_register_uri_handler(server, &favicon_uri);
         httpd_register_uri_handler(server, &config_exportp);
         httpd_register_uri_handler(server, &config_importp);
+        httpd_register_uri_handler(server, &ota_uploadp);
 
 #if CONFIG_ETH_UPLINK
         // In ETH mode, start captive portal if router appears unconfigured

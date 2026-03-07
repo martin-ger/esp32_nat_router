@@ -26,6 +26,7 @@
 
 #include "esp_netif_ip_addr.h"
 #include "router_config.h"
+#include "esp_app_desc.h"
 #include "client_stats.h"
 #include "dhcp_reservations.h"
 #include "wifi_config.h"
@@ -100,7 +101,8 @@ static int device_json(char *buf, size_t len)
         "\"name\":\"%s\","
         "\"sw\":\"%s\","
         "\"cu\":\"http://%s\"}",
-        s_device_id, ap_ssid, ROUTER_VERSION, ip_str);
+        s_device_id, ap_ssid,
+        esp_app_get_description()->version, ip_str);
 }
 
 /* ================================================================
