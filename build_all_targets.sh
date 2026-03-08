@@ -147,7 +147,14 @@ save_binary_artifacts() {
         print_status "  ✓ Copied partition-table.bin"
         ((files_copied++))
     fi
-    
+
+    # OTA data initial (required for OTA partition layout)
+    if [ -f "$build_dir/ota_data_initial.bin" ]; then
+        cp "$build_dir/ota_data_initial.bin" "$artifacts_dir/"
+        print_status "  ✓ Copied ota_data_initial.bin"
+        ((files_copied++))
+    fi
+
     # Combined firmware (if available)
     if [ -f "$build_dir/esp32_nat_router-merged.bin" ]; then
         cp "$build_dir/esp32_nat_router-merged.bin" "$artifacts_dir/"

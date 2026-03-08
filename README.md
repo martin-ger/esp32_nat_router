@@ -29,6 +29,7 @@ This is a firmware to use the ESP32 as WiFi NAT router. It routes between the ne
 - **OLED Display**: Status display on 72x40 I2C SSD1306 OLEDs (as found on some ESP32-C3 mini boards)
 - **MQTT Home Assistant**: Publish telemetry and per-client stats to MQTT with HA auto-discovery
 - **MCP Bridge (AI-Ready)**: BETA - Control the router from AI assistants (Claude, etc.) via the Model Context Protocol
+- **OTA Updates**: Flash new firmware directly from the Web UI
 
 The maximum number of simultaniously connected WiFi clients is 8 (5 on the ESP32c3) due to RAM limitations (uses about 5KB per client). Each of the features: Web Interface, PCAP Capture, Wireguard VPN, Remote Console, WPA Enterprise and MQTT Home Assistant require several KB of additional RAM. So using all of them at once will probably burst the ESP32's ressources. Have a look at remaining heap size if in doubt.
 
@@ -55,7 +56,8 @@ esptool.py --chip esp32 \
 -z --flash_mode dio --flash_freq 40m --flash_size detect \
 0x1000 firmware_esp32/bootloader.bin \
 0x8000 firmware_esp32/partition-table.bin \
-0x10000 firmware_esp32/esp32_nat_router.bin
+0xf000 firmware_esp32/ota_data_initial.bin \
+0x20000 firmware_esp32/esp32_nat_router.bin
 ```
 
 Pre-built binaries are available for: **ESP32**, **ESP32-C3**, **ESP32-C6**, **ESP32-S3**, and **WT32-ETH01** (Ethernet).

@@ -1095,6 +1095,21 @@ static esp_err_t config_get_handler(httpd_req_t *req)
                         }
                     }
 
+                    // Handle AP auth mode setting
+                    if (httpd_query_key_value(buf, "ap_auth", param5, sizeof(param5)) == ESP_OK) {
+                        int auth_val = atoi(param5);
+                        if (auth_val >= 0 && auth_val <= 2) {
+                            nvs_handle_t nvs;
+                            if (nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs) == ESP_OK) {
+                                nvs_set_i32(nvs, "ap_authmode", auth_val);
+                                nvs_commit(nvs);
+                                nvs_close(nvs);
+                                ap_authmode = (uint8_t)auth_val;
+                                ESP_LOGI(TAG, "AP auth mode set to: %d", auth_val);
+                            }
+                        }
+                    }
+
 #if CONFIG_ETH_UPLINK
                     // Handle AP channel setting (ETH_UPLINK only)
                     if (httpd_query_key_value(buf, "ap_channel", param5, sizeof(param5)) == ESP_OK) {
@@ -1472,11 +1487,15 @@ static esp_err_t config_get_handler(httpd_req_t *req)
     httpd_resp_send_chunk(req, CONFIG_CHUNK_SCRIPT, HTTPD_RESP_USE_STRLEN);
 
     /* Chunk 4: AP Settings */
+    const char* auth_sel0 = (ap_authmode == 0) ? "selected" : "";
+    const char* auth_sel1 = (ap_authmode == 1) ? "selected" : "";
+    const char* auth_sel2 = (ap_authmode == 2) ? "selected" : "";
     snprintf(section, sizeof(section), CONFIG_CHUNK_AP,
         safe_ap_ssid, ap_ip_str, ap_dns ? ap_dns : "", ap_mac_str,
 #if CONFIG_ETH_UPLINK
         (int)ap_channel,
 #endif
+        auth_sel0, auth_sel1, auth_sel2,
         ap_open_checked, ap_hidden_checked);
     httpd_resp_send_chunk(req, section, HTTPD_RESP_USE_STRLEN);
 

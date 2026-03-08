@@ -70,6 +70,7 @@ static void register_set_led_gpio(void);
 static void register_set_led_lowactive(void);
 static void register_set_ttl(void);
 static void register_set_ap_hidden(void);
+static void register_set_ap_auth(void);
 #if CONFIG_ETH_UPLINK
 static void register_set_ap_channel(void);
 #endif
@@ -252,6 +253,7 @@ void register_router(void)
     register_set_led_lowactive();
     register_set_ttl();
     register_set_ap_hidden();
+    register_set_ap_auth();
 #if CONFIG_ETH_UPLINK
     register_set_ap_channel();
 #endif
@@ -1395,6 +1397,10 @@ static int show(int argc, char **argv)
         addr.addr = my_ap_ip;
         printf("  IP Address: " IPSTR "\n", IP2STR(&addr));
         printf("  DNS Server: %s\n", (ap_dns && ap_dns[0]) ? ap_dns : "(upstream)");
+        {
+            const char *auth_modes[] = {"WPA2/WPA3", "WPA2", "WPA3"};
+            printf("  Security: %s\n", auth_modes[ap_authmode <= 2 ? ap_authmode : 0]);
+        }
 #if CONFIG_ETH_UPLINK
         printf("  Channel: %s", ap_channel > 0 ? "" : "auto\n");
         if (ap_channel > 0) printf("%d\n", ap_channel);
@@ -2132,6 +2138,61 @@ static void register_set_ap_hidden(void)
         .help = "Hide or show the AP SSID (on/off, requires restart)",
         .hint = NULL,
         .func = &set_ap_hidden_cmd,
+    };
+    ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
+}
+
+/* 'set_ap_auth' command - set AP authentication mode */
+static int set_ap_auth_cmd(int argc, char **argv)
+{
+    const char *modes[] = {"wpa2wpa3", "wpa2", "wpa3"};
+
+    if (argc < 2) {
+        printf("AP auth mode: %s\n", modes[ap_authmode <= 2 ? ap_authmode : 0]);
+        return 0;
+    }
+
+    int mode_val = -1;
+    if (strcasecmp(argv[1], "wpa2wpa3") == 0 || strcasecmp(argv[1], "wpa2/wpa3") == 0) {
+        mode_val = 0;
+    } else if (strcasecmp(argv[1], "wpa2") == 0) {
+        mode_val = 1;
+    } else if (strcasecmp(argv[1], "wpa3") == 0) {
+        mode_val = 2;
+    } else {
+        printf("Invalid mode. Use: wpa2, wpa3, or wpa2wpa3\n");
+        return 1;
+    }
+
+    nvs_handle_t nvs;
+    esp_err_t err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err != ESP_OK) {
+        printf("Failed to open NVS\n");
+        return err;
+    }
+
+    err = nvs_set_i32(nvs, "ap_authmode", mode_val);
+    if (err == ESP_OK) {
+        err = nvs_commit(nvs);
+        if (err == ESP_OK) {
+            ap_authmode = (uint8_t)mode_val;
+            printf("AP auth mode set to: %s\n", modes[mode_val]);
+            printf("Restart the device for changes to take effect.\n");
+        }
+    } else {
+        printf("Failed to save setting\n");
+    }
+    nvs_close(nvs);
+    return err;
+}
+
+static void register_set_ap_auth(void)
+{
+    const esp_console_cmd_t cmd = {
+        .command = "set_ap_auth",
+        .help = "Set AP auth mode (wpa2, wpa3, or wpa2wpa3; requires restart)",
+        .hint = NULL,
+        .func = &set_ap_auth_cmd,
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }

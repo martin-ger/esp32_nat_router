@@ -35,6 +35,9 @@ extern uint32_t my_ap_ip;
 // AP SSID hidden (0 = visible, 1 = hidden)
 extern uint8_t ap_ssid_hidden;
 
+// AP auth mode (0 = WPA2/WPA3, 1 = WPA2 only, 2 = WPA3 only)
+extern uint8_t ap_authmode;
+
 #if CONFIG_ETH_UPLINK
 // AP WiFi channel (0 = auto, 1-13 = fixed channel; ETH_UPLINK only)
 extern uint8_t ap_channel;

@@ -83,6 +83,9 @@ uint16_t ap_pmtu = 0;
 // AP SSID hidden (0 = visible, 1 = hidden)
 uint8_t ap_ssid_hidden = 0;
 
+// AP auth mode (0 = WPA2/WPA3, 1 = WPA2 only, 2 = WPA3 only)
+uint8_t ap_authmode = 0;
+
 #if CONFIG_ETH_UPLINK
 // AP WiFi channel (0 = auto, 1-13 = fixed channel; ETH_UPLINK only)
 uint8_t ap_channel = 0;
@@ -520,6 +523,15 @@ const int CONNECTED_BIT = BIT0;
 #define JOIN_TIMEOUT_MS (2000)
 
 
+static wifi_auth_mode_t get_ap_authmode(void)
+{
+    switch (ap_authmode) {
+        case 1: return WIFI_AUTH_WPA2_PSK;
+        case 2: return WIFI_AUTH_WPA3_PSK;
+        default: return WIFI_AUTH_WPA2_WPA3_PSK;
+    }
+}
+
 #if CONFIG_ETH_UPLINK
 void eth_init(const char* static_ip, const char* subnet_mask, const char* gateway_addr,
               const uint8_t* ap_mac, const char* ap_ssid, const char* ap_passwd, const char* ap_ip)
@@ -604,7 +616,7 @@ void eth_init(const char* static_ip, const char* subnet_mask, const char* gatewa
     wifi_config_t ap_config = {
         .ap = {
             .channel = ap_channel,
-            .authmode = WIFI_AUTH_WPA2_WPA3_PSK,
+            .authmode = get_ap_authmode(),
             .ssid_hidden = ap_ssid_hidden,
             .max_connection = AP_MAX_CONNECTIONS,
             .beacon_interval = 100,
@@ -698,7 +710,7 @@ void wifi_init(const uint8_t* mac, const char* ssid, const char* ent_username, c
         wifi_config_t ap_config = {
         .ap = {
             .channel = 0,
-            .authmode = WIFI_AUTH_WPA2_WPA3_PSK,
+            .authmode = get_ap_authmode(),
             .ssid_hidden = ap_ssid_hidden,
             .max_connection = AP_MAX_CONNECTIONS,
             .beacon_interval = 100,
@@ -954,6 +966,17 @@ void app_main(void)
     }
     if (ap_ssid_hidden) {
         ESP_LOGI(TAG, "AP SSID hidden enabled");
+    }
+
+    // Load AP auth mode from NVS (default 0 = WPA2/WPA3)
+    int authmode_setting = 0;
+    if (get_config_param_int("ap_authmode", &authmode_setting) == ESP_OK) {
+        if (authmode_setting >= 0 && authmode_setting <= 2) {
+            ap_authmode = (uint8_t)authmode_setting;
+        }
+    }
+    if (ap_authmode > 0) {
+        ESP_LOGI(TAG, "AP auth mode: %s", ap_authmode == 1 ? "WPA2" : "WPA3");
     }
 
 #if CONFIG_ETH_UPLINK
