@@ -1,0 +1,15 @@
+{
+  "name": "ESP32 NAT Router (WT32-ETH01)",
+  "version": "1.0.0",
+  "builds": [
+    {
+      "chipFamily": "ESP32",
+      "parts": [
+        { "path": "firmware_wt32_eth01/bootloader.bin", "offset": 4096 },
+        { "path": "firmware_wt32_eth01/partition-table.bin", "offset": 32768 },
+        { "path": "firmware_wt32_eth01/ota_data_initial.bin", "offset": 61440 },
+        { "path": "firmware_wt32_eth01/esp32_nat_router.bin", "offset": 131072 }
+      ]
+    }
+  ]
+}

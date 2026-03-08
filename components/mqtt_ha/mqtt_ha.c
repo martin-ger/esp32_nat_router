@@ -152,15 +152,9 @@ static esp_err_t save_u32(const char *key, uint32_t val)
     return ESP_OK;
 }
 
-static esp_err_t save_str(const char *key, const char *val)
+static inline esp_err_t save_str(const char *key, const char *val)
 {
-    nvs_handle_t h;
-    esp_err_t err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &h);
-    if (err != ESP_OK) return err;
-    nvs_set_str(h, key, val);
-    nvs_commit(h);
-    nvs_close(h);
-    return ESP_OK;
+    return set_config_param_str(key, val);
 }
 
 /* ================================================================
@@ -428,7 +422,7 @@ static void publish_discovery(void)
 static bool is_web_ui_enabled(void)
 {
     char *lock = NULL;
-    get_config_param_str("lock", &lock);
+    get_config_param_str("web_disabled", &lock);
     bool enabled = (lock == NULL || strcmp(lock, "0") == 0);
     if (lock) free(lock);
     return enabled;
@@ -555,12 +549,7 @@ static void mqtt_event_handler(void *arg, esp_event_base_t base,
                 bool on = (event->data_len >= 2 &&
                            strncasecmp(event->data, "ON", 2) == 0);
                 ESP_LOGI(TAG, "Web UI %s via MQTT", on ? "enabled" : "disabled");
-                nvs_handle_t h;
-                if (nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &h) == ESP_OK) {
-                    nvs_set_str(h, "lock", on ? "0" : "1");
-                    nvs_commit(h);
-                    nvs_close(h);
-                }
+                set_config_param_str("web_disabled", on ? "0" : "1");
                 /* Publish updated state immediately */
                 publish_state(NULL);
             }

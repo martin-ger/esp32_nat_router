@@ -109,7 +109,6 @@ void print_dhcp_pool() {
 
 esp_err_t add_dhcp_reservation(const uint8_t *mac, uint32_t ip, const char *name) {
     esp_err_t err;
-    nvs_handle_t nvs;
 
     // Check if MAC already exists and update it
     for (int i = 0; i < MAX_DHCP_RESERVATIONS; i++) {
@@ -145,71 +144,40 @@ esp_err_t add_dhcp_reservation(const uint8_t *mac, uint32_t ip, const char *name
     return ESP_ERR_NO_MEM;
 
 save:
-    err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
-    if (err != ESP_OK) {
-        return err;
-    }
-    err = nvs_set_blob(nvs, "dhcp_res", dhcp_reservations, DHCP_RES_SIZE);
+    err = set_config_param_blob("dhcp_res", dhcp_reservations, DHCP_RES_SIZE);
     if (err == ESP_OK) {
-        err = nvs_commit(nvs);
-        if (err == ESP_OK) {
-            ESP_LOGI(TAG, "DHCP reservations stored.");
-        }
+        ESP_LOGI(TAG, "DHCP reservations stored.");
     }
-    nvs_close(nvs);
-    return ESP_OK;
+    return err;
 }
 
 esp_err_t del_dhcp_reservation(const uint8_t *mac) {
-    esp_err_t err;
-    nvs_handle_t nvs;
-
     for (int i = 0; i < MAX_DHCP_RESERVATIONS; i++) {
         if (dhcp_reservations[i].valid &&
             memcmp(dhcp_reservations[i].mac, mac, 6) == 0) {
             dhcp_reservations[i].valid = 0;
 
-            err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
-            if (err != ESP_OK) {
-                return err;
-            }
-            err = nvs_set_blob(nvs, "dhcp_res", dhcp_reservations, DHCP_RES_SIZE);
+            esp_err_t err = set_config_param_blob("dhcp_res", dhcp_reservations, DHCP_RES_SIZE);
             if (err == ESP_OK) {
-                err = nvs_commit(nvs);
-                if (err == ESP_OK) {
-                    ESP_LOGI(TAG, "DHCP reservations stored.");
-                }
+                ESP_LOGI(TAG, "DHCP reservations stored.");
             }
-            nvs_close(nvs);
-            return ESP_OK;
+            return err;
         }
     }
     return ESP_OK;
 }
 
 esp_err_t clear_all_dhcp_reservations() {
-    esp_err_t err;
-    nvs_handle_t nvs;
-
     // Clear all reservation entries
     for (int i = 0; i < MAX_DHCP_RESERVATIONS; i++) {
         dhcp_reservations[i].valid = 0;
     }
 
     // Save cleared table to NVS
-    err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
-    if (err != ESP_OK) {
-        return err;
-    }
-    err = nvs_set_blob(nvs, "dhcp_res", dhcp_reservations, DHCP_RES_SIZE);
+    esp_err_t err = set_config_param_blob("dhcp_res", dhcp_reservations, DHCP_RES_SIZE);
     if (err == ESP_OK) {
-        err = nvs_commit(nvs);
-        if (err == ESP_OK) {
-            ESP_LOGI(TAG, "All DHCP reservations cleared.");
-        }
+        ESP_LOGI(TAG, "All DHCP reservations cleared.");
     }
-    nvs_close(nvs);
-
     return err;
 }
 

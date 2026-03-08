@@ -1110,7 +1110,7 @@ void app_main(void)
     ESP_LOGI(TAG, "NAT is enabled");
 
     char* web_disabled = NULL;
-    get_config_param_str("lock", &web_disabled);
+    get_config_param_str("web_disabled", &web_disabled);
     if (web_disabled == NULL) {
         web_disabled = param_set_default("0");
     }

@@ -65,6 +65,10 @@ esp_err_t get_config_param_blob(char* name, uint8_t** blob, size_t blob_len);
 esp_err_t get_config_param_int(char* name, int* param);
 esp_err_t get_config_param_str(char* name, char** param);
 
+esp_err_t set_config_param_str(const char* name, const char* value);
+esp_err_t set_config_param_int(const char* name, int32_t value);
+esp_err_t set_config_param_blob(const char* name, const void* data, size_t len);
+
 #ifdef __cplusplus
 }
 #endif

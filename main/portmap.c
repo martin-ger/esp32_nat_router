@@ -103,9 +103,6 @@ esp_err_t get_portmap_tab() {
 }
 
 esp_err_t add_portmap(u8_t proto, u16_t mport, u32_t daddr, u16_t dport, u8_t iface) {
-    esp_err_t err;
-    nvs_handle_t nvs;
-
     for (int i = 0; i<IP_PORTMAP_MAX; i++) {
         if (!portmap_tab[i].valid) {
             portmap_tab[i].proto = proto;
@@ -115,62 +112,40 @@ esp_err_t add_portmap(u8_t proto, u16_t mport, u32_t daddr, u16_t dport, u8_t if
             portmap_tab[i].valid = 1;
             portmap_tab[i].iface = iface;
 
-            err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
-            if (err != ESP_OK) {
-                return err;
-            }
-            err = nvs_set_blob(nvs, "portmap_tab", portmap_tab, PORTMAP_TAB_SIZE);
+            esp_err_t err = set_config_param_blob("portmap_tab", portmap_tab, PORTMAP_TAB_SIZE);
             if (err == ESP_OK) {
-                err = nvs_commit(nvs);
-                if (err == ESP_OK) {
-                    ESP_LOGI(TAG, "New portmap table stored.");
-                }
+                ESP_LOGI(TAG, "New portmap table stored.");
             }
-            nvs_close(nvs);
 
             uint32_t bind_ip = (iface == 1) ? vpn_tunnel_ip : my_ip;
             if (bind_ip != 0) {
                 ip_portmap_add(proto, bind_ip, mport, daddr, dport);
             }
 
-            return ESP_OK;
+            return err;
         }
     }
     return ESP_ERR_NO_MEM;
 }
 
 esp_err_t del_portmap(u8_t proto, u16_t mport) {
-    esp_err_t err;
-    nvs_handle_t nvs;
-
     for (int i = 0; i<IP_PORTMAP_MAX; i++) {
         if (portmap_tab[i].valid && portmap_tab[i].mport == mport && portmap_tab[i].proto == proto) {
             portmap_tab[i].valid = 0;
 
-            err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
-            if (err != ESP_OK) {
-                return err;
-            }
-            err = nvs_set_blob(nvs, "portmap_tab", portmap_tab, PORTMAP_TAB_SIZE);
+            esp_err_t err = set_config_param_blob("portmap_tab", portmap_tab, PORTMAP_TAB_SIZE);
             if (err == ESP_OK) {
-                err = nvs_commit(nvs);
-                if (err == ESP_OK) {
-                    ESP_LOGI(TAG, "New portmap table stored.");
-                }
+                ESP_LOGI(TAG, "New portmap table stored.");
             }
-            nvs_close(nvs);
 
             ip_portmap_remove(proto, mport);
-            return ESP_OK;
+            return err;
         }
     }
     return ESP_OK;
 }
 
 esp_err_t clear_all_portmaps() {
-    esp_err_t err;
-    nvs_handle_t nvs;
-
     // Clear all portmap entries from NAPT
     for (int i = 0; i < IP_PORTMAP_MAX; i++) {
         if (portmap_tab[i].valid) {
@@ -180,18 +155,9 @@ esp_err_t clear_all_portmaps() {
     }
 
     // Save cleared table to NVS
-    err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
-    if (err != ESP_OK) {
-        return err;
-    }
-    err = nvs_set_blob(nvs, "portmap_tab", portmap_tab, PORTMAP_TAB_SIZE);
+    esp_err_t err = set_config_param_blob("portmap_tab", portmap_tab, PORTMAP_TAB_SIZE);
     if (err == ESP_OK) {
-        err = nvs_commit(nvs);
-        if (err == ESP_OK) {
-            ESP_LOGI(TAG, "All port mappings cleared.");
-        }
+        ESP_LOGI(TAG, "All port mappings cleared.");
     }
-    nvs_close(nvs);
-
     return err;
 }

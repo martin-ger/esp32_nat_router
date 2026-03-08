@@ -48,6 +48,16 @@ After first boot the ESP32 NAT Router will offer a WiFi network with an open AP 
 
 ## Flashing Pre-built Binaries
 
+### Web Installer (Easiest)
+
+Flash directly from your browser — no tools or command line required:
+
+**[Open Web Installer](https://martin-ger.github.io/esp32_nat_router/)**
+
+Requires Chrome, Edge, or Opera. Select your firmware variant (WiFi or Ethernet) and click "Connect & Install".
+
+### esptool (Command Line)
+
 Install [esptool](https://github.com/espressif/esptool) and flash using the pre-built binaries from the `firmware_*` directories. Example for ESP32:
 
 ```bash

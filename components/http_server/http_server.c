@@ -933,7 +933,9 @@ static esp_err_t index_get_handler(httpd_req_t *req)
         const esp_app_desc_t *app_desc = esp_app_get_description();
         char footer[512];
         snprintf(footer, sizeof(footer), INDEX_CHUNK_TAIL,
-                 app_desc ? app_desc->version : "unknown");
+                 app_desc ? app_desc->version : "unknown",
+                 app_desc ? app_desc->date : "",
+                 app_desc ? app_desc->time : "");
         httpd_resp_send_chunk(req, footer, HTTPD_RESP_USE_STRLEN);
     }
 
@@ -986,12 +988,7 @@ static esp_err_t config_get_handler(httpd_req_t *req)
             /* Handle disable interface button */
             if (strstr(buf, "disable_interface=") != NULL) {
                 ESP_LOGI(TAG, "Disabling web interface");
-                nvs_handle_t nvs;
-                esp_err_t err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
-                if (err == ESP_OK) {
-                    nvs_set_str(nvs, "lock", "1");
-                    nvs_commit(nvs);
-                    nvs_close(nvs);
+                if (set_config_param_str("web_disabled", "1") == ESP_OK) {
                     ESP_LOGI(TAG, "Web interface disabled. Use 'enable' command via serial to re-enable.");
                 }
                 esp_timer_start_once(restart_timer, 500000);
@@ -1045,12 +1042,7 @@ static esp_err_t config_get_handler(httpd_req_t *req)
                         if (httpd_query_key_value(buf, "ap_dns", dns_param, sizeof(dns_param)) == ESP_OK) {
                             preprocess_string(dns_param);
                             ESP_LOGI(TAG, "Found URL query parameter => ap_dns=%s", dns_param);
-                            nvs_handle_t nvs;
-                            if (nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs) == ESP_OK) {
-                                nvs_set_str(nvs, "ap_dns", dns_param);
-                                nvs_commit(nvs);
-                                nvs_close(nvs);
-                            }
+                            set_config_param_str("ap_dns", dns_param);
                             free(ap_dns);
                             ap_dns = strdup(dns_param);
                         }
@@ -1080,33 +1072,23 @@ static esp_err_t config_get_handler(httpd_req_t *req)
                     // Handle AP hidden SSID setting
                     // Checkbox sends value only when checked, so absence means "off"
                     {
-                        nvs_handle_t nvs;
-                        if (nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs) == ESP_OK) {
-                            int hidden_val = 0;
-                            if (httpd_query_key_value(buf, "ap_hidden", param5, sizeof(param5)) == ESP_OK) {
-                                hidden_val = 1;
-                                ESP_LOGI(TAG, "Found URL query parameter => ap_hidden=%s", param5);
-                            }
-                            nvs_set_i32(nvs, "ap_hidden", hidden_val);
-                            nvs_commit(nvs);
-                            nvs_close(nvs);
-                            ap_ssid_hidden = (uint8_t)hidden_val;
-                            ESP_LOGI(TAG, "AP hidden SSID set to: %d", hidden_val);
+                        int hidden_val = 0;
+                        if (httpd_query_key_value(buf, "ap_hidden", param5, sizeof(param5)) == ESP_OK) {
+                            hidden_val = 1;
+                            ESP_LOGI(TAG, "Found URL query parameter => ap_hidden=%s", param5);
                         }
+                        set_config_param_int("ap_hidden", hidden_val);
+                        ap_ssid_hidden = (uint8_t)hidden_val;
+                        ESP_LOGI(TAG, "AP hidden SSID set to: %d", hidden_val);
                     }
 
                     // Handle AP auth mode setting
                     if (httpd_query_key_value(buf, "ap_auth", param5, sizeof(param5)) == ESP_OK) {
                         int auth_val = atoi(param5);
                         if (auth_val >= 0 && auth_val <= 2) {
-                            nvs_handle_t nvs;
-                            if (nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs) == ESP_OK) {
-                                nvs_set_i32(nvs, "ap_authmode", auth_val);
-                                nvs_commit(nvs);
-                                nvs_close(nvs);
-                                ap_authmode = (uint8_t)auth_val;
-                                ESP_LOGI(TAG, "AP auth mode set to: %d", auth_val);
-                            }
+                            set_config_param_int("ap_authmode", auth_val);
+                            ap_authmode = (uint8_t)auth_val;
+                            ESP_LOGI(TAG, "AP auth mode set to: %d", auth_val);
                         }
                     }
 
@@ -1115,14 +1097,9 @@ static esp_err_t config_get_handler(httpd_req_t *req)
                     if (httpd_query_key_value(buf, "ap_channel", param5, sizeof(param5)) == ESP_OK) {
                         int channel_val = atoi(param5);
                         if (channel_val >= 0 && channel_val <= 13) {
-                            nvs_handle_t nvs;
-                            if (nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs) == ESP_OK) {
-                                nvs_set_i32(nvs, "ap_channel", channel_val);
-                                nvs_commit(nvs);
-                                nvs_close(nvs);
-                                ap_channel = (uint8_t)channel_val;
-                                ESP_LOGI(TAG, "AP channel set to: %d", channel_val);
-                            }
+                            set_config_param_int("ap_channel", channel_val);
+                            ap_channel = (uint8_t)channel_val;
+                            ESP_LOGI(TAG, "AP channel set to: %d", channel_val);
                         }
                     }
 #endif
@@ -1172,43 +1149,37 @@ static esp_err_t config_get_handler(httpd_req_t *req)
 
                             // Save WPA2-Enterprise settings to NVS
                             {
-                                nvs_handle_t nvs;
-                                if (nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs) == ESP_OK) {
-                                    char eap_param[4] = "";
-                                    int eap_val = 0;
-                                    if (httpd_query_key_value(buf, "eap_method", eap_param, sizeof(eap_param)) == ESP_OK) {
-                                        eap_val = atoi(eap_param);
-                                    }
-                                    nvs_set_i32(nvs, "eap_method", eap_val);
-                                    eap_method = eap_val;
-
-                                    char phase2_param[4] = "";
-                                    int phase2_val = 0;
-                                    if (httpd_query_key_value(buf, "ttls_phase2", phase2_param, sizeof(phase2_param)) == ESP_OK) {
-                                        phase2_val = atoi(phase2_param);
-                                    }
-                                    nvs_set_i32(nvs, "ttls_phase2", phase2_val);
-                                    ttls_phase2 = phase2_val;
-
-                                    // Checkboxes: present = 1, absent = 0
-                                    char cb_param[4] = "";
-                                    int cb_val = 0;
-                                    if (httpd_query_key_value(buf, "cert_bundle", cb_param, sizeof(cb_param)) == ESP_OK) {
-                                        cb_val = 1;
-                                    }
-                                    nvs_set_i32(nvs, "cert_bundle", cb_val);
-                                    use_cert_bundle = cb_val;
-
-                                    int tc_val = 0;
-                                    if (httpd_query_key_value(buf, "no_time_chk", cb_param, sizeof(cb_param)) == ESP_OK) {
-                                        tc_val = 1;
-                                    }
-                                    nvs_set_i32(nvs, "no_time_chk", tc_val);
-                                    disable_time_check = tc_val;
-
-                                    nvs_commit(nvs);
-                                    nvs_close(nvs);
+                                char eap_param[4] = "";
+                                int eap_val = 0;
+                                if (httpd_query_key_value(buf, "eap_method", eap_param, sizeof(eap_param)) == ESP_OK) {
+                                    eap_val = atoi(eap_param);
                                 }
+                                set_config_param_int("eap_method", eap_val);
+                                eap_method = eap_val;
+
+                                char phase2_param[4] = "";
+                                int phase2_val = 0;
+                                if (httpd_query_key_value(buf, "ttls_phase2", phase2_param, sizeof(phase2_param)) == ESP_OK) {
+                                    phase2_val = atoi(phase2_param);
+                                }
+                                set_config_param_int("ttls_phase2", phase2_val);
+                                ttls_phase2 = phase2_val;
+
+                                // Checkboxes: present = 1, absent = 0
+                                char cb_param[4] = "";
+                                int cb_val = 0;
+                                if (httpd_query_key_value(buf, "cert_bundle", cb_param, sizeof(cb_param)) == ESP_OK) {
+                                    cb_val = 1;
+                                }
+                                set_config_param_int("cert_bundle", cb_val);
+                                use_cert_bundle = cb_val;
+
+                                int tc_val = 0;
+                                if (httpd_query_key_value(buf, "no_time_chk", cb_param, sizeof(cb_param)) == ESP_OK) {
+                                    tc_val = 1;
+                                }
+                                set_config_param_int("no_time_chk", tc_val);
+                                disable_time_check = tc_val;
                             }
 
                             // Check for optional STA MAC address

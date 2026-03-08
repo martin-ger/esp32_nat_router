@@ -28,6 +28,11 @@
             transition: background 0.2s;
         }
         button:hover { background-color: #0056b3; }
+        .variant-select { margin-bottom: 20px; }
+        .variant-select select {
+            padding: 8px 12px; border-radius: 8px; border: 1px solid #ddd;
+            font-size: 14px; margin-top: 6px; width: 100%; max-width: 340px;
+        }
         .footer { margin-top: 25px; font-size: 12px; color: #bcc0c4; line-height: 1.4; }
     </style>
 </head>
@@ -43,10 +48,18 @@
 
         <div class="chip-list">
             <strong>Supported hardware:</strong><br>
-            ESP32, ESP32-C3, ESP32-C6, ESP32-S3
+            ESP32, ESP32-C3, ESP32-C6, ESP32-S3, WT32-ETH01
         </div>
 
-        <esp-web-install-button manifest="./manifest.json">
+        <div class="variant-select">
+            <label for="variant"><strong>Firmware variant:</strong></label><br>
+            <select id="variant" onchange="document.querySelector('esp-web-install-button').setAttribute('manifest', this.value)">
+                <option value="./manifest_esp32_wifi.json">ESP32 / ESP32-Cx / ESP32-S3 (WiFi Uplink)</option>
+                <option value="./manifest_wt32_eth01.json">WT32-ETH01 (Ethernet Uplink)</option>
+            </select>
+        </div>
+
+        <esp-web-install-button manifest="./manifest_esp32_wifi.json">
             <button slot="activate">Connect & Install</button>
         </esp-web-install-button>
 

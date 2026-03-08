@@ -227,6 +227,39 @@ esp_err_t get_config_param_blob(char* name, uint8_t** blob, size_t blob_len)
     return ESP_OK;
 }
 
+esp_err_t set_config_param_str(const char* name, const char* value)
+{
+    nvs_handle_t nvs;
+    esp_err_t err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err != ESP_OK) return err;
+    err = nvs_set_str(nvs, name, value);
+    if (err == ESP_OK) err = nvs_commit(nvs);
+    nvs_close(nvs);
+    return err;
+}
+
+esp_err_t set_config_param_int(const char* name, int32_t value)
+{
+    nvs_handle_t nvs;
+    esp_err_t err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err != ESP_OK) return err;
+    err = nvs_set_i32(nvs, name, value);
+    if (err == ESP_OK) err = nvs_commit(nvs);
+    nvs_close(nvs);
+    return err;
+}
+
+esp_err_t set_config_param_blob(const char* name, const void* data, size_t len)
+{
+    nvs_handle_t nvs;
+    esp_err_t err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err != ESP_OK) return err;
+    err = nvs_set_blob(nvs, name, data, len);
+    if (err == ESP_OK) err = nvs_commit(nvs);
+    nvs_close(nvs);
+    return err;
+}
+
 void register_router(void)
 {
     register_show();
@@ -630,7 +663,6 @@ static struct {
 int set_ap_ip(int argc, char **argv)
 {
     esp_err_t err;
-    nvs_handle_t nvs;
 
     int nerrors = arg_parse(argc, argv, (void **) &set_ap_ip_arg);
     if (nerrors != 0) {
@@ -661,19 +693,10 @@ int set_ap_ip(int argc, char **argv)
         free(old_ap_ip);
     }
 
-    err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
-    if (err != ESP_OK) {
-        return err;
-    }
-
-    err = nvs_set_str(nvs, "ap_ip", set_ap_ip_arg.ap_ip_str->sval[0]);
+    err = set_config_param_str("ap_ip", set_ap_ip_arg.ap_ip_str->sval[0]);
     if (err == ESP_OK) {
-        err = nvs_commit(nvs);
-        if (err == ESP_OK) {
-            ESP_LOGI(TAG, "AP IP address %s stored.", set_ap_ip_arg.ap_ip_str->sval[0]);
-        }
+        ESP_LOGI(TAG, "AP IP address %s stored.", set_ap_ip_arg.ap_ip_str->sval[0]);
     }
-    nvs_close(nvs);
 
     // Clear DHCP reservations and port mappings if network changed
     if (clear_config && err == ESP_OK) {
@@ -709,7 +732,6 @@ static struct {
 static int set_ap_dns(int argc, char **argv)
 {
     esp_err_t err;
-    nvs_handle_t nvs;
 
     int nerrors = arg_parse(argc, argv, (void **) &set_ap_dns_arg);
     if (nerrors != 0) {
@@ -719,24 +741,15 @@ static int set_ap_dns(int argc, char **argv)
 
     preprocess_string((char*)set_ap_dns_arg.dns_str->sval[0]);
 
-    err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
-    if (err != ESP_OK) {
-        return err;
-    }
-
-    err = nvs_set_str(nvs, "ap_dns", set_ap_dns_arg.dns_str->sval[0]);
+    err = set_config_param_str("ap_dns", set_ap_dns_arg.dns_str->sval[0]);
     if (err == ESP_OK) {
-        err = nvs_commit(nvs);
-        if (err == ESP_OK) {
-            ESP_LOGI(TAG, "AP DNS server '%s' stored.", set_ap_dns_arg.dns_str->sval[0]);
-            printf("AP DNS set to: %s\n", set_ap_dns_arg.dns_str->sval[0]);
-            if (strlen(set_ap_dns_arg.dns_str->sval[0]) == 0) {
-                printf("DNS will be learned from upstream (default behavior).\n");
-            }
-            printf("Restart to apply.\n");
+        ESP_LOGI(TAG, "AP DNS server '%s' stored.", set_ap_dns_arg.dns_str->sval[0]);
+        printf("AP DNS set to: %s\n", set_ap_dns_arg.dns_str->sval[0]);
+        if (strlen(set_ap_dns_arg.dns_str->sval[0]) == 0) {
+            printf("DNS will be learned from upstream (default behavior).\n");
         }
+        printf("Restart to apply.\n");
     }
-    nvs_close(nvs);
 
     // Update global
     free(ap_dns);
@@ -792,28 +805,19 @@ static int set_hostname_cmd(int argc, char **argv)
         }
     }
 
-    esp_err_t err;
-    nvs_handle_t nvs;
-    err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
+    esp_err_t err = set_config_param_str("hostname", name);
     if (err != ESP_OK) {
-        printf("Error opening NVS: %s\n", esp_err_to_name(err));
+        printf("Error saving hostname: %s\n", esp_err_to_name(err));
         return err;
     }
 
-    err = nvs_set_str(nvs, "hostname", name);
-    if (err == ESP_OK) {
-        err = nvs_commit(nvs);
-        if (err == ESP_OK) {
-            ESP_LOGI(TAG, "Hostname set to '%s'", name);
-            if (len > 0) {
-                printf("Hostname set to: %s\n", name);
-            } else {
-                printf("Hostname cleared (will use default 'espressif').\n");
-            }
-            printf("Restart to apply.\n");
-        }
+    ESP_LOGI(TAG, "Hostname set to '%s'", name);
+    if (len > 0) {
+        printf("Hostname set to: %s\n", name);
+    } else {
+        printf("Hostname cleared (will use default 'espressif').\n");
     }
-    nvs_close(nvs);
+    printf("Restart to apply.\n");
 
     free(hostname);
     hostname = strdup(name);
@@ -842,7 +846,7 @@ static int web_ui_cmd(int argc, char **argv)
     if (argc < 2) {
         /* Show current status */
         char* lock = NULL;
-        get_config_param_str("lock", &lock);
+        get_config_param_str("web_disabled", &lock);
         bool enabled = (lock == NULL || strcmp(lock, "0") == 0);
         int port = 80;
         get_config_param_int("web_port", &port);
@@ -857,32 +861,19 @@ static int web_ui_cmd(int argc, char **argv)
 
     const char *action = argv[1];
     esp_err_t err;
-    nvs_handle_t nvs;
-
-    err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
-    if (err != ESP_OK) {
-        printf("Error opening NVS: %s\n", esp_err_to_name(err));
-        return err;
-    }
 
     if (strcmp(action, "enable") == 0) {
-        err = nvs_set_str(nvs, "lock", "0");
+        err = set_config_param_str("web_disabled", "0");
         if (err == ESP_OK) {
-            err = nvs_commit(nvs);
-            if (err == ESP_OK) {
-                ESP_LOGI(TAG, "Web interface enabled.");
-                printf("Web interface will be enabled after reboot.\n");
-            }
+            ESP_LOGI(TAG, "Web interface enabled.");
+            printf("Web interface will be enabled after reboot.\n");
         }
     } else if (strcmp(action, "disable") == 0) {
-        err = nvs_set_str(nvs, "lock", "1");
+        err = set_config_param_str("web_disabled", "1");
         if (err == ESP_OK) {
-            err = nvs_commit(nvs);
-            if (err == ESP_OK) {
-                ESP_LOGI(TAG, "Web interface disabled.");
-                printf("Web interface will be disabled after reboot.\n");
-                printf("Use 'web_ui enable' to re-enable it.\n");
-            }
+            ESP_LOGI(TAG, "Web interface disabled.");
+            printf("Web interface will be disabled after reboot.\n");
+            printf("Use 'web_ui enable' to re-enable it.\n");
         }
     } else if (strcmp(action, "port") == 0) {
         if (argc < 3) {
@@ -890,31 +881,24 @@ static int web_ui_cmd(int argc, char **argv)
             get_config_param_int("web_port", &port);
             printf("Current web server port: %d\n", port);
             printf("Usage: web_ui port <port>\n");
-            nvs_close(nvs);
             return 0;
         }
         int port = atoi(argv[2]);
         if (port < 1 || port > 65535) {
             printf("Invalid port: %s (must be 1-65535)\n", argv[2]);
-            nvs_close(nvs);
             return 1;
         }
-        err = nvs_set_i32(nvs, "web_port", port);
+        err = set_config_param_int("web_port", port);
         if (err == ESP_OK) {
-            err = nvs_commit(nvs);
-            if (err == ESP_OK) {
-                ESP_LOGI(TAG, "Web server port set to %d.", port);
-                printf("Web server port set to %d (after reboot).\n", port);
-            }
+            ESP_LOGI(TAG, "Web server port set to %d.", port);
+            printf("Web server port set to %d (after reboot).\n", port);
         }
     } else {
         printf("Unknown action: %s\n", action);
         printf("Usage: web_ui <enable|disable|port>\n");
-        nvs_close(nvs);
         return 1;
     }
 
-    nvs_close(nvs);
     return err;
 }
 
@@ -1028,30 +1012,22 @@ bool verify_web_password(const char *plaintext)
 
 esp_err_t set_web_password_hashed(const char *plaintext)
 {
-    nvs_handle_t nvs;
-    esp_err_t err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
-    if (err != ESP_OK) return err;
-
     if (plaintext[0] == '\0') {
         /* Empty = disable password */
-        nvs_set_str(nvs, "web_password", "");
-    } else {
-        uint8_t salt[PW_SALT_LEN], hash[PW_HASH_LEN];
-        esp_fill_random(salt, PW_SALT_LEN);
-        pw_compute_hash(salt, PW_SALT_LEN, plaintext, hash);
-
-        /* Format: "salt_hex:hash_hex" */
-        char buf[PW_SALT_LEN * 2 + 1 + PW_HASH_LEN * 2 + 1];
-        pw_bytes_to_hex(salt, PW_SALT_LEN, buf);
-        buf[PW_SALT_LEN * 2] = ':';
-        pw_bytes_to_hex(hash, PW_HASH_LEN, buf + PW_SALT_LEN * 2 + 1);
-
-        nvs_set_str(nvs, "web_password", buf);
+        return set_config_param_str("web_password", "");
     }
 
-    err = nvs_commit(nvs);
-    nvs_close(nvs);
-    return err;
+    uint8_t salt[PW_SALT_LEN], hash[PW_HASH_LEN];
+    esp_fill_random(salt, PW_SALT_LEN);
+    pw_compute_hash(salt, PW_SALT_LEN, plaintext, hash);
+
+    /* Format: "salt_hex:hash_hex" */
+    char buf[PW_SALT_LEN * 2 + 1 + PW_HASH_LEN * 2 + 1];
+    pw_bytes_to_hex(salt, PW_SALT_LEN, buf);
+    buf[PW_SALT_LEN * 2] = ':';
+    pw_bytes_to_hex(hash, PW_HASH_LEN, buf + PW_SALT_LEN * 2 + 1);
+
+    return set_config_param_str("web_password", buf);
 }
 
 /* 'set_router_password' command */
@@ -1409,7 +1385,7 @@ static int show(int argc, char **argv)
 #endif
 
         char* web_lock = NULL;
-        get_config_param_str("lock", &web_lock);
+        get_config_param_str("web_disabled", &web_lock);
         bool web_enabled = (web_lock == NULL || strcmp(web_lock, "0") == 0);
         int web_port = 80;
         get_config_param_int("web_port", &web_port);
@@ -1864,7 +1840,6 @@ static int set_led_gpio_cmd(int argc, char **argv)
     }
 
     esp_err_t err;
-    nvs_handle_t nvs;
     int gpio_num;
 
     // Parse argument
@@ -1879,29 +1854,19 @@ static int set_led_gpio_cmd(int argc, char **argv)
         }
     }
 
-    err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
-    if (err != ESP_OK) {
-        printf("Failed to open NVS\n");
-        return err;
-    }
-
-    err = nvs_set_i32(nvs, "led_gpio", gpio_num);
+    err = set_config_param_int("led_gpio", gpio_num);
     if (err == ESP_OK) {
-        err = nvs_commit(nvs);
-        if (err == ESP_OK) {
-            if (gpio_num < 0) {
-                ESP_LOGI(TAG, "LED GPIO disabled.");
-                printf("LED status blinking disabled.\n");
-            } else {
-                ESP_LOGI(TAG, "LED GPIO set to %d.", gpio_num);
-                printf("LED status blinking set to GPIO %d.\n", gpio_num);
-            }
-            printf("Restart the device for changes to take effect.\n");
+        if (gpio_num < 0) {
+            ESP_LOGI(TAG, "LED GPIO disabled.");
+            printf("LED status blinking disabled.\n");
+        } else {
+            ESP_LOGI(TAG, "LED GPIO set to %d.", gpio_num);
+            printf("LED status blinking set to GPIO %d.\n", gpio_num);
         }
+        printf("Restart the device for changes to take effect.\n");
     } else {
         printf("Failed to save setting\n");
     }
-    nvs_close(nvs);
     return err;
 }
 
@@ -1928,7 +1893,6 @@ static int set_led_lowactive_cmd(int argc, char **argv)
     }
 
     esp_err_t err;
-    nvs_handle_t nvs;
     int value;
 
     // Parse boolean argument
@@ -1941,30 +1905,20 @@ static int set_led_lowactive_cmd(int argc, char **argv)
         return 1;
     }
 
-    err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
-    if (err != ESP_OK) {
-        printf("Failed to open NVS\n");
-        return err;
-    }
-
-    err = nvs_set_i32(nvs, "led_low", value);
+    err = set_config_param_int("led_low", value);
     if (err == ESP_OK) {
-        err = nvs_commit(nvs);
-        if (err == ESP_OK) {
-            led_lowactive = value;
-            if (value) {
-                ESP_LOGI(TAG, "LED set to low-active (inverted) mode.");
-                printf("LED set to low-active (inverted) mode.\n");
-            } else {
-                ESP_LOGI(TAG, "LED set to active-high (normal) mode.");
-                printf("LED set to active-high (normal) mode.\n");
-            }
-            printf("Change takes effect immediately.\n");
+        led_lowactive = value;
+        if (value) {
+            ESP_LOGI(TAG, "LED set to low-active (inverted) mode.");
+            printf("LED set to low-active (inverted) mode.\n");
+        } else {
+            ESP_LOGI(TAG, "LED set to active-high (normal) mode.");
+            printf("LED set to active-high (normal) mode.\n");
         }
+        printf("Change takes effect immediately.\n");
     } else {
         printf("Failed to save setting\n");
     }
-    nvs_close(nvs);
     return err;
 }
 
@@ -1995,7 +1949,6 @@ static int set_ttl_cmd(int argc, char **argv)
     }
 
     esp_err_t err;
-    nvs_handle_t nvs;
 
     // Parse argument
     char *endptr;
@@ -2005,29 +1958,19 @@ static int set_ttl_cmd(int argc, char **argv)
         return 1;
     }
 
-    err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
-    if (err != ESP_OK) {
-        printf("Failed to open NVS\n");
-        return err;
-    }
-
-    err = nvs_set_i32(nvs, "sta_ttl", (int32_t)ttl_val);
+    err = set_config_param_int("sta_ttl", (int32_t)ttl_val);
     if (err == ESP_OK) {
-        err = nvs_commit(nvs);
-        if (err == ESP_OK) {
-            sta_ttl_override = (uint8_t)ttl_val;
-            if (ttl_val == 0) {
-                ESP_LOGI(TAG, "TTL override disabled.");
-                printf("TTL override disabled (no change to packets).\n");
-            } else {
-                ESP_LOGI(TAG, "TTL override set to %ld.", ttl_val);
-                printf("TTL override set to %ld for upstream packets.\n", ttl_val);
-            }
+        sta_ttl_override = (uint8_t)ttl_val;
+        if (ttl_val == 0) {
+            ESP_LOGI(TAG, "TTL override disabled.");
+            printf("TTL override disabled (no change to packets).\n");
+        } else {
+            ESP_LOGI(TAG, "TTL override set to %ld.", ttl_val);
+            printf("TTL override set to %ld for upstream packets.\n", ttl_val);
         }
     } else {
         printf("Failed to save setting\n");
     }
-    nvs_close(nvs);
     return err;
 }
 
@@ -2072,18 +2015,7 @@ static int set_tx_power_cmd(int argc, char **argv)
         return 1;
     }
 
-    nvs_handle_t nvs;
-    esp_err_t err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
-    if (err != ESP_OK) {
-        printf("Failed to open NVS\n");
-        return err;
-    }
-
-    err = nvs_set_i32(nvs, "tx_power", (int32_t)dbm);
-    if (err == ESP_OK) {
-        err = nvs_commit(nvs);
-    }
-    nvs_close(nvs);
+    esp_err_t err = set_config_param_int("tx_power", (int32_t)dbm);
 
     if (err != ESP_OK) {
         printf("Failed to save setting\n");
@@ -2140,38 +2072,26 @@ static int set_rf_switch_cmd(int argc, char **argv)
         return 1;
     }
 
-    esp_err_t err;
-    nvs_handle_t nvs;
-    err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
-    if (err != ESP_OK) {
-        printf("Failed to open NVS\n");
-        return err;
-    }
-
-    err = nvs_set_i32(nvs, "rf_switch", value);
+    esp_err_t err = set_config_param_int("rf_switch", value);
     if (err == ESP_OK) {
-        err = nvs_commit(nvs);
-        if (err == ESP_OK) {
-            // Apply immediately
-            gpio_reset_pin(GPIO_NUM_3);
-            gpio_set_direction(GPIO_NUM_3, GPIO_MODE_OUTPUT);
-            gpio_set_level(GPIO_NUM_3, 0);  // Activate RF switch control
-            vTaskDelay(pdMS_TO_TICKS(10));
-            gpio_reset_pin(GPIO_NUM_14);
-            gpio_set_direction(GPIO_NUM_14, GPIO_MODE_OUTPUT);
-            gpio_set_level(GPIO_NUM_14, value); // 0 = built-in, 1 = external
+        // Apply immediately
+        gpio_reset_pin(GPIO_NUM_3);
+        gpio_set_direction(GPIO_NUM_3, GPIO_MODE_OUTPUT);
+        gpio_set_level(GPIO_NUM_3, 0);  // Activate RF switch control
+        vTaskDelay(pdMS_TO_TICKS(10));
+        gpio_reset_pin(GPIO_NUM_14);
+        gpio_set_direction(GPIO_NUM_14, GPIO_MODE_OUTPUT);
+        gpio_set_level(GPIO_NUM_14, value); // 0 = built-in, 1 = external
 
-            if (value) {
-                printf("Switched to external antenna.\n");
-            } else {
-                printf("Switched to built-in ceramic antenna.\n");
-            }
-            printf("Setting saved (persists across reboots).\n");
+        if (value) {
+            printf("Switched to external antenna.\n");
+        } else {
+            printf("Switched to built-in ceramic antenna.\n");
         }
+        printf("Setting saved (persists across reboots).\n");
     } else {
         printf("Failed to save setting\n");
     }
-    nvs_close(nvs);
     return err;
 }
 
@@ -2196,7 +2116,6 @@ static int set_ap_hidden_cmd(int argc, char **argv)
     }
 
     esp_err_t err;
-    nvs_handle_t nvs;
     int hidden_val;
 
     // Parse argument
@@ -2209,25 +2128,15 @@ static int set_ap_hidden_cmd(int argc, char **argv)
         return 1;
     }
 
-    err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
-    if (err != ESP_OK) {
-        printf("Failed to open NVS\n");
-        return err;
-    }
-
-    err = nvs_set_i32(nvs, "ap_hidden", hidden_val);
+    err = set_config_param_int("ap_hidden", hidden_val);
     if (err == ESP_OK) {
-        err = nvs_commit(nvs);
-        if (err == ESP_OK) {
-            ap_ssid_hidden = (uint8_t)hidden_val;
-            ESP_LOGI(TAG, "AP SSID hidden set to: %s", hidden_val ? "yes" : "no");
-            printf("AP SSID hidden set to: %s\n", hidden_val ? "yes" : "no");
-            printf("Restart the device for changes to take effect.\n");
-        }
+        ap_ssid_hidden = (uint8_t)hidden_val;
+        ESP_LOGI(TAG, "AP SSID hidden set to: %s", hidden_val ? "yes" : "no");
+        printf("AP SSID hidden set to: %s\n", hidden_val ? "yes" : "no");
+        printf("Restart the device for changes to take effect.\n");
     } else {
         printf("Failed to save setting\n");
     }
-    nvs_close(nvs);
     return err;
 }
 
@@ -2264,25 +2173,14 @@ static int set_ap_auth_cmd(int argc, char **argv)
         return 1;
     }
 
-    nvs_handle_t nvs;
-    esp_err_t err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
-    if (err != ESP_OK) {
-        printf("Failed to open NVS\n");
-        return err;
-    }
-
-    err = nvs_set_i32(nvs, "ap_authmode", mode_val);
+    esp_err_t err = set_config_param_int("ap_authmode", mode_val);
     if (err == ESP_OK) {
-        err = nvs_commit(nvs);
-        if (err == ESP_OK) {
-            ap_authmode = (uint8_t)mode_val;
-            printf("AP auth mode set to: %s\n", modes[mode_val]);
-            printf("Restart the device for changes to take effect.\n");
-        }
+        ap_authmode = (uint8_t)mode_val;
+        printf("AP auth mode set to: %s\n", modes[mode_val]);
+        printf("Restart the device for changes to take effect.\n");
     } else {
         printf("Failed to save setting\n");
     }
-    nvs_close(nvs);
     return err;
 }
 
@@ -2316,30 +2214,18 @@ static int set_ap_channel_cmd(int argc, char **argv)
         return 1;
     }
 
-    esp_err_t err;
-    nvs_handle_t nvs;
-    err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
-    if (err != ESP_OK) {
-        printf("Failed to open NVS\n");
-        return err;
-    }
-
-    err = nvs_set_i32(nvs, "ap_channel", channel_val);
+    esp_err_t err = set_config_param_int("ap_channel", channel_val);
     if (err == ESP_OK) {
-        err = nvs_commit(nvs);
-        if (err == ESP_OK) {
-            ap_channel = (uint8_t)channel_val;
-            if (channel_val == 0) {
-                printf("AP channel set to: auto\n");
-            } else {
-                printf("AP channel set to: %d\n", channel_val);
-            }
-            printf("Restart the device for changes to take effect.\n");
+        ap_channel = (uint8_t)channel_val;
+        if (channel_val == 0) {
+            printf("AP channel set to: auto\n");
+        } else {
+            printf("AP channel set to: %d\n", channel_val);
         }
+        printf("Restart the device for changes to take effect.\n");
     } else {
         printf("Failed to save setting\n");
     }
-    nvs_close(nvs);
     return err;
 }
 
