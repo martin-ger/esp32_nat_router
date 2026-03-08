@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP32 NAT Router Web Installer</title>
+    <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
+    <style>
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
+            display: flex; justify-content: center; align-items: center; min-height: 100vh; 
+            margin: 0; background-color: #f0f2f5; color: #1c1e21;
+        }
+        .container { 
+            background: white; padding: 40px; border-radius: 16px; 
+            box-shadow: 0 10px 25px rgba(0,0,0,0.08); text-align: center; max-width: 450px; 
+        }
+        h1 { margin-bottom: 10px; font-size: 24px; }
+        p { line-height: 1.5; color: #606770; margin-bottom: 20px; }
+        .chip-list { font-size: 0.85em; color: #8e8e8e; margin-bottom: 25px; }
+        .links { margin-bottom: 30px; }
+        .links a { color: #007bff; text-decoration: none; font-size: 14px; font-weight: 500; }
+        .links a:hover { text-decoration: underline; }
+        esp-web-install-button { --esp-tools-button-border-radius: 8px; }
+        button { 
+            background-color: #007bff; color: white; border: none; 
+            padding: 12px 24px; font-weight: 600; border-radius: 8px; cursor: pointer;
+            transition: background 0.2s;
+        }
+        button:hover { background-color: #0056b3; }
+        .footer { margin-top: 25px; font-size: 12px; color: #bcc0c4; line-height: 1.4; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>ESP32 NAT Router</h1>
+        <p>Flash the NAT Router firmware directly to your device via the browser. No command line or Python installation required.</p>
+        
+        <div class="links">
+            <a href="https://github.com/DEIN_NUTZERNAME/DEIN_REPO" target="_blank">View Project Documentation →</a>
+        </div>
+
+        <div class="chip-list">
+            <strong>Supported hardware:</strong><br>
+            ESP32, ESP32-C3, ESP32-C6, ESP32-S3
+        </div>
+
+        <esp-web-install-button manifest="./manifest.json">
+            <button slot="activate">Connect & Install</button>
+        </esp-web-install-button>
+
+        <div class="footer">
+            Recommended: Chrome, Edge, or Opera.<br>
+            Ensure all other serial monitors are closed.
+        </div>
+    </div>
+
+</body>
+</html>
