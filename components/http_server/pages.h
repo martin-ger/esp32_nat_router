@@ -430,7 +430,7 @@ setTimeout(\"location.href = '/'\", 10000);\
 <div id='rebootScreen' style='display:none;text-align:center;padding:2rem 0;'>\
 <h2 style='color:#4caf50;margin-bottom:1rem;' id='rebootTitle'>Success</h2>\
 <p style='font-size:1.1rem;margin-bottom:0.5rem;' id='rebootMsg'>The device is rebooting...</p>\
-<p style='font-size:1.5rem;font-weight:bold;color:#00d9ff;' id='countdown'>5</p>\
+<p style='font-size:1.5rem;font-weight:bold;color:#00d9ff;' id='countdown'></p>\
 <p style='color:#888;font-size:0.9rem;'>Redirecting to home page...</p>\
 </div>\
 <script>\
@@ -547,6 +547,8 @@ select { cursor: pointer; }\
 .modal-box p { color: #e0e0e0; margin-bottom: 1.5rem; }\
 .modal-box button { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #fff; border: none; border-radius: 8px; padding: 0.75rem 2rem; font-size: 1rem; cursor: pointer; }\
 .green-button { background: linear-gradient(135deg, #4caf50 0%, #2e7d32 100%); color: #fff; border: none; border-radius: 6px; padding: 0.4rem 0.8rem; font-size: 0.8rem; font-weight: 600; cursor: pointer; transition: all 0.3s; box-shadow: 0 2px 8px rgba(76, 175, 80, 0.4); text-decoration: none; display: inline-block; }\
+.select-button { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #fff; border: none; border-radius: 6px; padding: 0.4rem 0.8rem; font-size: 0.8rem; font-weight: 600; cursor: pointer; transition: all 0.3s; box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4); text-decoration: none; display: inline-block; }\
+.select-button:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(102, 126, 234, 0.6); }\
 .green-button:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(76, 175, 80, 0.6); }\
 </style>\
 <script>\
@@ -617,7 +619,8 @@ document.getElementById('dhcp_mac').scrollIntoView({behavior: 'smooth', block: '
 <tr><td>MAC Address</td><td><input type='text' name='dhcp_mac' id='dhcp_mac' placeholder='AA:BB:CC:DD:EE:FF'/></td></tr>\
 <tr><td>IP Address</td><td><input type='text' name='dhcp_ip' id='dhcp_ip' placeholder='192.168.4.100'/></td></tr>\
 <tr><td>Name (optional)</td><td><input type='text' name='dhcp_name' id='dhcp_name' placeholder='My Device'/></td></tr>\
-<tr><td></td><td><input type='submit' name='dhcp_action' value='Add Reservation' class='ok-button'/></td></tr>\
+<tr><td></td><td><input type='submit' name='dhcp_action' value='Add Reservation' class='ok-button'/>\
+<input type='submit' name='dhcp_action' value='Block' class='red-button' style='width:100%;padding:0.75rem 1.5rem;font-size:0.95rem;border-radius:8px;margin-top:0.5rem;' onclick=\"document.getElementById('dhcp_ip').value='0.0.0.0';\"/></td></tr>\
 </table>\
 </form>\
 </div>\

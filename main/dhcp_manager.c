@@ -47,13 +47,17 @@ esp_err_t get_dhcp_reservations() {
 void print_dhcp_reservations() {
     for (int i = 0; i < MAX_DHCP_RESERVATIONS; i++) {
         if (dhcp_reservations[i].valid) {
-            ip4_addr_t addr;
-            addr.addr = dhcp_reservations[i].ip;
-            printf("%02X:%02X:%02X:%02X:%02X:%02X -> " IPSTR,
+            printf("%02X:%02X:%02X:%02X:%02X:%02X -> ",
                 dhcp_reservations[i].mac[0], dhcp_reservations[i].mac[1],
                 dhcp_reservations[i].mac[2], dhcp_reservations[i].mac[3],
-                dhcp_reservations[i].mac[4], dhcp_reservations[i].mac[5],
-                IP2STR(&addr));
+                dhcp_reservations[i].mac[4], dhcp_reservations[i].mac[5]);
+            if (dhcp_reservations[i].ip == 0) {
+                printf("BLOCKED");
+            } else {
+                ip4_addr_t addr;
+                addr.addr = dhcp_reservations[i].ip;
+                printf(IPSTR, IP2STR(&addr));
+            }
             if (dhcp_reservations[i].name[0] != '\0') {
                 printf(" (%s)", dhcp_reservations[i].name);
             }
@@ -217,6 +221,16 @@ uint32_t lookup_dhcp_reservation(const uint8_t *mac) {
         }
     }
     return 0;
+}
+
+bool is_mac_blocked(const uint8_t *mac) {
+    for (int i = 0; i < MAX_DHCP_RESERVATIONS; i++) {
+        if (dhcp_reservations[i].valid &&
+            memcmp(dhcp_reservations[i].mac, mac, 6) == 0) {
+            return dhcp_reservations[i].ip == 0;
+        }
+    }
+    return false;
 }
 
 const char* lookup_device_name_by_ip(uint32_t ip) {

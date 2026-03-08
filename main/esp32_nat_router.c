@@ -388,6 +388,18 @@ static void wifi_ap_event_handler(void* arg, esp_event_base_t event_base,
         init_ap_netif_hooks();
     } else if (event_id == WIFI_EVENT_AP_STACONNECTED) {
         wifi_event_ap_staconnected_t* event = (wifi_event_ap_staconnected_t*) event_data;
+
+        /* Check if this MAC is blacklisted (reservation with IP 0.0.0.0) */
+        if (is_mac_blocked(event->mac)) {
+            const char* name = lookup_device_name_by_mac(event->mac);
+            ESP_LOGW(TAG, "Blocked client: %02X:%02X:%02X:%02X:%02X:%02X%s%s",
+                     event->mac[0], event->mac[1], event->mac[2],
+                     event->mac[3], event->mac[4], event->mac[5],
+                     name ? " (" : "", name ? name : "");
+            esp_wifi_deauth_sta(event->aid);
+            return;
+        }
+
         connect_count++;
         client_stats_on_connect(event->mac);
         const char* name = lookup_device_name_by_mac(event->mac);
@@ -479,6 +491,18 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
     else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_AP_STACONNECTED)
     {
         wifi_event_ap_staconnected_t* event = (wifi_event_ap_staconnected_t*) event_data;
+
+        /* Check if this MAC is blacklisted (reservation with IP 0.0.0.0) */
+        if (is_mac_blocked(event->mac)) {
+            const char* name = lookup_device_name_by_mac(event->mac);
+            ESP_LOGW(TAG, "Blocked client: %02X:%02X:%02X:%02X:%02X:%02X%s%s",
+                     event->mac[0], event->mac[1], event->mac[2],
+                     event->mac[3], event->mac[4], event->mac[5],
+                     name ? " (" : "", name ? name : "");
+            esp_wifi_deauth_sta(event->aid);
+            return;
+        }
+
         connect_count++;
         client_stats_on_connect(event->mac);
 
@@ -1064,6 +1088,20 @@ void app_main(void)
 #else
     wifi_init(mac, ssid, ent_username, ent_identity, passwd, static_ip, subnet_mask, gateway_addr, ap_mac, ap_ssid, ap_passwd, ap_ip);
 #endif
+
+    // Apply TX power setting from NVS (must be after esp_wifi_start)
+    int tx_power_dbm = 0;
+    if (get_config_param_int("tx_power", &tx_power_dbm) == ESP_OK && tx_power_dbm >= 2 && tx_power_dbm <= 20) {
+        int8_t power_qdbm = (int8_t)(tx_power_dbm * 4);
+        esp_err_t ret = esp_wifi_set_max_tx_power(power_qdbm);
+        if (ret == ESP_OK) {
+            int8_t actual = 0;
+            esp_wifi_get_max_tx_power(&actual);
+            ESP_LOGI(TAG, "TX power set to %.1f dBm", actual * 0.25);
+        } else {
+            ESP_LOGW(TAG, "Failed to set TX power: %s", esp_err_to_name(ret));
+        }
+    }
 
     pthread_t t1;
     pthread_create(&t1, NULL, led_status_thread, NULL);

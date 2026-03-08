@@ -1636,7 +1636,8 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
 
             /* Check for add DHCP reservation */
             if (httpd_query_key_value(buf, "dhcp_action", param1, sizeof(param1)) == ESP_OK) {
-                if (strcmp(param1, "Add+Reservation") == 0 || strcmp(param1, "Add Reservation") == 0) {
+                bool is_block = (strcmp(param1, "Block") == 0);
+                if (strcmp(param1, "Add+Reservation") == 0 || strcmp(param1, "Add Reservation") == 0 || is_block) {
                     if (httpd_query_key_value(buf, "dhcp_mac", param1, sizeof(param1)) == ESP_OK &&
                         httpd_query_key_value(buf, "dhcp_ip", param2, sizeof(param2)) == ESP_OK) {
 
@@ -1658,10 +1659,10 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
                                 mac_bytes[i] = (uint8_t)mac[i];
                             }
 
-                            uint32_t ip = esp_ip4addr_aton(param2);
-                            if (ip == IPADDR_NONE) {
+                            uint32_t ip = is_block ? 0 : esp_ip4addr_aton(param2);
+                            if (!is_block && ip == IPADDR_NONE) {
                                 err_msg = "Invalid IP address";
-                            } else if ((ip & 0x00FFFFFF) != (my_ap_ip & 0x00FFFFFF)) {
+                            } else if (!is_block && (ip & 0x00FFFFFF) != (my_ap_ip & 0x00FFFFFF)) {
                                 err_msg = "IP must be in the same network as the AP";
                             } else {
                                 const char *name = NULL;
@@ -1885,7 +1886,7 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
                 "<td>%s</td>"
                 "<td>%s</td>"
                 "<td>%s</td>"
-                "<td><button type='button' class='green-button' onclick=\"fillDhcpForm('%s','%s','%s')\">Reserve</button></td>"
+                "<td><button type='button' class='select-button' onclick=\"fillDhcpForm('%s','%s','%s')\">Select</button></td>"
                 "</tr>",
                 mac_str,
                 ip_str,
@@ -1927,20 +1928,26 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
     for (int i = 0; i < MAX_DHCP_RESERVATIONS; i++) {
         if (dhcp_reservations[i].valid) {
             has_reservations = true;
-            esp_ip4_addr_t addr;
-            addr.addr = dhcp_reservations[i].ip;
+            char ip_col[64];
+            if (dhcp_reservations[i].ip == 0) {
+                snprintf(ip_col, sizeof(ip_col), "<span style='color:#ff5252;font-weight:bold;'>BLOCKED</span>");
+            } else {
+                esp_ip4_addr_t addr;
+                addr.addr = dhcp_reservations[i].ip;
+                snprintf(ip_col, sizeof(ip_col), IPSTR, IP2STR(&addr));
+            }
 
             snprintf(row, sizeof(row),
                 "<tr>"
                 "<td>%02X:%02X:%02X:%02X:%02X:%02X</td>"
-                "<td>" IPSTR "</td>"
+                "<td>%s</td>"
                 "<td>%s</td>"
                 "<td><a href='/mappings?del_dhcp_mac=%02X:%02X:%02X:%02X:%02X:%02X' class='red-button'>Delete</a></td>"
                 "</tr>",
                 dhcp_reservations[i].mac[0], dhcp_reservations[i].mac[1],
                 dhcp_reservations[i].mac[2], dhcp_reservations[i].mac[3],
                 dhcp_reservations[i].mac[4], dhcp_reservations[i].mac[5],
-                IP2STR(&addr),
+                ip_col,
                 dhcp_reservations[i].name[0] ? dhcp_reservations[i].name : "-",
                 dhcp_reservations[i].mac[0], dhcp_reservations[i].mac[1],
                 dhcp_reservations[i].mac[2], dhcp_reservations[i].mac[3],

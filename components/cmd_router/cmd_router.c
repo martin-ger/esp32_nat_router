@@ -49,6 +49,7 @@
 
 static const char *TAG = "cmd_router";
 
+static void register_set_hostname(void);
 #if !CONFIG_ETH_UPLINK
 static void register_set_sta(void);
 static void register_set_mac(void);
@@ -58,6 +59,11 @@ static void register_set_ap_mac_only(void);
 static void register_set_sta_static(void);
 static void register_set_ap(void);
 static void register_set_ap_ip(void);
+static void register_set_ap_hidden(void);
+static void register_set_ap_auth(void);
+#if CONFIG_ETH_UPLINK
+static void register_set_ap_channel(void);
+#endif
 static void register_set_ap_dns(void);
 static void register_show(void);
 static void register_portmap(void);
@@ -69,12 +75,7 @@ static void register_pcap(void);
 static void register_set_led_gpio(void);
 static void register_set_led_lowactive(void);
 static void register_set_ttl(void);
-static void register_set_ap_hidden(void);
-static void register_set_ap_auth(void);
-#if CONFIG_ETH_UPLINK
-static void register_set_ap_channel(void);
-#endif
-static void register_set_hostname(void);
+static void register_set_tx_power(void);
 #if defined(CONFIG_IDF_TARGET_ESP32C6)
 static void register_set_rf_switch(void);
 #endif
@@ -252,6 +253,7 @@ void register_router(void)
     register_set_led_gpio();
     register_set_led_lowactive();
     register_set_ttl();
+    register_set_tx_power();
     register_set_ap_hidden();
     register_set_ap_auth();
 #if CONFIG_ETH_UPLINK
@@ -1414,6 +1416,11 @@ static int show(int argc, char **argv)
         printf("\nWeb Interface: %s (port %d)\n", web_enabled ? "enabled" : "disabled", web_port);
         if (web_lock != NULL) free(web_lock);
 
+        int8_t tx_power = 0;
+        if (esp_wifi_get_max_tx_power(&tx_power) == ESP_OK) {
+            printf("TX Power: %.1f dBm\n", tx_power * 0.25);
+        }
+
         // Cleanup
         if (static_ip != NULL) free(static_ip);
         if (subnet_mask != NULL) free(subnet_mask);
@@ -1552,13 +1559,15 @@ int dhcp_reserve(int argc, char **argv)
         return 1;
     }
 
-    bool add;
+    int action; // 0 = add, 1 = del, 2 = block
     if (strcmp((char *)dhcp_reserve_args.add_del->sval[0], "add") == 0) {
-        add = true;
+        action = 0;
     } else if (strcmp((char *)dhcp_reserve_args.add_del->sval[0], "del") == 0) {
-        add = false;
+        action = 1;
+    } else if (strcmp((char *)dhcp_reserve_args.add_del->sval[0], "block") == 0) {
+        action = 2;
     } else {
-        printf("Must be 'add' or 'del'\n");
+        printf("Must be 'add', 'del', or 'block'\n");
         return 1;
     }
 
@@ -1578,7 +1587,24 @@ int dhcp_reserve(int argc, char **argv)
         mac_bytes[i] = (uint8_t)mac[i];
     }
 
-    if (add) {
+    if (action == 2) {
+        // Block: add reservation with IP 0.0.0.0
+        const char *name = NULL;
+        if (dhcp_reserve_args.name->count > 0) {
+            name = dhcp_reserve_args.name->sval[0];
+        }
+
+        esp_err_t err = add_dhcp_reservation(mac_bytes, 0, name);
+        if (err == ESP_OK) {
+            printf("Client blocked\n");
+        } else if (err == ESP_ERR_NO_MEM) {
+            printf("No more slots available\n");
+            return 1;
+        } else {
+            printf("Failed to block client\n");
+            return 1;
+        }
+    } else if (action == 0) {
         // Parse IP address
         uint32_t ip = esp_ip4addr_aton((char *)dhcp_reserve_args.ip_addr->sval[0]);
         if (ip == IPADDR_NONE) {
@@ -1587,7 +1613,7 @@ int dhcp_reserve(int argc, char **argv)
         }
 
         // Validate IP is in same /24 network as AP interface
-        if ((ip & 0x00FFFFFF) != (my_ap_ip & 0x00FFFFFF)) {
+        if (ip != 0 && (ip & 0x00FFFFFF) != (my_ap_ip & 0x00FFFFFF)) {
             ip4_addr_t ap_addr, res_addr;
             ap_addr.addr = my_ap_ip;
             res_addr.addr = ip;
@@ -1604,7 +1630,7 @@ int dhcp_reserve(int argc, char **argv)
 
         esp_err_t err = add_dhcp_reservation(mac_bytes, ip, name);
         if (err == ESP_OK) {
-            printf("DHCP reservation added\n");
+            printf(ip == 0 ? "Client blocked\n" : "DHCP reservation added\n");
         } else if (err == ESP_ERR_NO_MEM) {
             printf("No more slots available for DHCP reservations\n");
             return 1;
@@ -1627,7 +1653,7 @@ int dhcp_reserve(int argc, char **argv)
 
 static void register_dhcp_reserve(void)
 {
-    dhcp_reserve_args.add_del = arg_str1(NULL, NULL, "[add|del]", "add or delete reservation");
+    dhcp_reserve_args.add_del = arg_str1(NULL, NULL, "[add|del|block]", "add, delete, or block");
     dhcp_reserve_args.mac_addr = arg_str1(NULL, NULL, "<mac>", "MAC address (AA:BB:CC:DD:EE:FF)");
     dhcp_reserve_args.ip_addr = arg_str0(NULL, NULL, "<ip>", "IP address (required for add)");
     dhcp_reserve_args.name = arg_str0("-n", "--name", "<name>", "optional device name");
@@ -1635,7 +1661,7 @@ static void register_dhcp_reserve(void)
 
     const esp_console_cmd_t cmd = {
         .command = "dhcp_reserve",
-        .help = "Add or delete a DHCP reservation",
+        .help = "Add/delete DHCP reservation or block a client by MAC",
         .hint = NULL,
         .func = &dhcp_reserve,
         .argtable = &dhcp_reserve_args
@@ -2012,6 +2038,80 @@ static void register_set_ttl(void)
         .help = "Set TTL override for upstream STA packets (0 = disabled)",
         .hint = NULL,
         .func = &set_ttl_cmd,
+    };
+    ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
+}
+
+/* 'set_tx_power' command - set WiFi TX power */
+static int set_tx_power_cmd(int argc, char **argv)
+{
+    int8_t current_power = 0;
+    esp_err_t ret = esp_wifi_get_max_tx_power(&current_power);
+
+    if (argc < 2) {
+        printf("Usage: set_tx_power <dBm>\n");
+        printf("  dBm: 2-20 (0 = max/default)\n");
+        printf("  Actual steps: 2, 5, 7, 8, 11, 13, 14, 15, 16, 18, 20\n");
+        if (ret == ESP_OK) {
+            printf("\nCurrent TX power: %.1f dBm (raw: %d)\n", current_power * 0.25, current_power);
+        }
+        int saved = 0;
+        get_config_param_int("tx_power", &saved);
+        if (saved > 0) {
+            printf("Saved setting: %d dBm\n", saved);
+        } else {
+            printf("Saved setting: max (default)\n");
+        }
+        return 0;
+    }
+
+    char *endptr;
+    long dbm = strtol(argv[1], &endptr, 10);
+    if (*endptr != '\0' || (dbm != 0 && (dbm < 2 || dbm > 20))) {
+        printf("Invalid value. Use 2-20 dBm (0 = max/default).\n");
+        return 1;
+    }
+
+    nvs_handle_t nvs;
+    esp_err_t err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err != ESP_OK) {
+        printf("Failed to open NVS\n");
+        return err;
+    }
+
+    err = nvs_set_i32(nvs, "tx_power", (int32_t)dbm);
+    if (err == ESP_OK) {
+        err = nvs_commit(nvs);
+    }
+    nvs_close(nvs);
+
+    if (err != ESP_OK) {
+        printf("Failed to save setting\n");
+        return err;
+    }
+
+    if (dbm == 0) {
+        printf("TX power set to max (default). Restart to apply.\n");
+    } else {
+        int8_t power_qdbm = (int8_t)(dbm * 4);
+        ret = esp_wifi_set_max_tx_power(power_qdbm);
+        if (ret == ESP_OK) {
+            esp_wifi_get_max_tx_power(&current_power);
+            printf("TX power set to %.1f dBm (applied immediately, saved for reboot).\n", current_power * 0.25);
+        } else {
+            printf("Saved for next reboot. Could not apply now: %s\n", esp_err_to_name(ret));
+        }
+    }
+    return 0;
+}
+
+static void register_set_tx_power(void)
+{
+    const esp_console_cmd_t cmd = {
+        .command = "set_tx_power",
+        .help = "Set WiFi TX power in dBm (2-20, 0 = max/default)",
+        .hint = NULL,
+        .func = &set_tx_power_cmd,
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }
