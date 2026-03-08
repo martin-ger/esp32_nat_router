@@ -4,6 +4,12 @@
   "builds": [
     {
       "chipFamily": "ESP32",
+      "parts": [
+        { "path": "firmware_esp32/bootloader.bin", "offset": 4096 },
+        { "path": "firmware_esp32/partition-table.bin", "offset": 32768 },
+        { "path": "firmware_esp32/ota_data_initial.bin", "offset": 61440 },
+        { "path": "firmware_esp32/esp32_nat_router.bin", "offset": 131072 }
+      ],
       "choices": [
         {
           "name": "Standard ESP32 (WiFi)",
