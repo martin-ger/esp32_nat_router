@@ -1,6 +1,7 @@
 {
   "name": "ESP32 NAT Router (WiFi)",
   "version": "1.0.0",
+  "new_install_skip_erase": true,
   "builds": [
     {
       "chipFamily": "ESP32",
