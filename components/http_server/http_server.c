@@ -44,6 +44,29 @@
 
 static const char *TAG = "HTTPServer";
 
+/* Get client IP address string from HTTP request */
+static const char *get_client_ip(httpd_req_t *req, char *buf, size_t buf_len)
+{
+    int sockfd = httpd_req_to_sockfd(req);
+    struct sockaddr_in6 addr6;
+    socklen_t addr_len = sizeof(addr6);
+    if (getpeername(sockfd, (struct sockaddr *)&addr6, &addr_len) == 0) {
+        /* ESP-IDF httpd uses IPv6 sockets; IPv4 clients appear as
+         * ::ffff:x.x.x.x (IPv4-mapped IPv6).  Extract the IPv4 part. */
+        if (addr6.sin6_family == AF_INET6) {
+            struct in_addr ipv4;
+            memcpy(&ipv4, addr6.sin6_addr.s6_addr + 12, 4);
+            inet_ntoa_r(ipv4, buf, buf_len);
+        } else {
+            struct sockaddr_in *addr4 = (struct sockaddr_in *)&addr6;
+            inet_ntoa_r(addr4->sin_addr, buf, buf_len);
+        }
+    } else {
+        strncpy(buf, "unknown", buf_len);
+    }
+    return buf;
+}
+
 static void web_server_start_captive_dns(void);
 
 esp_timer_handle_t restart_timer;
@@ -390,6 +413,7 @@ static esp_err_t config_export_handler(httpd_req_t *req)
 {
     bool password_protection_enabled = is_web_password_set();
     if (password_protection_enabled && !is_authenticated(req)) {
+        { char _ip[16]; ESP_LOGW(TAG, "Unauthenticated access to /api/config-export from %s", get_client_ip(req, _ip, sizeof(_ip))); }
         httpd_resp_set_status(req, "303 See Other");
         httpd_resp_set_hdr(req, "Location", "/?auth_required=1");
         httpd_resp_send(req, NULL, 0);
@@ -413,6 +437,7 @@ static esp_err_t config_import_handler(httpd_req_t *req)
 {
     bool password_protection_enabled = is_web_password_set();
     if (password_protection_enabled && !is_authenticated(req)) {
+        { char _ip[16]; ESP_LOGW(TAG, "Unauthenticated access to /api/config-import from %s", get_client_ip(req, _ip, sizeof(_ip))); }
         httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "Not authenticated");
         return ESP_FAIL;
     }
@@ -474,6 +499,7 @@ static esp_err_t ota_upload_handler(httpd_req_t *req)
 {
     bool password_protection_enabled = is_web_password_set();
     if (password_protection_enabled && !is_authenticated(req)) {
+        { char _ip[16]; ESP_LOGW(TAG, "Unauthenticated access to /api/ota-upload from %s", get_client_ip(req, _ip, sizeof(_ip))); }
         httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "Not authenticated");
         return ESP_FAIL;
     }
@@ -694,7 +720,7 @@ static esp_err_t index_get_handler(httpd_req_t *req)
                 preprocess_string(param);
                 if (password_protection_enabled && verify_web_password(param)) {
                     create_session(req);
-                    ESP_LOGI(TAG, "Web UI login successful");
+                    { char _ip[16]; ESP_LOGI(TAG, "Web UI login successful from %s", get_client_ip(req, _ip, sizeof(_ip))); }
                     free(buf);
                     /* Redirect to reload page with session cookie */
                     httpd_resp_set_status(req, "303 See Other");
@@ -702,7 +728,8 @@ static esp_err_t index_get_handler(httpd_req_t *req)
                     httpd_resp_send(req, NULL, 0);
                     return ESP_OK;
                 } else {
-                    ESP_LOGW(TAG, "Web UI login failed: incorrect password");
+                    char ip[16];
+                    ESP_LOGW(TAG, "Web UI login failed: incorrect password from %s", get_client_ip(req, ip, sizeof(ip)));
                     strcpy(login_message, "ERROR: Incorrect password.");
                 }
             }
@@ -732,7 +759,8 @@ static esp_err_t index_get_handler(httpd_req_t *req)
                         strcpy(login_message, "ERROR: Passwords do not match.");
                     }
                 } else {
-                    ESP_LOGW(TAG, "Unauthorized attempt to change web password");
+                    char ip2[16];
+                    ESP_LOGW(TAG, "Unauthorized attempt to change web password from %s", get_client_ip(req, ip2, sizeof(ip2)));
                     strcpy(login_message, "ERROR: Not authorized to change password.");
                 }
             }
@@ -958,7 +986,7 @@ static esp_err_t config_get_handler(httpd_req_t *req)
     bool password_protection_enabled = is_web_password_set();
 
     if (password_protection_enabled && !is_authenticated(req)) {
-        ESP_LOGW(TAG, "Unauthenticated access attempt to /config");
+        { char _ip[16]; ESP_LOGW(TAG, "Unauthenticated access to /config from %s", get_client_ip(req, _ip, sizeof(_ip))); }
         /* Redirect to index page with auth_required flag */
         httpd_resp_set_status(req, "303 See Other");
         httpd_resp_set_hdr(req, "Location", "/?auth_required=1");
@@ -1566,7 +1594,7 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
     bool password_protection_enabled = is_web_password_set();
 
     if (password_protection_enabled && !is_authenticated(req)) {
-        ESP_LOGW(TAG, "Unauthenticated access attempt to /mappings");
+        { char _ip[16]; ESP_LOGW(TAG, "Unauthenticated access to /mappings from %s", get_client_ip(req, _ip, sizeof(_ip))); }
         /* Redirect to index page with auth_required flag */
         httpd_resp_set_status(req, "303 See Other");
         httpd_resp_set_hdr(req, "Location", "/?auth_required=1");
@@ -2007,7 +2035,7 @@ static esp_err_t firewall_get_handler(httpd_req_t *req)
     bool password_protection_enabled = is_web_password_set();
 
     if (password_protection_enabled && !is_authenticated(req)) {
-        ESP_LOGW(TAG, "Unauthenticated access attempt to /firewall");
+        { char _ip[16]; ESP_LOGW(TAG, "Unauthenticated access to /firewall from %s", get_client_ip(req, _ip, sizeof(_ip))); }
         /* Redirect to index page with auth_required flag */
         httpd_resp_set_status(req, "303 See Other");
         httpd_resp_set_hdr(req, "Location", "/?auth_required=1");
@@ -2567,6 +2595,7 @@ static esp_err_t setup_get_handler(httpd_req_t *req)
 {
     /* Check authentication if password protection is enabled */
     if (is_web_password_set() && !is_authenticated(req)) {
+        { char _ip[16]; ESP_LOGW(TAG, "Unauthenticated access to /setup from %s", get_client_ip(req, _ip, sizeof(_ip))); }
         httpd_resp_set_status(req, "303 See Other");
         httpd_resp_set_hdr(req, "Location", "/?auth_required=1");
         httpd_resp_send(req, NULL, 0);
@@ -2681,7 +2710,7 @@ static esp_err_t vpn_get_handler(httpd_req_t *req)
     bool password_protection_enabled = is_web_password_set();
 
     if (password_protection_enabled && !is_authenticated(req)) {
-        ESP_LOGW(TAG, "Unauthenticated access attempt to /vpn");
+        { char _ip[16]; ESP_LOGW(TAG, "Unauthenticated access to /vpn from %s", get_client_ip(req, _ip, sizeof(_ip))); }
         httpd_resp_set_status(req, "303 See Other");
         httpd_resp_set_hdr(req, "Location", "/?auth_required=1");
         httpd_resp_send(req, NULL, 0);

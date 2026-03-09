@@ -12,7 +12,9 @@
  */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <pthread.h>
 #include "esp_system.h"
 #include "esp_log.h"
@@ -61,6 +63,7 @@
 #include "esp_netif.h"
 #include "pcap_capture.h"
 #include "remote_console.h"
+#include "syslog_client.h"
 #include "oled_display.h"
 #if CONFIG_MQTT_HOMEASSISTANT
 #include "mqtt_ha.h"
@@ -373,6 +376,7 @@ static void eth_event_handler(void* arg, esp_event_base_t event_base,
         init_byte_counter();
 
         init_sntp_if_needed();
+        syslog_notify_connected();
         if (vpn_enabled) {
             xTaskCreate(vpn_connect_task, "vpn_connect", 4096, NULL, 5, NULL);
         }
@@ -474,6 +478,9 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
 
         // Start SNTP time synchronization
         init_sntp_if_needed();
+
+        // Re-resolve syslog server now that network is up
+        syslog_notify_connected();
 
         // Start VPN connection if enabled
         if (vpn_enabled) {
@@ -866,6 +873,17 @@ void app_main(void)
     initialize_nvs();
     load_log_level();  // Apply saved log level early
 
+    /* Restore timezone from NVS */
+    {
+        char *tz = NULL;
+        if (get_config_param_str("tz", &tz) == ESP_OK && tz[0] != '\0') {
+            setenv("TZ", tz, 1);
+            tzset();
+            ESP_LOGI(TAG, "Timezone set to: %s", tz);
+        }
+        free(tz);
+    }
+
     /* OTA rollback support: confirm the running firmware is valid */
     const esp_partition_t *running = esp_ota_get_running_partition();
     esp_ota_img_states_t ota_state;
@@ -1127,6 +1145,9 @@ void app_main(void)
 
     // Initialize remote console (TCP server on port 2323, disabled by default)
     remote_console_init();
+
+    // Initialize syslog client (UDP forwarding, disabled by default)
+    syslog_init();
 
     // Initialize OLED display (disabled by default, enable via 'set_oled enable')
     oled_display_init();

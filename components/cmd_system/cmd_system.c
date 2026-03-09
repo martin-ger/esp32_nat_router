@@ -163,7 +163,7 @@ static int factory_reset(int argc, char **argv)
         ESP_LOGE(TAG, "Failed to erase NVS namespace: %s", esp_err_to_name(err));
         return 1;
     }
-    ESP_LOGI(TAG, "NVS namespace '%s' erased, restarting...", PARAM_NAMESPACE);
+    ESP_LOGW(TAG, "Factory reset: NVS namespace '%s' erased, restarting...", PARAM_NAMESPACE);
     esp_restart();
     return 0; // Never reached
 }

@@ -114,8 +114,8 @@ static void load_config(void)
     nvs_handle_t h;
     if (nvs_open(PARAM_NAMESPACE, NVS_READONLY, &h) != ESP_OK) return;
 
-    uint8_t en = 0;
-    nvs_get_u8(h, NVS_KEY_MQTT_EN, &en);
+    int32_t en = 0;
+    nvs_get_i32(h, NVS_KEY_MQTT_EN, &en);
     s_enabled = (en != 0);
 
     size_t sz;
@@ -123,33 +123,18 @@ static void load_config(void)
     sz = sizeof(s_user); nvs_get_str(h, NVS_KEY_MQTT_USER, s_user, &sz);
     sz = sizeof(s_pass); nvs_get_str(h, NVS_KEY_MQTT_PASS, s_pass, &sz);
 
-    nvs_get_u32(h, NVS_KEY_MQTT_INTV, &s_interval);
-    if (s_interval < 5)    s_interval = 5;
-    if (s_interval > 3600) s_interval = 3600;
+    int32_t intv = (int32_t)s_interval;
+    nvs_get_i32(h, NVS_KEY_MQTT_INTV, &intv);
+    if (intv < 5)    intv = 5;
+    if (intv > 3600) intv = 3600;
+    s_interval = (uint32_t)intv;
 
     nvs_close(h);
 }
 
-static esp_err_t save_u8(const char *key, uint8_t val)
+static inline esp_err_t save_int(const char *key, int32_t val)
 {
-    nvs_handle_t h;
-    esp_err_t err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &h);
-    if (err != ESP_OK) return err;
-    nvs_set_u8(h, key, val);
-    nvs_commit(h);
-    nvs_close(h);
-    return ESP_OK;
-}
-
-static esp_err_t save_u32(const char *key, uint32_t val)
-{
-    nvs_handle_t h;
-    esp_err_t err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &h);
-    if (err != ESP_OK) return err;
-    nvs_set_u32(h, key, val);
-    nvs_commit(h);
-    nvs_close(h);
-    return ESP_OK;
+    return set_config_param_int(key, val);
 }
 
 static inline esp_err_t save_str(const char *key, const char *val)
@@ -714,7 +699,7 @@ static int mqtt_cmd(int argc, char **argv)
 
     if (strcmp(action, "enable") == 0) {
         s_enabled = true;
-        save_u8(NVS_KEY_MQTT_EN, 1);
+        save_int(NVS_KEY_MQTT_EN, 1);
         esp_err_t err = mqtt_ha_start();
         if (err != ESP_OK) {
             printf("Failed to start: %s\n", esp_err_to_name(err));
@@ -726,7 +711,7 @@ static int mqtt_cmd(int argc, char **argv)
 
     if (strcmp(action, "disable") == 0) {
         s_enabled = false;
-        save_u8(NVS_KEY_MQTT_EN, 0);
+        save_int(NVS_KEY_MQTT_EN, 0);
         mqtt_ha_stop();
         printf("MQTT HA disabled\n");
         return 0;
@@ -770,7 +755,7 @@ static int mqtt_cmd(int argc, char **argv)
             return 1;
         }
         s_interval = (uint32_t)val;
-        save_u32(NVS_KEY_MQTT_INTV, s_interval);
+        save_int(NVS_KEY_MQTT_INTV, (int32_t)s_interval);
         printf("Publish interval set to %" PRIu32 "s\n", s_interval);
         /* Restart timer if running */
         if (s_publish_timer != NULL && s_client != NULL) {

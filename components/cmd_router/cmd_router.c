@@ -6,8 +6,10 @@
 */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <time.h>
 #include <inttypes.h>
 #include <stdint.h>
 #include "esp_log.h"
@@ -39,6 +41,7 @@
 #include "pcap_capture.h"
 #include "acl.h"
 #include "remote_console.h"
+#include "syslog_client.h"
 #include "oled_display.h"
 #include "esp_ota_ops.h"
 #include "esp_app_desc.h"
@@ -81,6 +84,7 @@ static void register_set_rf_switch(void);
 #endif
 static void register_acl(void);
 static void register_remote_console_cmd(void);
+static void register_syslog_cmd(void);
 #ifdef CONFIG_IDF_TARGET_ESP32C3
 static void register_set_oled(void);
 static void register_set_oled_gpio(void);
@@ -89,6 +93,7 @@ static void register_set_oled_gpio(void);
 static void register_scan(void);
 #endif
 static void register_set_vpn(void);
+static void register_set_tz(void);
 
 /* ACL helper functions (forward declarations) */
 static char* acl_format_ip_with_name(uint32_t ip, uint32_t mask, char* buf, size_t buf_len);
@@ -297,6 +302,8 @@ void register_router(void)
     register_set_rf_switch();
 #endif
     register_remote_console_cmd();
+    register_syslog_cmd();
+    register_set_tz();
     register_set_vpn();
 #ifdef CONFIG_IDF_TARGET_ESP32C3
     register_set_oled();
@@ -865,13 +872,13 @@ static int web_ui_cmd(int argc, char **argv)
     if (strcmp(action, "enable") == 0) {
         err = set_config_param_str("web_disabled", "0");
         if (err == ESP_OK) {
-            ESP_LOGI(TAG, "Web interface enabled.");
+            ESP_LOGW(TAG, "Web interface enabled via CLI.");
             printf("Web interface will be enabled after reboot.\n");
         }
     } else if (strcmp(action, "disable") == 0) {
         err = set_config_param_str("web_disabled", "1");
         if (err == ESP_OK) {
-            ESP_LOGI(TAG, "Web interface disabled.");
+            ESP_LOGW(TAG, "Web interface disabled via CLI.");
             printf("Web interface will be disabled after reboot.\n");
             printf("Use 'web_ui enable' to re-enable it.\n");
         }
@@ -1042,10 +1049,10 @@ static int set_router_password_cmd(int argc, char **argv)
     esp_err_t err = set_web_password_hashed(argv[1]);
     if (err == ESP_OK) {
         if (argv[1][0] == '\0') {
-            ESP_LOGI(TAG, "Web password protection disabled.");
+            ESP_LOGW(TAG, "Web password protection disabled via CLI.");
             printf("Password protection disabled.\n");
         } else {
-            ESP_LOGI(TAG, "Web password updated.");
+            ESP_LOGW(TAG, "Web password changed via CLI.");
             printf("Password updated successfully.\n");
         }
     } else {
@@ -2417,6 +2424,7 @@ static int acl_cmd(int argc, char **argv)
     if (strcmp(argv[2], "clear") == 0) {
         acl_clear(list_no);
         save_acl_rules();
+        ESP_LOGW(TAG, "ACL list %s cleared via CLI.", acl_get_name(list_no));
         printf("ACL list %s cleared.\n", acl_get_name(list_no));
         return 0;
     }
@@ -2441,6 +2449,7 @@ static int acl_cmd(int argc, char **argv)
         }
         if (acl_delete(list_no, idx)) {
             save_acl_rules();
+            ESP_LOGW(TAG, "ACL rule %d deleted from %s via CLI.", idx, acl_get_name(list_no));
             printf("Deleted rule %d from %s\n", idx, acl_get_name(list_no));
         } else {
             printf("No rule at index %d\n", idx);
@@ -2543,6 +2552,7 @@ static int acl_cmd(int argc, char **argv)
     /* Add the rule */
     if (acl_add(list_no, src_ip, src_mask, dst_ip, dst_mask, proto, s_port, d_port, allow)) {
         save_acl_rules();
+        ESP_LOGW(TAG, "ACL rule added to %s via CLI.", acl_get_name(list_no));
         printf("Rule added to %s\n", acl_get_name(list_no));
     } else {
         printf("Failed to add rule (list may be full)\n");
@@ -2621,6 +2631,7 @@ static int remote_console_cmd(int argc, char **argv)
     } else if (strcmp(action, "enable") == 0) {
         esp_err_t err = remote_console_enable();
         if (err == ESP_OK) {
+            ESP_LOGW(TAG, "Remote console enabled via CLI.");
             printf("Remote console enabled.\n");
         } else {
             printf("Error: %s\n", esp_err_to_name(err));
@@ -2628,6 +2639,7 @@ static int remote_console_cmd(int argc, char **argv)
 
     } else if (strcmp(action, "disable") == 0) {
         remote_console_disable();
+        ESP_LOGW(TAG, "Remote console disabled via CLI.");
         printf("Remote console disabled.\n");
 
     } else if (strcmp(action, "port") == 0) {
@@ -2641,6 +2653,7 @@ static int remote_console_cmd(int argc, char **argv)
             return 1;
         }
         remote_console_set_port((uint16_t)port);
+        ESP_LOGW(TAG, "Remote console port changed to %d via CLI.", port);
         printf("Port set to %d. Restart or disable/enable to apply.\n", port);
 
     } else if (strcmp(action, "bind") == 0) {
@@ -2669,6 +2682,7 @@ static int remote_console_cmd(int argc, char **argv)
             return 1;
         }
         remote_console_set_bind(bind);
+        ESP_LOGW(TAG, "Remote console bind changed to %s via CLI.", argv[2]);
         printf("Bind set. Restart or disable/enable to apply.\n");
 
     } else if (strcmp(action, "timeout") == 0) {
@@ -2678,11 +2692,13 @@ static int remote_console_cmd(int argc, char **argv)
         }
         uint32_t timeout = (uint32_t)atoi(argv[2]);
         remote_console_set_timeout(timeout);
+        ESP_LOGI(TAG, "Remote console timeout changed to %lu sec via CLI.", (unsigned long)timeout);
         printf("Timeout set to %lu seconds.\n", (unsigned long)timeout);
 
     } else if (strcmp(action, "kick") == 0) {
         esp_err_t err = remote_console_kick();
         if (err == ESP_OK) {
+            ESP_LOGW(TAG, "Remote console session kicked via CLI.");
             printf("Kick request sent.\n");
         } else {
             printf("No active session to kick.\n");
@@ -2710,6 +2726,135 @@ static void register_remote_console_cmd(void)
                 "  remote_console kick                 - Disconnect current session",
         .hint = " <action> [<args>]",
         .func = &remote_console_cmd,
+    };
+    ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
+}
+
+/* 'syslog' command - configure remote syslog forwarding */
+static int syslog_cmd(int argc, char **argv)
+{
+    if (argc < 2) {
+        printf("Usage: syslog <action> [args]\n");
+        printf("  status                    - Show syslog configuration\n");
+        printf("  enable <server> [<port>]  - Enable syslog (default port 514)\n");
+        printf("  disable                   - Disable syslog forwarding\n");
+        return 0;
+    }
+
+    const char *action = argv[1];
+
+    if (strcmp(action, "status") == 0) {
+        bool enabled;
+        char server[SYSLOG_MAX_SERVER_LEN];
+        uint16_t port;
+        syslog_get_config(&enabled, server, sizeof(server), &port);
+
+        printf("Syslog Status:\n");
+        printf("==============\n");
+        printf("Enabled:  %s\n", enabled ? "yes" : "no");
+        printf("Server:   %s\n", server[0] ? server : "(not set)");
+        printf("Port:     %u\n", port);
+
+    } else if (strcmp(action, "enable") == 0) {
+        if (argc < 3) {
+            printf("Usage: syslog enable <server> [<port>]\n");
+            return 1;
+        }
+        const char *server = argv[2];
+        uint16_t port = SYSLOG_DEFAULT_PORT;
+        if (argc >= 4) {
+            int p = atoi(argv[3]);
+            if (p < 1 || p > 65535) {
+                printf("Invalid port number (1-65535)\n");
+                return 1;
+            }
+            port = (uint16_t)p;
+        }
+        esp_err_t err = syslog_enable(server, port);
+        if (err == ESP_OK) {
+            ESP_LOGW(TAG, "Syslog enabled: %s:%u via CLI.", server, port);
+            printf("Syslog enabled: %s:%u\n", server, port);
+        } else {
+            printf("Error: %s\n", esp_err_to_name(err));
+        }
+
+    } else if (strcmp(action, "disable") == 0) {
+        syslog_disable();
+        ESP_LOGW(TAG, "Syslog disabled via CLI.");
+        printf("Syslog disabled.\n");
+
+    } else {
+        printf("Unknown action: %s\n", action);
+        return 1;
+    }
+
+    return 0;
+}
+
+static void register_syslog_cmd(void)
+{
+    const esp_console_cmd_t cmd = {
+        .command = "syslog",
+        .help = "Manage remote syslog forwarding\n"
+                "  syslog status                    - Show syslog configuration\n"
+                "  syslog enable <server> [<port>]  - Enable syslog (default port 514)\n"
+                "  syslog disable                   - Disable syslog forwarding",
+        .hint = " <action> [<args>]",
+        .func = &syslog_cmd,
+    };
+    ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
+}
+
+/* 'set_tz' command - set timezone */
+static int set_tz_cmd(int argc, char **argv)
+{
+    if (argc < 2) {
+        const char *tz = getenv("TZ");
+        printf("Timezone: %s\n", tz ? tz : "(not set, using UTC)");
+        printf("\nUsage: set_tz <POSIX TZ string>\n");
+        printf("Examples:\n");
+        printf("  set_tz UTC               - UTC\n");
+        printf("  set_tz CET-1CEST,M3.5.0,M10.5.0/3  - Central Europe\n");
+        printf("  set_tz EST5EDT,M3.2.0,M11.1.0       - US Eastern\n");
+        printf("  set_tz PST8PDT,M3.2.0,M11.1.0       - US Pacific\n");
+        printf("  set_tz clear             - Clear timezone (revert to UTC)\n");
+        return 0;
+    }
+
+    if (strcmp(argv[1], "clear") == 0) {
+        unsetenv("TZ");
+        tzset();
+        set_config_param_str("tz", "");
+        printf("Timezone cleared (using UTC).\n");
+        return 0;
+    }
+
+    setenv("TZ", argv[1], 1);
+    tzset();
+    set_config_param_str("tz", argv[1]);
+
+    /* Show current time to confirm */
+    time_t now = time(NULL);
+    struct tm tm_info;
+    localtime_r(&now, &tm_info);
+    char buf[32];
+    strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S %Z", &tm_info);
+    printf("Timezone set to: %s\n", argv[1]);
+    printf("Current time:    %s\n", buf);
+
+    return 0;
+}
+
+static void register_set_tz(void)
+{
+    const esp_console_cmd_t cmd = {
+        .command = "set_tz",
+        .help = "Set timezone (POSIX TZ string)\n"
+                "  set_tz                   - Show current timezone\n"
+                "  set_tz <TZ string>       - Set timezone\n"
+                "  set_tz clear             - Clear timezone (revert to UTC)",
+        .hint = " <TZ string>",
+        .func = &set_tz_cmd,
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }
