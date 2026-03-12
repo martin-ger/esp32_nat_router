@@ -1,6 +1,6 @@
 {
   "name": "ESP32 NAT Router",
-  "version": "1.0.0",
+  "version": "2.4.0",
   "new_install_prompt_erase": true,
   "builds": [
     {
