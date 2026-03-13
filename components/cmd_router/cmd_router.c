@@ -92,6 +92,9 @@ static void register_set_oled_gpio(void);
 #if !CONFIG_ETH_UPLINK
 static void register_scan(void);
 #endif
+#if WIFI_HAS_5GHZ
+static void register_set_sta_band(void);
+#endif
 static void register_set_vpn(void);
 static void register_set_tz(void);
 
@@ -298,6 +301,9 @@ void register_router(void)
     register_set_ap_channel();
 #endif
     register_set_hostname();
+#if WIFI_HAS_5GHZ
+    register_set_sta_band();
+#endif
 #if defined(CONFIG_IDF_TARGET_ESP32C6)
     register_set_rf_switch();
 #endif
@@ -1244,7 +1250,14 @@ static int show(int argc, char **argv)
         if (ap_connect) {
             wifi_ap_record_t ap_info;
             if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
-                printf("Uplink AP: connected (%d dBm)\n", ap_info.rssi);
+#if WIFI_HAS_5GHZ
+                printf("Uplink AP: connected (ch %d, %s, %d dBm)\n",
+                       ap_info.primary,
+                       ap_info.primary > 14 ? "5 GHz" : "2.4 GHz",
+                       ap_info.rssi);
+#else
+                printf("Uplink AP: connected (ch %d, %d dBm)\n", ap_info.primary, ap_info.rssi);
+#endif
             } else {
                 printf("Uplink AP: connected\n");
             }
@@ -1359,6 +1372,14 @@ static int show(int argc, char **argv)
         } else {
             printf("  Enterprise: <not active>\n");
         }
+
+
+#if WIFI_HAS_5GHZ
+        {
+            const char *band_names[] = {"auto", "2.4 GHz", "5 GHz"};
+            printf("  Band preference: %s\n", band_names[sta_band <= STA_BAND_5G ? sta_band : 0]);
+        }
+#endif
 
         if (ssid != NULL) free(ssid);
         if (ent_username != NULL) free(ent_username);
@@ -2248,6 +2269,52 @@ static void register_set_ap_channel(void)
 }
 #endif
 
+#if WIFI_HAS_5GHZ
+/* 'set_sta_band' command - set STA band preference (5 GHz capable targets) */
+static int set_sta_band_cmd(int argc, char **argv)
+{
+    if (argc < 2) {
+        const char *names[] = {"auto", "2.4 GHz", "5 GHz"};
+        printf("STA band preference: %s\n", names[sta_band <= STA_BAND_5G ? sta_band : 0]);
+        return 0;
+    }
+
+    int band_val;
+    if (strcmp(argv[1], "auto") == 0 || strcmp(argv[1], "0") == 0) {
+        band_val = STA_BAND_AUTO;
+    } else if (strcmp(argv[1], "2.4") == 0 || strcmp(argv[1], "1") == 0) {
+        band_val = STA_BAND_2G;
+    } else if (strcmp(argv[1], "5") == 0 || strcmp(argv[1], "2") == 0) {
+        band_val = STA_BAND_5G;
+    } else {
+        printf("Invalid band. Use: auto, 2.4, or 5\n");
+        return 1;
+    }
+
+    esp_err_t err = set_config_param_int("sta_band", band_val);
+    if (err == ESP_OK) {
+        sta_band = (uint8_t)band_val;
+        const char *names[] = {"auto", "2.4 GHz", "5 GHz"};
+        printf("STA band preference set to: %s\n", names[band_val]);
+        printf("Restart the device for changes to take effect.\n");
+    } else {
+        printf("Failed to save setting\n");
+    }
+    return err;
+}
+
+static void register_set_sta_band(void)
+{
+    const esp_console_cmd_t cmd = {
+        .command = "set_sta_band",
+        .help = "Set STA band preference (auto, 2.4, 5; requires restart)",
+        .hint = NULL,
+        .func = &set_sta_band_cmd,
+    };
+    ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
+}
+#endif /* WIFI_HAS_5GHZ */
+
 /**
  * @brief Format IP address with device name for /32 addresses
  * If the IP has a full /32 mask and a matching DHCP reservation with a name,
@@ -3004,6 +3071,16 @@ static int scan_cmd(int argc, char **argv)
 
     /* Print header */
     printf("\nFound %d networks:\n", ap_count);
+#if WIFI_HAS_5GHZ
+    printf("%-32s  %3s  %5s  %4s  %-12s\n", "SSID", "Ch", "Band", "RSSI", "Security");
+    printf("--------------------------------  ---  -----  ----  ------------\n");
+
+    for (int i = 0; i < ap_count; i++) {
+        const char *auth = auth_mode_to_str(ap_list[i].authmode);
+        printf("%-32s  %3d  %5s  %4d  %s\n", ap_list[i].ssid, ap_list[i].primary,
+               ap_list[i].primary > 14 ? "5 GHz" : "2.4 G", ap_list[i].rssi, auth);
+    }
+#else
     printf("%-32s  %3s  %4s  %-12s\n", "SSID", "Ch", "RSSI", "Security");
     printf("--------------------------------  ---  ----  ------------\n");
 
@@ -3011,6 +3088,7 @@ static int scan_cmd(int argc, char **argv)
         const char *auth = auth_mode_to_str(ap_list[i].authmode);
         printf("%-32s  %3d  %4d  %s\n", ap_list[i].ssid, ap_list[i].primary, ap_list[i].rssi, auth);
     }
+#endif
 
     free(ap_list);
     return 0;

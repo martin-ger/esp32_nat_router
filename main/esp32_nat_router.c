@@ -102,6 +102,11 @@ int32_t use_cert_bundle = 0;     // 0=off, 1=on
 int32_t disable_time_check = 0;  // 0=off, 1=on
 #endif
 
+#if WIFI_HAS_5GHZ
+// STA band preference (0=auto, 1=2.4GHz, 2=5GHz)
+uint8_t sta_band = STA_BAND_AUTO;
+#endif
+
 // WireGuard VPN settings
 int32_t vpn_enabled = 0;
 int32_t vpn_port = 51820;
@@ -272,8 +277,8 @@ static void initialize_console(void)
 #endif
 }
 
-// BOOT button is GPIO 9 on ESP32-C3/C2/C6, GPIO 0 on ESP32/S2/S3
-#if defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32C2) || defined(CONFIG_IDF_TARGET_ESP32C6)
+// BOOT button is GPIO 9 on ESP32-C3/C2/C5/C6, GPIO 0 on ESP32/S2/S3
+#if defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32C2) || defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
 #define BOOT_BUTTON_GPIO      9
 #else
 #define BOOT_BUTTON_GPIO      0
@@ -437,6 +442,116 @@ static void wifi_ap_event_handler(void* arg, esp_event_base_t event_base,
     }
 }
 #else
+
+#if WIFI_HAS_5GHZ
+/**
+ * Band-aware STA connection helper.
+ *
+ * When a band preference is configured (sta_band == STA_BAND_2G or STA_BAND_5G),
+ * this function scans for the configured SSID, selects the best BSSID on the
+ * preferred band, and sets it in the STA config before connecting.
+ * Falls back to the other band if the preferred one is unavailable.
+ *
+ * When sta_band == STA_BAND_AUTO (or on non-5GHz chips) this just calls
+ * esp_wifi_connect() directly.
+ */
+static void wifi_connect_band_aware(void)
+{
+    if (sta_band == STA_BAND_AUTO || ssid == NULL || ssid[0] == '\0') {
+        esp_wifi_connect();
+        return;
+    }
+
+    /* Targeted scan for our SSID only */
+    wifi_scan_config_t scan_cfg = {
+        .ssid = (uint8_t *)ssid,
+        .bssid = NULL,
+        .channel = 0,
+        .show_hidden = true,
+        .scan_type = WIFI_SCAN_TYPE_ACTIVE,
+    };
+
+    esp_err_t err = esp_wifi_scan_start(&scan_cfg, true);  /* blocking */
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Band-aware scan failed (%s), falling back", esp_err_to_name(err));
+        esp_wifi_connect();
+        return;
+    }
+
+    uint16_t ap_count = 0;
+    esp_wifi_scan_get_ap_num(&ap_count);
+    if (ap_count == 0) {
+        ESP_LOGI(TAG, "No APs found for SSID '%s', connecting normally", ssid);
+        esp_wifi_connect();
+        return;
+    }
+
+    wifi_ap_record_t *ap_list = malloc(sizeof(wifi_ap_record_t) * ap_count);
+    if (ap_list == NULL) {
+        esp_wifi_connect();
+        return;
+    }
+    esp_wifi_scan_get_ap_records(&ap_count, ap_list);
+
+    /* Find best BSSID on preferred band, and best on any band as fallback */
+    int best_preferred = -1;
+    int best_fallback = -1;
+    for (int i = 0; i < ap_count; i++) {
+        bool is_5g = (ap_list[i].primary > 14);
+        bool matches_pref = (sta_band == STA_BAND_5G) ? is_5g : !is_5g;
+
+        if (matches_pref) {
+            if (best_preferred < 0 || ap_list[i].rssi > ap_list[best_preferred].rssi)
+                best_preferred = i;
+        } else {
+            if (best_fallback < 0 || ap_list[i].rssi > ap_list[best_fallback].rssi)
+                best_fallback = i;
+        }
+    }
+
+    int chosen = (best_preferred >= 0) ? best_preferred : best_fallback;
+    if (chosen < 0) {
+        free(ap_list);
+        esp_wifi_connect();
+        return;
+    }
+
+    if (best_preferred < 0) {
+        ESP_LOGW(TAG, "Preferred band (%s) unavailable, falling back to %s",
+                 (sta_band == STA_BAND_5G) ? "5 GHz" : "2.4 GHz",
+                 (sta_band == STA_BAND_5G) ? "2.4 GHz" : "5 GHz");
+    }
+
+    ESP_LOGI(TAG, "Connecting to BSSID %02X:%02X:%02X:%02X:%02X:%02X (ch %d, %s, %d dBm)",
+             ap_list[chosen].bssid[0], ap_list[chosen].bssid[1],
+             ap_list[chosen].bssid[2], ap_list[chosen].bssid[3],
+             ap_list[chosen].bssid[4], ap_list[chosen].bssid[5],
+             ap_list[chosen].primary,
+             ap_list[chosen].primary > 14 ? "5 GHz" : "2.4 GHz",
+             ap_list[chosen].rssi);
+
+    /* Update STA config with the chosen BSSID */
+    wifi_config_t sta_cfg;
+    esp_wifi_get_config(WIFI_IF_STA, &sta_cfg);
+    memcpy(sta_cfg.sta.bssid, ap_list[chosen].bssid, 6);
+    sta_cfg.sta.bssid_set = true;
+    sta_cfg.sta.channel = ap_list[chosen].primary;
+    esp_wifi_set_config(WIFI_IF_STA, &sta_cfg);
+
+    free(ap_list);
+    esp_wifi_connect();
+}
+#endif /* WIFI_HAS_5GHZ */
+
+static inline void sta_connect(void)
+{
+#if WIFI_HAS_5GHZ
+    wifi_connect_band_aware();
+#else
+    esp_wifi_connect();
+#endif
+}
+
 static void wifi_event_handler(void* arg, esp_event_base_t event_base,
                                 int32_t event_id, void* event_data)
 {
@@ -444,7 +559,7 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
 
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START)
     {
-        esp_wifi_connect();
+        sta_connect();
     }
     else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED)
     {
@@ -453,7 +568,7 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
             vpn_disconnect();
         }
         ap_connect = false;
-        esp_wifi_connect();
+        sta_connect();
         ESP_LOGI(TAG, "retry to connect to the AP");
         xEventGroupClearBits(wifi_event_group, WIFI_CONNECTED_BIT);
     }
@@ -1029,6 +1144,19 @@ void app_main(void)
     }
     if (ap_channel > 0) {
         ESP_LOGI(TAG, "AP WiFi channel: %d", ap_channel);
+    }
+#endif
+
+#if WIFI_HAS_5GHZ
+    // Load STA band preference from NVS (default 0 = auto)
+    int sta_band_setting = STA_BAND_AUTO;
+    if (get_config_param_int("sta_band", &sta_band_setting) == ESP_OK) {
+        if (sta_band_setting >= STA_BAND_AUTO && sta_band_setting <= STA_BAND_5G) {
+            sta_band = (uint8_t)sta_band_setting;
+        }
+    }
+    if (sta_band != STA_BAND_AUTO) {
+        ESP_LOGI(TAG, "STA band preference: %s", sta_band == STA_BAND_2G ? "2.4 GHz" : "5 GHz");
     }
 #endif
 

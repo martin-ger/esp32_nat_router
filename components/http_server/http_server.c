@@ -1210,6 +1210,21 @@ static esp_err_t config_get_handler(httpd_req_t *req)
                                 disable_time_check = tc_val;
                             }
 
+#if WIFI_HAS_5GHZ
+                            // Save STA band preference
+                            {
+                                char band_param[4] = "";
+                                int band_val = STA_BAND_AUTO;
+                                if (httpd_query_key_value(buf, "sta_band", band_param, sizeof(band_param)) == ESP_OK) {
+                                    band_val = atoi(band_param);
+                                    if (band_val < STA_BAND_AUTO || band_val > STA_BAND_5G)
+                                        band_val = STA_BAND_AUTO;
+                                }
+                                set_config_param_int("sta_band", band_val);
+                                sta_band = (uint8_t)band_val;
+                            }
+#endif
+
                             // Check for optional STA MAC address
                             if (httpd_query_key_value(buf, "sta_mac", param5, sizeof(param5)) == ESP_OK && strlen(param5) > 0) {
                                 ESP_LOGI(TAG, "Found URL query parameter => sta_mac=%s", param5);
@@ -1506,7 +1521,13 @@ static esp_err_t config_get_handler(httpd_req_t *req)
 #else
     /* Chunk 5: STA Settings */
     snprintf(section, sizeof(section), CONFIG_CHUNK_STA,
-        safe_ssid, safe_ent_username, safe_ent_identity,
+        safe_ssid,
+#if WIFI_HAS_5GHZ
+        sta_band == STA_BAND_AUTO ? "selected" : "",
+        sta_band == STA_BAND_2G ? "selected" : "",
+        sta_band == STA_BAND_5G ? "selected" : "",
+#endif
+        safe_ent_username, safe_ent_identity,
         eap_method == 0 ? "selected" : "", eap_method == 1 ? "selected" : "",
         eap_method == 2 ? "selected" : "", eap_method == 3 ? "selected" : "",
         ttls_phase2 == 0 ? "selected" : "", ttls_phase2 == 1 ? "selected" : "",
@@ -2482,11 +2503,11 @@ static esp_err_t scan_get_handler(httpd_req_t *req)
                 "<tr><td colspan='%d' style='text-align:center; color:#00d9ff;'>"
                 "<span style='display:inline-block; animation: pulse 1s infinite;'>📡 Scanning...</span>"
                 "</td></tr>",
-                can_connect ? 4 : 3);
+                can_connect ? 5 : 4);
         } else {
             snprintf(scan_html, sizeof(scan_html),
                 "<tr><td colspan='%d' style='text-align:center; color:#888;'>No networks found</td></tr>",
-                can_connect ? 4 : 3);
+                can_connect ? 5 : 4);
         }
     } else {
         for (int i = 0; i < ap_count && html_offset < (int)(sizeof(scan_html) - 512); i++) {
@@ -2528,29 +2549,45 @@ static esp_err_t scan_get_handler(httpd_req_t *req)
                     encoded_ssid);
             }
 
-            /* Build signal bars HTML with active/inactive styling */
-            char signal_bars_html[128];
-            const char *bar_chars[] = {"▂", "▄", "▆", "█"};
+            /* Build signal bars HTML with CSS divs */
+            char signal_bars_html[384];
+            const int bar_heights[] = {4, 8, 12, 16};  /* px */
             int sb_offset = 0;
+            sb_offset += snprintf(signal_bars_html, sizeof(signal_bars_html),
+                "<span class='signal-bars'>");
             for (int b = 0; b < 4; b++) {
                 if (b < bars) {
                     sb_offset += snprintf(signal_bars_html + sb_offset, sizeof(signal_bars_html) - sb_offset,
-                        "<span class='%s'>%s</span>", signal_class, bar_chars[b]);
+                        "<span class='bar active %s' style='height:%dpx;'></span>",
+                        signal_class, bar_heights[b]);
                 } else {
                     sb_offset += snprintf(signal_bars_html + sb_offset, sizeof(signal_bars_html) - sb_offset,
-                        "<span style='color:#444;'>%s</span>", bar_chars[b]);
+                        "<span class='bar' style='height:%dpx;'></span>", bar_heights[b]);
                 }
             }
+            sb_offset += snprintf(signal_bars_html + sb_offset, sizeof(signal_bars_html) - sb_offset,
+                "</span>");
+
+            /* Channel / band info */
+            char ch_info[80];
+#if WIFI_HAS_5GHZ
+            snprintf(ch_info, sizeof(ch_info), "%d <span style='color:#888;font-size:0.75rem;'>%s</span>",
+                     ap_list[i].primary, ap_list[i].primary > 14 ? "5G" : "2.4G");
+#else
+            snprintf(ch_info, sizeof(ch_info), "%d", ap_list[i].primary);
+#endif
 
             html_offset += snprintf(scan_html + html_offset, sizeof(scan_html) - html_offset,
                 "<tr>"
                 "<td>%s</td>"
-                "<td>%s <span style='color:#888;font-size:0.8rem;'>%d dBm</span></td>"
+                "<td style='white-space:nowrap;'>%s<span style='color:#888;font-size:0.8rem;margin-left:0.5em;'>%d dBm</span></td>"
+                "<td>%s</td>"
                 "<td>%s</td>"
                 "%s"
                 "</tr>",
                 safe_ssid,
                 signal_bars_html, rssi,
+                ch_info,
                 web_auth_mode_to_str(ap_list[i].authmode),
                 connect_cell
             );

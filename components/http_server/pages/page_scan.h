@@ -26,11 +26,13 @@ h1 { font-size: 1.5rem; font-weight: 600; color: #00d9ff; margin-bottom: 1rem; t
 .data-table td { padding: 0.75rem 0.5rem; border-bottom: 1px solid rgba(255, 255, 255, 0.05); font-size: 0.9rem; }\
 .data-table tbody tr:last-child td { border-bottom: none; }\
 .data-table tbody tr:hover { background: rgba(0, 217, 255, 0.05); }\
-.signal-excellent { color: #4caf50; }\
-.signal-good { color: #8bc34a; }\
-.signal-fair { color: #ffc107; }\
-.signal-weak { color: #ff9800; }\
-.signal-poor { color: #f44336; }\
+.signal-bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 16px; vertical-align: middle; }\
+.signal-bars .bar { width: 4px; border-radius: 1px; background: #444; }\
+.signal-bars .bar.active.signal-excellent { background: #4caf50; }\
+.signal-bars .bar.active.signal-good { background: #8bc34a; }\
+.signal-bars .bar.active.signal-fair { background: #ffc107; }\
+.signal-bars .bar.active.signal-weak { background: #ff9800; }\
+.signal-bars .bar.active.signal-poor { background: #f44336; }\
 .connect-button { background: linear-gradient(135deg, #667eea 0%%, #764ba2 100%%); color: #fff; border: none; border-radius: 6px; padding: 0.4rem 0.8rem; font-size: 0.8rem; font-weight: 600; cursor: pointer; text-decoration: none; display: inline-block; }\
 .connect-button:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4); }\
 .refresh-note { color: #888; font-size: 0.8rem; margin-bottom: 1rem; }\
@@ -51,6 +53,7 @@ h1 { font-size: 1.5rem; font-weight: 600; color: #00d9ff; margin-bottom: 1rem; t
 <tr>\
 <th>SSID</th>\
 <th>Signal</th>\
+<th>Ch</th>\
 <th>Security</th>\
 %s\
 </tr>\

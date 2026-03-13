@@ -12,6 +12,22 @@
 extern "C" {
 #endif
 
+/* 5 GHz band support — currently only ESP32-C5 has dual-band WiFi */
+#if defined(CONFIG_IDF_TARGET_ESP32C5)
+#define WIFI_HAS_5GHZ 1
+#else
+#define WIFI_HAS_5GHZ 0
+#endif
+
+/* STA band preference (only meaningful when WIFI_HAS_5GHZ) */
+#define STA_BAND_AUTO  0   /* Connect to strongest signal regardless of band */
+#define STA_BAND_2G    1   /* Prefer 2.4 GHz (channels 1-14) */
+#define STA_BAND_5G    2   /* Prefer 5 GHz (channels > 14) */
+
+#if WIFI_HAS_5GHZ
+extern uint8_t sta_band;   /* STA_BAND_AUTO / STA_BAND_2G / STA_BAND_5G */
+#endif
+
 #if !CONFIG_ETH_UPLINK
 extern char* ssid;
 extern char* ent_username;
