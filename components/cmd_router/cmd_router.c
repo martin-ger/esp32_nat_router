@@ -77,6 +77,7 @@ static void register_bytes(void);
 static void register_pcap(void);
 static void register_set_led_gpio(void);
 static void register_set_led_lowactive(void);
+static void register_set_led_strip(void);
 static void register_set_ttl(void);
 static void register_set_tx_power(void);
 #if defined(CONFIG_IDF_TARGET_ESP32C6)
@@ -293,6 +294,7 @@ void register_router(void)
     register_set_router_password();
     register_set_led_gpio();
     register_set_led_lowactive();
+    register_set_led_strip();
     register_set_ttl();
     register_set_tx_power();
     register_set_ap_hidden();
@@ -1957,6 +1959,59 @@ static void register_set_led_lowactive(void)
         .help = "Set LED to low-active (inverted) mode for active-low LEDs",
         .hint = NULL,
         .func = &set_led_lowactive_cmd,
+    };
+    ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
+}
+
+/* 'set_led_strip' command - set GPIO for addressable LED strip (WS2812) */
+static int set_led_strip_cmd(int argc, char **argv)
+{
+    if (argc < 2) {
+        printf("Usage: set_led_strip <gpio_number|none>\n");
+        printf("  gpio_number: GPIO pin for WS2812 data line (0-48)\n");
+        printf("  none: disable addressable LED strip\n");
+        printf("\nCurrent setting: ");
+        if (led_strip_gpio < 0) {
+            printf("none (disabled)\n");
+        } else {
+            printf("GPIO %d\n", led_strip_gpio);
+        }
+        return 0;
+    }
+
+    int gpio_num;
+    if (strcasecmp(argv[1], "none") == 0 || strcmp(argv[1], "-1") == 0) {
+        gpio_num = -1;
+    } else {
+        char *endptr;
+        gpio_num = strtol(argv[1], &endptr, 10);
+        if (*endptr != '\0' || gpio_num < 0 || gpio_num > 48) {
+            printf("Invalid GPIO number. Use 0-48 or 'none'.\n");
+            return 1;
+        }
+    }
+
+    esp_err_t err = set_config_param_int("ls_gpio", gpio_num);
+    if (err == ESP_OK) {
+        if (gpio_num < 0) {
+            printf("LED strip disabled.\n");
+        } else {
+            printf("LED strip set to GPIO %d.\n", gpio_num);
+        }
+        printf("Restart the device for changes to take effect.\n");
+    } else {
+        printf("Failed to save setting\n");
+    }
+    return err;
+}
+
+static void register_set_led_strip(void)
+{
+    const esp_console_cmd_t cmd = {
+        .command = "set_led_strip",
+        .help = "Set GPIO for addressable LED strip (WS2812/SK6812, 'none' to disable, requires restart)",
+        .hint = NULL,
+        .func = &set_led_strip_cmd,
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }

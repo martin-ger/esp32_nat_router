@@ -21,11 +21,12 @@ This is a firmware to use the ESP32 as WiFi NAT router. It routes between the ne
 - **Firewall**: Define ACL to restrict or monitor traffic
 - **PCAP Capture**: Live packet capture can be streamed to Wireshark or other network tools
 - **WPA2-Enterprise Support**: Connect to corporate networks (PEAP, TTLS, TLS) and convert them to WPA2-PSK
+- **5 GHz WiFi**: Dual-band support on ESP32-C5 with configurable band preference (auto/2.4 GHz/5 GHz)
 - **Ethernet Support**: Use a W32-ET01 board with LAN8720 PHY to get Ethernet uplink
 - **Web Interface**: Web UI with password protection for easy configuration
 - **Serial Console**: Full CLI for advanced configuration
 - **Remote Console**: Network-accessible CLI via TCP (password protected, per-interface binding)
-- **LED Status Indicator**: Visual feedback for connection and traffic status
+- **LED Status Indicator**: Visual feedback via plain GPIO LED or addressable LED strip (WS2812/SK6812) with color-coded status
 - **OLED Display**: Status display on 72x40 I2C SSD1306 OLEDs (as found on some ESP32-C3 mini boards)
 - **MQTT Home Assistant**: Publish telemetry and per-client stats to MQTT with HA auto-discovery
 - **MCP Bridge (AI-Ready)**: BETA - Control the router from AI assistants (Claude, etc.) via the Model Context Protocol
@@ -70,7 +71,7 @@ esptool.py --chip esp32 \
 0x20000 firmware_esp32/esp32_nat_router.bin
 ```
 
-Pre-built binaries are available for: **ESP32**, **ESP32-C3**, **ESP32-C6**, **ESP32-S3**, and **WT32-ETH01** (Ethernet).
+Pre-built binaries are available for: **ESP32**, **ESP32-C3**, **ESP32-C5**, **ESP32-C6**, **ESP32-S3**, and **WT32-ETH01** (Ethernet).
 
 See the [Installation](https://github.com/martin-ger/esp32_nat_router/wiki/Installation) wiki page for all chip-specific commands.
 

@@ -65,6 +65,7 @@
 #include "remote_console.h"
 #include "syslog_client.h"
 #include "oled_display.h"
+#include "led_strip_status.h"
 #if CONFIG_MQTT_HOMEASSISTANT
 #include "mqtt_ha.h"
 #endif
@@ -277,8 +278,10 @@ static void initialize_console(void)
 #endif
 }
 
-// BOOT button is GPIO 9 on ESP32-C3/C2/C5/C6, GPIO 0 on ESP32/S2/S3
-#if defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32C2) || defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
+// BOOT button GPIO: GPIO28 on ESP32-C5 board, GPIO9 on C3/C2/C6, GPIO0 on ESP32/S2/S3
+#if defined(CONFIG_IDF_TARGET_ESP32C5)
+#define BOOT_BUTTON_GPIO      28
+#elif defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32C2) || defined(CONFIG_IDF_TARGET_ESP32C6)
 #define BOOT_BUTTON_GPIO      9
 #else
 #define BOOT_BUTTON_GPIO      0
@@ -306,6 +309,8 @@ void * led_status_thread(void * p)
 
     int held_ms = 0;
 
+    bool strip_active = led_strip_is_active();
+
     while (true)
     {
         // --- LED status: OFF=disconnected, ON=connected (packet hooks flicker it off) ---
@@ -317,12 +322,20 @@ void * led_status_thread(void * p)
         for (int t = 0; t < 1000 / POLL_INTERVAL_MS; t++) {
             vTaskDelay(pdMS_TO_TICKS(POLL_INTERVAL_MS));
 
+            // Update addressable LED strip colour each tick
+            if (strip_active) {
+                led_strip_status_update();
+            }
+
 #if !CONFIG_ETH_UPLINK
             if (gpio_get_level(BOOT_BUTTON_GPIO) == 0) {
                 held_ms += POLL_INTERVAL_MS;
                 // Rapid LED toggle for visual feedback during hold
                 if (led_enabled) {
                     gpio_set_level(led_gpio, ((held_ms / POLL_INTERVAL_MS) % 2) ^ led_lowactive);
+                }
+                if (strip_active) {
+                    led_strip_set_factory_reset(true);
                 }
                 if (held_ms >= FACTORY_RESET_HOLD_MS) {
                     ESP_LOGW(TAG, "BOOT button held %d ms - factory reset!", held_ms);
@@ -335,6 +348,9 @@ void * led_status_thread(void * p)
                     esp_restart();
                 }
             } else {
+                if (held_ms > 0 && strip_active) {
+                    led_strip_set_factory_reset(false);
+                }
                 held_ms = 0;
             }
 #endif
@@ -1089,6 +1105,12 @@ void app_main(void)
         ESP_LOGI(TAG, "LED low-active mode enabled");
     }
 
+    // Load addressable LED strip GPIO from NVS (default -1 = disabled)
+    int led_strip_gpio_setting = -1;
+    if (get_config_param_int("ls_gpio", &led_strip_gpio_setting) == ESP_OK) {
+        led_strip_gpio = led_strip_gpio_setting;
+    }
+
 #if defined(CONFIG_IDF_TARGET_ESP32C6)
     // XIAO ESP32-C6 RF switch: GPIO3 enables switch, GPIO14 selects antenna
     int rf_switch_setting = 0;
@@ -1234,6 +1256,9 @@ void app_main(void)
 #else
     wifi_init(mac, ssid, ent_username, ent_identity, passwd, static_ip, subnet_mask, gateway_addr, ap_mac, ap_ssid, ap_passwd, ap_ip);
 #endif
+
+    // Initialise addressable LED strip (if configured)
+    led_strip_status_init();
 
     // Apply TX power setting from NVS (must be after esp_wifi_start)
     int tx_power_dbm = 0;

@@ -38,6 +38,9 @@ extern uint8_t led_lowactive;
 // Shared LED toggle state (packet-driven flicker)
 extern uint8_t led_toggle;
 
+// Addressable LED strip GPIO (-1 = disabled/none)
+extern int led_strip_gpio;
+
 // TTL override for STA upstream (0 = disabled/no change, 1-255 = fixed TTL)
 extern uint8_t sta_ttl_override;
 

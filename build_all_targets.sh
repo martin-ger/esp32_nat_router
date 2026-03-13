@@ -6,7 +6,7 @@
 set -e  # Exit on any error
 
 # Build targets in order
-BUILD_ORDER=("esp32" "wt32_eth01" "esp32s3" "esp32c6" "esp32c3")
+BUILD_ORDER=("esp32" "wt32_eth01" "esp32s3" "esp32c5" "esp32c6" "esp32c3")
 
 # Target descriptions
 declare -A TARGET_DESC=(
@@ -14,6 +14,7 @@ declare -A TARGET_DESC=(
     ["esp32s3"]="ESP32-S3"
     ["esp32c6"]="ESP32-C6"
     ["esp32c3"]="ESP32-C3"
+    ["esp32c5"]="ESP32-C5"
     ["wt32_eth01"]="WT32-ETH01 (Ethernet)"
 )
 
@@ -23,6 +24,7 @@ declare -A TARGET_CHIP=(
     ["esp32s3"]="esp32s3"
     ["esp32c6"]="esp32c6"
     ["esp32c3"]="esp32c3"
+    ["esp32c5"]="esp32c5"
     ["wt32_eth01"]="esp32"
 )
 
