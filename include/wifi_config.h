@@ -44,6 +44,7 @@ extern char* hostname;
 
 extern uint16_t connect_count;
 extern bool ap_connect;
+extern bool wifi_scan_active;
 
 extern uint32_t my_ip;
 extern uint32_t my_ap_ip;

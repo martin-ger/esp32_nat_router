@@ -27,6 +27,8 @@
 //#include "protocol_examples_common.h"
 
 #include <esp_http_server.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 #include "lwip/lwip_napt.h"
 #include "lwip/sockets.h"
@@ -407,6 +409,19 @@ static esp_err_t nvs_import_from_json_robust(const char *json_str)
     return ESP_OK;
 }
 
+/* Resume STA connection attempts if a WiFi scan had suppressed them.
+ * Called from non-scan page handlers so that navigating away from /scan
+ * (or any other page load) restarts the connection process. */
+static inline void resume_sta_if_scan_idle(void)
+{
+    if (wifi_scan_active) {
+        wifi_scan_active = false;
+        if (!ap_connect) {
+            esp_wifi_connect();
+        }
+    }
+}
+
 /* --- Config Export/Import HTTP handlers --- */
 
 static esp_err_t config_export_handler(httpd_req_t *req)
@@ -695,6 +710,7 @@ static const httpd_uri_t favicon_uri = {
 /* Index page GET handler - System Status with navigation */
 static esp_err_t index_get_handler(httpd_req_t *req)
 {
+    resume_sta_if_scan_idle();
     char* buf = NULL;
     size_t buf_len = 0;
     char param[128];
@@ -982,6 +998,7 @@ static httpd_uri_t indexp = {
 /* Router Config page GET handler */
 static esp_err_t config_get_handler(httpd_req_t *req)
 {
+    resume_sta_if_scan_idle();
     /* Check authentication if password protection is enabled */
     bool password_protection_enabled = is_web_password_set();
 
@@ -1611,6 +1628,7 @@ static httpd_uri_t configp = {
 /* Mappings page GET handler (DHCP Reservations + Port Forwarding) - Chunked transfer */
 static esp_err_t mappings_get_handler(httpd_req_t *req)
 {
+    resume_sta_if_scan_idle();
     /* Check authentication if password protection is enabled */
     bool password_protection_enabled = is_web_password_set();
 
@@ -2052,6 +2070,7 @@ static httpd_uri_t mappingsp = {
 /* Firewall (ACL) page GET handler */
 static esp_err_t firewall_get_handler(httpd_req_t *req)
 {
+    resume_sta_if_scan_idle();
     /* Check authentication if password protection is enabled */
     bool password_protection_enabled = is_web_password_set();
 
@@ -2447,11 +2466,16 @@ static esp_err_t scan_get_handler(httpd_req_t *req)
     bool scan_in_progress = false;
     int refresh_time = 15;  /* Default refresh interval */
 
+    /* Suppress STA reconnect attempts while on the scan page */
+    if (!ap_connect) {
+        wifi_scan_active = true;
+    }
+
     /* Try to get existing scan results first */
     esp_err_t err = esp_wifi_scan_get_ap_num(&ap_count);
 
     if (err == ESP_OK && ap_count > 0) {
-        /* We have results from a previous scan */
+        /* We have results from a previous scan — read them */
         if (ap_count > 20) ap_count = 20;
         ap_list = malloc(sizeof(wifi_ap_record_t) * ap_count);
         if (ap_list != NULL) {
@@ -2459,29 +2483,22 @@ static esp_err_t scan_get_handler(httpd_req_t *req)
         } else {
             ap_count = 0;
         }
+    }
 
-        /* Start a new scan in the background for the next refresh */
-        wifi_scan_config_t scan_config = {
-            .ssid = NULL,
-            .bssid = NULL,
-            .channel = 0,
-            .show_hidden = true,
-            .scan_type = WIFI_SCAN_TYPE_ACTIVE,
-        };
-        esp_wifi_scan_start(&scan_config, false);  /* Non-blocking */
-    } else {
-        /* No results available, start a scan */
-        wifi_scan_config_t scan_config = {
-            .ssid = NULL,
-            .bssid = NULL,
-            .channel = 0,
-            .show_hidden = true,
-            .scan_type = WIFI_SCAN_TYPE_ACTIVE,
-        };
-        err = esp_wifi_scan_start(&scan_config, false);  /* Non-blocking */
+    /* Start a (new) background scan for the next refresh */
+    wifi_scan_config_t scan_config = {
+        .ssid = NULL,
+        .bssid = NULL,
+        .channel = 0,
+        .show_hidden = true,
+        .scan_type = WIFI_SCAN_TYPE_ACTIVE,
+    };
+    if (!ap_connect) wifi_scan_active = true;
+    err = esp_wifi_scan_start(&scan_config, false);  /* Non-blocking */
 
+    if (ap_count == 0) {
         if (err == ESP_OK || err == ESP_ERR_WIFI_STATE) {
-            /* Scan started or already in progress */
+            /* No previous results, scan just started */
             scan_in_progress = true;
             refresh_time = 2;  /* Quick refresh to get results */
         }
@@ -2630,6 +2647,7 @@ static httpd_uri_t scanp = {
 /* Getting Started page GET handler */
 static esp_err_t setup_get_handler(httpd_req_t *req)
 {
+    resume_sta_if_scan_idle();
     /* Check authentication if password protection is enabled */
     if (is_web_password_set() && !is_authenticated(req)) {
         { char _ip[16]; ESP_LOGW(TAG, "Unauthenticated access to /setup from %s", get_client_ip(req, _ip, sizeof(_ip))); }
@@ -2743,6 +2761,7 @@ static httpd_uri_t setupp = {
 /* VPN page GET handler */
 static esp_err_t vpn_get_handler(httpd_req_t *req)
 {
+    resume_sta_if_scan_idle();
     /* Check authentication if password protection is enabled */
     bool password_protection_enabled = is_web_password_set();
 

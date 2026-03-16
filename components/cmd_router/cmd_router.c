@@ -3101,28 +3101,48 @@ static int scan_cmd(int argc, char **argv)
         .scan_type = WIFI_SCAN_TYPE_ACTIVE,
     };
 
+    /* Stop connection attempts so they don't interfere with scanning */
+    if (!ap_connect) {
+        wifi_scan_active = true;
+        esp_wifi_disconnect();
+        vTaskDelay(pdMS_TO_TICKS(100));  /* Let disconnect complete */
+    }
+
     printf("Scanning for WiFi networks...\n");
     esp_err_t err = esp_wifi_scan_start(&scan_config, true);  /* Blocking scan */
+
+    /* Read results BEFORE clearing flag or reconnecting, so nothing
+     * can interfere with the scan result buffer. */
+    uint16_t ap_count = 0;
+    wifi_ap_record_t *ap_list = NULL;
+
+    if (err == ESP_OK) {
+        esp_wifi_scan_get_ap_num(&ap_count);
+        if (ap_count > 0) {
+            ap_list = malloc(sizeof(wifi_ap_record_t) * ap_count);
+            if (ap_list != NULL) {
+                esp_wifi_scan_get_ap_records(&ap_count, ap_list);
+            } else {
+                ap_count = 0;
+            }
+        }
+    }
+
+    /* Now safe to resume connection attempts */
+    wifi_scan_active = false;
+    if (!ap_connect) {
+        esp_wifi_connect();
+    }
+
     if (err != ESP_OK) {
         printf("Scan failed: %s\n", esp_err_to_name(err));
         return 1;
     }
 
-    uint16_t ap_count = 0;
-    esp_wifi_scan_get_ap_num(&ap_count);
-
     if (ap_count == 0) {
         printf("No networks found.\n");
         return 0;
     }
-
-    wifi_ap_record_t *ap_list = malloc(sizeof(wifi_ap_record_t) * ap_count);
-    if (ap_list == NULL) {
-        printf("Failed to allocate memory for scan results\n");
-        return 1;
-    }
-
-    esp_wifi_scan_get_ap_records(&ap_count, ap_list);
 
     /* Print header */
     printf("\nFound %d networks:\n", ap_count);

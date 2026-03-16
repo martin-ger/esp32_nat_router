@@ -136,6 +136,7 @@ const int WIFI_CONNECTED_BIT = BIT0;
 /* Global vars */
 uint16_t connect_count = 0;
 bool ap_connect = false;
+bool wifi_scan_active = false;
 bool has_static_ip = false;
 int led_gpio = -1;  // -1 means LED disabled (none)
 uint8_t led_lowactive = 0;  // 0 = active-high (default), 1 = active-low (inverted)
@@ -584,9 +585,23 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
             vpn_disconnect();
         }
         ap_connect = false;
-        sta_connect();
-        ESP_LOGI(TAG, "retry to connect to the AP");
+        if (wifi_scan_active) {
+            ESP_LOGI(TAG, "scan in progress - deferring reconnect");
+        } else {
+            sta_connect();
+            ESP_LOGI(TAG, "retry to connect to the AP");
+        }
         xEventGroupClearBits(wifi_event_group, WIFI_CONNECTED_BIT);
+    }
+    else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_SCAN_DONE)
+    {
+        if (wifi_scan_active) {
+            /* Just clear the flag — don't reconnect here.
+             * Reconnection is handled by the caller (CLI after reading results,
+             * or the disconnect handler once wifi_scan_active is cleared). */
+            wifi_scan_active = false;
+            ESP_LOGI(TAG, "scan complete");
+        }
     }
     else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP)
     {
