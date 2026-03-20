@@ -14,6 +14,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <inttypes.h>
 #include <time.h>
 #include <pthread.h>
 #include "esp_system.h"
@@ -132,6 +133,14 @@ const int WIFI_CONNECTED_BIT = BIT0;
 
 #define DEFAULT_AP_IP "192.168.4.1"
 #define DEFAULT_DNS "8.8.8.8"
+
+#if !CONFIG_ETH_UPLINK
+/* STA reconnect backoff */
+#define STA_RECONNECT_INITIAL_MS  250
+#define STA_RECONNECT_MAX_MS     16000
+static esp_timer_handle_t sta_reconnect_timer;
+static uint32_t sta_reconnect_delay_ms = STA_RECONNECT_INITIAL_MS;
+#endif
 
 /* Global vars */
 uint16_t connect_count = 0;
@@ -569,6 +578,27 @@ static inline void sta_connect(void)
 #endif
 }
 
+static void sta_reconnect_timer_cb(void* arg)
+{
+    ESP_LOGI(TAG, "reconnect backoff expired (%"PRIu32" ms), attempting STA connect", sta_reconnect_delay_ms);
+    sta_connect();
+    /* Double the delay for next time, capped at max */
+    if (sta_reconnect_delay_ms < STA_RECONNECT_MAX_MS) {
+        sta_reconnect_delay_ms *= 2;
+        if (sta_reconnect_delay_ms > STA_RECONNECT_MAX_MS) {
+            sta_reconnect_delay_ms = STA_RECONNECT_MAX_MS;
+        }
+    }
+}
+
+static void sta_schedule_reconnect(void)
+{
+    /* Stop any pending reconnect timer before starting a new one */
+    esp_timer_stop(sta_reconnect_timer);
+    ESP_LOGI(TAG, "scheduling STA reconnect in %"PRIu32" ms", sta_reconnect_delay_ms);
+    esp_timer_start_once(sta_reconnect_timer, (uint64_t)sta_reconnect_delay_ms * 1000);
+}
+
 static void wifi_event_handler(void* arg, esp_event_base_t event_base,
                                 int32_t event_id, void* event_data)
 {
@@ -588,8 +618,7 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
         if (wifi_scan_active) {
             ESP_LOGI(TAG, "scan in progress - deferring reconnect");
         } else {
-            sta_connect();
-            ESP_LOGI(TAG, "retry to connect to the AP");
+            sta_schedule_reconnect();
         }
         xEventGroupClearBits(wifi_event_group, WIFI_CONNECTED_BIT);
     }
@@ -607,6 +636,9 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
     {
         ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
         ESP_LOGI(TAG, "got ip:" IPSTR, IP2STR(&event->ip_info.ip));
+        /* Reset backoff on successful connection */
+        sta_reconnect_delay_ms = STA_RECONNECT_INITIAL_MS;
+        esp_timer_stop(sta_reconnect_timer);
         ap_connect = true;
         my_ip = event->ip_info.ip.addr;
         delete_portmap_tab();
@@ -1265,6 +1297,15 @@ void app_main(void)
         ap_pmtu = 1440;
         ESP_LOGI(TAG, "VPN enabled, MSS=1380 PMTU=1440 pre-set");
     }
+
+#if !CONFIG_ETH_UPLINK
+    /* Create one-shot timer for STA reconnect backoff */
+    const esp_timer_create_args_t reconnect_timer_args = {
+        .callback = sta_reconnect_timer_cb,
+        .name = "sta_reconnect",
+    };
+    ESP_ERROR_CHECK(esp_timer_create(&reconnect_timer_args, &sta_reconnect_timer));
+#endif
 
 #if CONFIG_ETH_UPLINK
     eth_init(static_ip, subnet_mask, gateway_addr, ap_mac, ap_ssid, ap_passwd, ap_ip);

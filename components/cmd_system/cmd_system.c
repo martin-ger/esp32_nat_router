@@ -43,7 +43,7 @@ void load_log_level(void)
     nvs_handle_t nvs;
     esp_err_t err = nvs_open(PARAM_NAMESPACE, NVS_READONLY, &nvs);
     if (err == ESP_OK) {
-        uint8_t level = ESP_LOG_INFO;  // Default
+        uint8_t level = ESP_LOG_WARN;  // Default
         if (nvs_get_u8(nvs, "log_level", &level) == ESP_OK) {
             if (level <= ESP_LOG_VERBOSE) {
                 esp_log_level_set("*", (esp_log_level_t)level);
@@ -451,7 +451,7 @@ static int log_level_cmd(int argc, char **argv)
     if (log_level_args.level->count == 0) {
         // No level specified, show current level and usage
         nvs_handle_t nvs;
-        uint8_t saved_level = ESP_LOG_INFO;
+        uint8_t saved_level = ESP_LOG_WARN;
         if (nvs_open(PARAM_NAMESPACE, NVS_READONLY, &nvs) == ESP_OK) {
             nvs_get_u8(nvs, "log_level", &saved_level);
             nvs_close(nvs);
