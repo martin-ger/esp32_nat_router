@@ -33,7 +33,7 @@
     {
       "chipFamily": "ESP32-C6",
       "parts": [
-        { "path": "firmware_esp32c6/bootloader.bin", "offset": 0 },
+        { "path": "firmware_esp32c6/bootloader.bin", "offset": 8192 },
         { "path": "firmware_esp32c6/partition-table.bin", "offset": 32768 },
         { "path": "firmware_esp32c6/ota_data_initial.bin", "offset": 61440 },
         { "path": "firmware_esp32c6/esp32_nat_router.bin", "offset": 131072 }
