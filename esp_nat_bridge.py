@@ -437,6 +437,25 @@ async def set_ap_hidden(hidden: bool) -> str:
     return await _cmd(f"set_ap_hidden {'on' if hidden else 'off'}")
 
 
+@mcp.tool()
+async def set_ap_enabled(enabled: bool) -> str:
+    """Enable or disable the WiFi hotspot (AP interface) immediately, without a reboot.
+
+    When disabled, clients can no longer connect to the router's hotspot.
+    The setting is persisted and survives restarts.
+
+    Args:
+        enabled: True to enable the hotspot, False to disable it.
+    """
+    return await _cmd(f"ap {'enable' if enabled else 'disable'}")
+
+
+@mcp.tool()
+async def get_ap_status() -> str:
+    """Get the current enabled/disabled state of the WiFi hotspot (AP interface)."""
+    return await _cmd("ap")
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # DHCP RESERVATIONS
 # ═══════════════════════════════════════════════════════════════════════════

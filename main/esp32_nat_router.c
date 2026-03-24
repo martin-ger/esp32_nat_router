@@ -158,6 +158,7 @@ struct portmap_table_entry portmap_tab[IP_PORTMAP_MAX];
 struct dhcp_reservation_entry dhcp_reservations[MAX_DHCP_RESERVATIONS];
 
 esp_netif_t* wifiAP;
+bool ap_disabled = false;
 #if CONFIG_ETH_UPLINK
 esp_netif_t* ethNetif = NULL;
 esp_eth_handle_t eth_handle = NULL;
@@ -731,6 +732,29 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
 const int CONNECTED_BIT = BIT0;
 #define JOIN_TIMEOUT_MS (2000)
 
+void ap_set_enabled(bool enabled)
+{
+#if CONFIG_ETH_UPLINK
+    if (enabled) {
+        esp_wifi_start();
+        ip_napt_enable(my_ap_ip, 1);
+    } else {
+        connect_count = 0;
+        esp_wifi_stop();
+    }
+#else
+    if (enabled) {
+        esp_wifi_set_mode(WIFI_MODE_APSTA);
+        ip_napt_enable(my_ap_ip, 1);
+    } else {
+        connect_count = 0;
+        esp_wifi_set_mode(WIFI_MODE_STA);
+    }
+#endif
+    ap_disabled = !enabled;
+    set_config_param_int("ap_disabled", ap_disabled ? 1 : 0);
+    ESP_LOGI(TAG, "AP interface %s", enabled ? "enabled" : "disabled");
+}
 
 static wifi_auth_mode_t get_ap_authmode(void)
 {
@@ -854,7 +878,11 @@ void eth_init(const char* static_ip, const char* subnet_mask, const char* gatewa
     dnsserver.ip.type = ESP_IPADDR_TYPE_V4;
     esp_netif_set_dns_info(wifiAP, ESP_NETIF_DNS_MAIN, &dnsserver);
 
-    ESP_ERROR_CHECK(esp_wifi_start());
+    if (!ap_disabled) {
+        ESP_ERROR_CHECK(esp_wifi_start());
+    } else {
+        ESP_LOGI(TAG, "AP interface disabled at boot");
+    }
     ESP_ERROR_CHECK(esp_eth_start(eth_handle));
 
     ESP_LOGI(TAG, "Ethernet-to-WiFi NAT Router initialized");
@@ -934,7 +962,7 @@ void wifi_init(const uint8_t* mac, const char* ssid, const char* ent_username, c
     }
 
     // Always use APSTA mode so WiFi scanning works even without an uplink configured
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA) );
+    ESP_ERROR_CHECK(esp_wifi_set_mode(ap_disabled ? WIFI_MODE_STA : WIFI_MODE_APSTA));
 
     if (strlen(ssid) > 0) {
         //Set SSID
@@ -980,10 +1008,11 @@ void wifi_init(const uint8_t* mac, const char* ssid, const char* ent_username, c
         }
     }
 
-    ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &ap_config) );
-
-    if (ap_mac != NULL) {
-        ESP_ERROR_CHECK(esp_wifi_set_mac(ESP_IF_WIFI_AP, ap_mac));
+    if (!ap_disabled) {
+        ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &ap_config));
+        if (ap_mac != NULL) {
+            ESP_ERROR_CHECK(esp_wifi_set_mac(ESP_IF_WIFI_AP, ap_mac));
+        }
     }
 
 
@@ -1185,6 +1214,15 @@ void app_main(void)
         ESP_LOGI(TAG, "TTL override enabled: %d", sta_ttl_override);
     }
 
+    // Load AP disabled setting from NVS (default 0 = enabled)
+    int ap_disabled_setting = 0;
+    if (get_config_param_int("ap_disabled", &ap_disabled_setting) == ESP_OK) {
+        ap_disabled = (ap_disabled_setting != 0);
+    }
+    if (ap_disabled) {
+        ESP_LOGI(TAG, "AP interface disabled (NVS)");
+    }
+
     // Load AP SSID hidden setting from NVS (default 0 = visible)
     int hidden_setting = 0;
     if (get_config_param_int("ap_hidden", &hidden_setting) == ESP_OK) {
@@ -1333,8 +1371,10 @@ void app_main(void)
     pthread_t t1;
     pthread_create(&t1, NULL, led_status_thread, NULL);
 
-    ip_napt_enable(my_ap_ip, 1);
-    ESP_LOGI(TAG, "NAT is enabled");
+    if (!ap_disabled) {
+        ip_napt_enable(my_ap_ip, 1);
+        ESP_LOGI(TAG, "NAT is enabled");
+    }
 
     char* web_disabled = NULL;
     get_config_param_str("web_disabled", &web_disabled);

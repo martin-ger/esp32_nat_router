@@ -48,6 +48,7 @@ static const char *TAG = "mqtt_ha";
 #define TOPIC_CMD_RESTART  TOPIC_PREFIX "/command/restart"
 #define TOPIC_CMD_WEBUI    TOPIC_PREFIX "/command/web_ui"
 #define TOPIC_CMD_RC       TOPIC_PREFIX "/command/remote_console"
+#define TOPIC_CMD_AP       TOPIC_PREFIX "/command/ap"
 #define TOPIC_CLIENTS      TOPIC_PREFIX "/clients/"
 
 /* ---------- Config limits ---------- */
@@ -320,6 +321,20 @@ static void publish_discovery(void)
         "%s}", s_device_id, dev);
     esp_mqtt_client_publish(s_client, topic, payload, 0, 1, 1);
 
+    /* switch: AP Interface */
+    snprintf(topic, sizeof(topic),
+        "homeassistant/switch/%s/ap/config", s_device_id);
+    snprintf(payload, sizeof(payload),
+        "{\"name\":\"AP Interface\","
+        "\"uniq_id\":\"%s_ap\","
+        "\"stat_t\":\"" TOPIC_STATE "\","
+        "\"val_tpl\":\"{{value_json.ap_enabled}}\","
+        "\"cmd_t\":\"" TOPIC_CMD_AP "\","
+        "\"ic\":\"mdi:access-point\","
+        "\"avty_t\":\"" TOPIC_AVAILABILITY "\","
+        "%s}", s_device_id, dev);
+    esp_mqtt_client_publish(s_client, topic, payload, 0, 1, 1);
+
     /* --- Per-client entities (DHCP reservations only) --- */
     for (int i = 0; i < MAX_DHCP_RESERVATIONS; i++) {
         if (!dhcp_reservations[i].valid) continue;
@@ -433,7 +448,8 @@ static void publish_state(void *arg)
         "\"bytes_tx\":%" PRIu64 ",\"bytes_rx\":%" PRIu64 ","
         "\"free_heap\":%" PRIu32 ",\"uptime\":%" PRIu32 ","
         "\"rssi\":%d,\"ssid\":\"%s\","
-        "\"web_ui\":\"%s\",\"remote_console\":\"%s\"}",
+        "\"web_ui\":\"%s\",\"remote_console\":\"%s\","
+        "\"ap_enabled\":\"%s\"}",
         ap_connect ? "ON" : "OFF",
         connect_count,
         get_sta_bytes_sent(),
@@ -442,7 +458,8 @@ static void publish_state(void *arg)
         get_uptime_seconds(),
         rssi, uplink_ssid,
         is_web_ui_enabled() ? "ON" : "OFF",
-        remote_console_is_enabled() ? "ON" : "OFF");
+        remote_console_is_enabled() ? "ON" : "OFF",
+        ap_disabled ? "OFF" : "ON");
     esp_mqtt_client_publish(s_client, TOPIC_STATE, payload, 0, 0, 1);
 
     /* Get AP station list for per-client RSSI */
@@ -511,6 +528,7 @@ static void mqtt_event_handler(void *arg, esp_event_base_t base,
         esp_mqtt_client_subscribe(s_client, TOPIC_CMD_RESTART, 1);
         esp_mqtt_client_subscribe(s_client, TOPIC_CMD_WEBUI, 1);
         esp_mqtt_client_subscribe(s_client, TOPIC_CMD_RC, 1);
+        esp_mqtt_client_subscribe(s_client, TOPIC_CMD_AP, 1);
         /* Publish HA discovery */
         publish_discovery();
         /* Publish initial state */
@@ -548,6 +566,14 @@ static void mqtt_event_handler(void *arg, esp_event_base_t base,
                 } else {
                     remote_console_disable();
                 }
+                publish_state(NULL);
+            }
+            if (event->topic_len == (int)strlen(TOPIC_CMD_AP) &&
+                memcmp(event->topic, TOPIC_CMD_AP, event->topic_len) == 0) {
+                bool on = (event->data_len >= 2 &&
+                           strncasecmp(event->data, "ON", 2) == 0);
+                ESP_LOGI(TAG, "AP interface %s via MQTT", on ? "enabled" : "disabled");
+                ap_set_enabled(on);
                 publish_state(NULL);
             }
         }

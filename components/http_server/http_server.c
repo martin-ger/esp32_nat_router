@@ -809,23 +809,27 @@ static esp_err_t index_get_handler(httpd_req_t *req)
     /* Open status table */
     httpd_resp_send_chunk(req, INDEX_CHUNK_STATUS_OPEN, HTTPD_RESP_USE_STRLEN);
 
-    /* Stream SSID row */
-    char* safe_ap_ssid = html_escape(ap_ssid);
-    if (safe_ap_ssid == NULL) safe_ap_ssid = strdup("(unknown)");
-    snprintf(row, sizeof(row), "<tr><td>SSID:</td><td><strong>%s</strong></td></tr>", safe_ap_ssid);
-    httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
-    free(safe_ap_ssid);
+    /* Stream AP status rows */
+    if (ap_disabled) {
+        httpd_resp_send_chunk(req,
+            "<tr><td>AP Interface:</td><td><strong style='color:#ff5252;'>Disabled</strong></td></tr>",
+            HTTPD_RESP_USE_STRLEN);
+    } else {
+        char* safe_ap_ssid = html_escape(ap_ssid);
+        if (safe_ap_ssid == NULL) safe_ap_ssid = strdup("(unknown)");
+        snprintf(row, sizeof(row), "<tr><td>SSID:</td><td><strong>%s</strong></td></tr>", safe_ap_ssid);
+        httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
+        free(safe_ap_ssid);
 
-    /* Stream AP IP row */
-    esp_ip4_addr_t ap_addr;
-    ap_addr.addr = my_ap_ip;
-    snprintf(row, sizeof(row), "<tr><td>AP IP:</td><td>" IPSTR "</td></tr>", IP2STR(&ap_addr));
-    httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
+        esp_ip4_addr_t ap_addr;
+        ap_addr.addr = my_ap_ip;
+        snprintf(row, sizeof(row), "<tr><td>AP IP:</td><td>" IPSTR "</td></tr>", IP2STR(&ap_addr));
+        httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
 
-    /* Stream AP Clients row */
-    resync_connect_count();
-    snprintf(row, sizeof(row), "<tr><td>AP Clients:</td><td>%d</td></tr>", connect_count);
-    httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
+        resync_connect_count();
+        snprintf(row, sizeof(row), "<tr><td>AP Clients:</td><td>%d</td></tr>", connect_count);
+        httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
+    }
 
     /* Stream Uplink row */
 #if CONFIG_ETH_UPLINK
@@ -1112,6 +1116,15 @@ static esp_err_t config_get_handler(httpd_req_t *req)
                             }
                             set_ap_mac(7, mac_argv);
                         }
+                    }
+
+                    // Handle AP enabled/disabled setting
+                    // Checkbox sends value only when checked, so absence means "disabled"
+                    {
+                        bool ap_en = (httpd_query_key_value(buf, "ap_enabled", param5, sizeof(param5)) == ESP_OK);
+                        set_config_param_int("ap_disabled", ap_en ? 0 : 1);
+                        ap_disabled = !ap_en;
+                        ESP_LOGI(TAG, "AP interface %s", ap_en ? "enabled" : "disabled");
                     }
 
                     // Handle AP hidden SSID setting
@@ -1447,6 +1460,7 @@ static esp_err_t config_get_handler(httpd_req_t *req)
     remote_console_get_config(&rc_config);
     remote_console_get_status(&rc_status);
 
+    const char* ap_en_checked = ap_disabled ? "" : "checked";
     const char* ap_open_checked = (strlen(ap_passwd) == 0) ? "checked" : "";
     const char* ap_hidden_checked = ap_ssid_hidden ? "checked" : "";
     const char* rc_enabled_checked = rc_config.enabled ? "checked" : "";
@@ -1527,7 +1541,7 @@ static esp_err_t config_get_handler(httpd_req_t *req)
         (int)ap_channel,
 #endif
         auth_sel0, auth_sel1, auth_sel2,
-        ap_open_checked, ap_hidden_checked);
+        ap_en_checked, ap_open_checked, ap_hidden_checked);
     httpd_resp_send_chunk(req, section, HTTPD_RESP_USE_STRLEN);
 
 #if CONFIG_ETH_UPLINK

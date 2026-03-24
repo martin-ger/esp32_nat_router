@@ -64,6 +64,7 @@ static void register_set_ap(void);
 static void register_set_ap_ip(void);
 static void register_set_ap_hidden(void);
 static void register_set_ap_auth(void);
+static void register_ap(void);
 #if CONFIG_ETH_UPLINK
 static void register_set_ap_channel(void);
 #endif
@@ -299,6 +300,7 @@ void register_router(void)
     register_set_tx_power();
     register_set_ap_hidden();
     register_set_ap_auth();
+    register_ap();
 #if CONFIG_ETH_UPLINK
     register_set_ap_channel();
 #endif
@@ -1280,6 +1282,9 @@ static int show(int argc, char **argv)
 
         // Free heap
         printf("Free heap: %lu bytes\n", (unsigned long)esp_get_free_heap_size());
+
+        // AP interface state
+        printf("AP interface: %s\n", ap_disabled ? "disabled" : "enabled");
 
         // Connected clients
         resync_connect_count();
@@ -2323,6 +2328,62 @@ static void register_set_ap_channel(void)
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }
 #endif
+
+/* 'ap' command - enable/disable AP interface dynamically */
+static int ap_cmd(int argc, char **argv)
+{
+    if (argc < 2) {
+        wifi_mode_t mode = WIFI_MODE_NULL;
+        esp_wifi_get_mode(&mode);
+#if CONFIG_ETH_UPLINK
+        bool running = (mode == WIFI_MODE_AP);
+#else
+        bool running = (mode == WIFI_MODE_APSTA || mode == WIFI_MODE_AP);
+#endif
+        printf("AP interface: %s\n", running ? "enabled" : "disabled");
+        printf("  (NVS setting: %s)\n", ap_disabled ? "disabled" : "enabled");
+        printf("\nUsage:\n");
+        printf("  ap enable   - Enable AP interface immediately\n");
+        printf("  ap disable  - Disable AP interface immediately\n");
+        return 0;
+    }
+
+    const char *action = argv[1];
+    if (strcmp(action, "enable") == 0) {
+        if (!ap_disabled) {
+            printf("AP interface is already enabled.\n");
+            return 0;
+        }
+        ap_set_enabled(true);
+        printf("AP interface enabled.\n");
+    } else if (strcmp(action, "disable") == 0) {
+        if (ap_disabled) {
+            printf("AP interface is already disabled.\n");
+            return 0;
+        }
+        ap_set_enabled(false);
+        printf("AP interface disabled.\n");
+    } else {
+        printf("Unknown action: %s\n", action);
+        printf("Usage: ap <enable|disable>\n");
+        return 1;
+    }
+    return 0;
+}
+
+static void register_ap(void)
+{
+    const esp_console_cmd_t cmd = {
+        .command = "ap",
+        .help = "Enable or disable the AP interface\n"
+                "  ap          - Show current AP status\n"
+                "  ap enable   - Enable AP interface\n"
+                "  ap disable  - Disable AP interface",
+        .hint = " <enable|disable>",
+        .func = &ap_cmd,
+    };
+    ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
+}
 
 #if WIFI_HAS_5GHZ
 /* 'set_sta_band' command - set STA band preference (5 GHz capable targets) */

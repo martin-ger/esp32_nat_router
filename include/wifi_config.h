@@ -78,6 +78,12 @@ int set_ap(int argc, char **argv);
 int set_ap_mac(int argc, char **argv);
 int set_ap_ip(int argc, char **argv);
 
+// AP disable flag (persisted in NVS as "ap_disabled")
+extern bool ap_disabled;
+
+// Dynamically enable or disable the AP interface (persists to NVS)
+void ap_set_enabled(bool enabled);
+
 esp_err_t get_config_param_blob(char* name, uint8_t** blob, size_t blob_len);
 esp_err_t get_config_param_int(char* name, int* param);
 esp_err_t get_config_param_str(char* name, char** param);
