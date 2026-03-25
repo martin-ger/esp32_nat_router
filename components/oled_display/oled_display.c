@@ -56,9 +56,14 @@ static const char *TAG = "oled";
 #define OLED_COL_OFFSET   28
 #endif
 #define FB_SIZE           (OLED_WIDTH * OLED_PAGES)
-/* define display pages */
+/* display page rotation */
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
 #define OLED_PAGE_COUNT     2
 #define OLED_PAGE_INTERVAL  5000  /* ms per page */
+#else
+#define OLED_PAGE_COUNT     1
+#define OLED_PAGE_INTERVAL  2000  /* ms per page */
+#endif
 /* Character dimensions */
 #define CHAR_W  6  /* 5 pixel glyph + 1 pixel spacing */
 #define MAX_COLS (OLED_WIDTH / CHAR_W)
@@ -443,11 +448,7 @@ static int gpio_pins[2];
 
 void oled_display_init(void)
 {
-#if defined(CONFIG_IDF_TARGET_ESP32S3)
     bool enabled = false;
-#else
-    bool enabled = false;
-#endif
     int sda = OLED_DEFAULT_SDA;
     int scl = OLED_DEFAULT_SCL;
 
@@ -500,11 +501,7 @@ void oled_display_get_config(bool *enabled, int *sda, int *scl)
     nvs_handle_t nvs;
     int32_t val;
 
-    #if defined(CONFIG_IDF_TARGET_ESP32S3)
-    *enabled = true;
-#else
     *enabled = false;
-#endif
     *sda = OLED_DEFAULT_SDA;
     *scl = OLED_DEFAULT_SCL;
 
