@@ -257,39 +257,41 @@ static void render_status(int page)
 #if defined(CONFIG_IDF_TARGET_ESP32S3)
 
     if (page == 0) {
-        /* Page 1: SSIDs */
-        fb_draw_string_2x(0, "AP SSID");
-        fb_draw_string_2x(1, (ap_ssid != NULL && ap_ssid[0] != '\0') ? ap_ssid : "NO AP");
+        /* Page 1: SSIDs with big labels and normal values */
+        fb_draw_string_2x(0, "AP");
+        fb_draw_string(2, (ap_ssid != NULL && ap_ssid[0] != '\0') ? ap_ssid : "NO AP");
 
-        fb_draw_string_2x(2, "UPLINK");
-        fb_draw_string_2x(3, (ssid != NULL && ssid[0] != '\0') ? ssid : "NO UPLINK");
+        fb_draw_string_2x(2, "UP");
+        fb_draw_string(6, (ssid != NULL && ssid[0] != '\0') ? ssid : "NO UPLINK");
+
+        fb_draw_string(7, "Page 1/2");
     } else {
-        /* Page 2: addresses / status */
-        fb_draw_string_2x(0, "ADDRS");
-
+        /* Page 2: IPs with big labels and normal values */
+        fb_draw_string_2x(0, "AP IP");
         format_ip(ipbuf, sizeof(ipbuf), my_ap_ip);
-        fb_draw_string_2x(1, ipbuf);
+        fb_draw_string(2, ipbuf);
 
+        fb_draw_string_2x(2, "STA IP");
         if (ap_connect) {
             format_ip(ipbuf, sizeof(ipbuf), my_ip);
-            fb_draw_string_2x(2, ipbuf);
+            fb_draw_string(6, ipbuf);
 
             wifi_ap_record_t ap_info;
             if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
-                snprintf(line, sizeof(line), "%ddB C:%u", ap_info.rssi, (unsigned)connect_count);
+                snprintf(line, sizeof(line), "%ddB C:%u  2/2", ap_info.rssi, (unsigned)connect_count);
             } else {
-                snprintf(line, sizeof(line), "UP C:%u", (unsigned)connect_count);
+                snprintf(line, sizeof(line), "UP C:%u  2/2", (unsigned)connect_count);
             }
-            fb_draw_string_2x(3, line);
         } else {
-            fb_draw_string_2x(2, "DOWN");
-            snprintf(line, sizeof(line), "C:%u", (unsigned)connect_count);
-            fb_draw_string_2x(3, line);
+            fb_draw_string(6, "DOWN");
+            snprintf(line, sizeof(line), "C:%u  2/2", (unsigned)connect_count);
         }
+
+        fb_draw_string(7, line);
     }
 
 #else
-    /* Keep the existing compact layout on C3 */
+    /* Keep the original compact layout on C3 */
     fb_draw_string(0, ap_ssid != NULL ? ap_ssid : "NO AP");
 
     if (ap_connect) {
