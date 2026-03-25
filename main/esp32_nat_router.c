@@ -1398,7 +1398,7 @@ void app_main(void)
     // Initialize syslog client (UDP forwarding, disabled by default)
     syslog_init();
 
-    // Initialize OLED display (disabled by default, enable via 'set_oled enable')
+    // Initialize OLED display (ESP32-S3 defaults to enabled on GPIO17/18)
     oled_display_init();
 
     initialize_console();

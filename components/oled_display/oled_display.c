@@ -1,13 +1,12 @@
-/* OLED Display driver for SSD1306 72x40 (0.42") over I2C
+/* OLED Display driver for SSD1306 over I2C
  *
- * Shows router status: AP SSID, STA connection, IPs, client count.
- * Disabled by default, configured via CLI with NVS persistence.
- * Only compiled for ESP32-C3 targets.
+ * ESP32-C3 build: 72x40 SSD1306 (0.42") on GPIO 5/6, disabled by default.
+ * ESP32-S3 build: 128x64 SSD1306 on GPIO 17/18, disabled by default.
  */
 
 #include "oled_display.h"
 
-#ifdef CONFIG_IDF_TARGET_ESP32C3
+#if defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32S3)
 
 #include <string.h>
 #include <stdio.h>
@@ -17,6 +16,7 @@
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "driver/i2c_master.h"
+#include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_netif_ip_addr.h"
@@ -27,6 +27,8 @@
 extern bool ap_connect;
 extern uint16_t connect_count;
 extern uint32_t my_ip;
+extern uint32_t my_ap_ip;
+extern char *ssid;
 extern char *ap_ssid;
 extern uint64_t sta_bytes_sent;
 extern uint64_t sta_bytes_received;
@@ -37,17 +39,42 @@ static const char *TAG = "oled";
 
 #define PARAM_NAMESPACE "esp32_nat"
 
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+/* SSD1306 128x64 display parameters (Heltec WiFi LoRa 32 V3) */
+#define OLED_WIDTH        128
+#define OLED_HEIGHT       64
+#define OLED_PAGES        8
+#define OLED_COL_OFFSET   0
+/* Heltec WiFi LoRa 32 V3 control pins */
+#define HELTEC_VEXT_GPIO      GPIO_NUM_36
+#define HELTEC_OLED_RST_GPIO  GPIO_NUM_21
+#else
 /* SSD1306 72x40 display parameters */
 #define OLED_WIDTH        72
 #define OLED_HEIGHT       40
-#define OLED_PAGES        5   /* 40 / 8 = 5 */
-#define OLED_COL_OFFSET   28  /* 72x40 panels start at column 28 */
-#define FB_SIZE           (OLED_WIDTH * OLED_PAGES)  /* 360 bytes */
-
+#define OLED_PAGES        5
+#define OLED_COL_OFFSET   28
+#endif
+#define FB_SIZE           (OLED_WIDTH * OLED_PAGES)
+/* display page rotation */
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+#define OLED_PAGE_COUNT     2
+#define OLED_PAGE_INTERVAL  5000  /* ms per page */
+#else
+#define OLED_PAGE_COUNT     1
+#define OLED_PAGE_INTERVAL  2000  /* ms per page */
+#endif
 /* Character dimensions */
 #define CHAR_W  6  /* 5 pixel glyph + 1 pixel spacing */
-#define CHAR_H  8  /* one page */
-#define MAX_COLS (OLED_WIDTH / CHAR_W)  /* 12 chars per line */
+#define MAX_COLS (OLED_WIDTH / CHAR_W)
+
+/* Set larger font for ESP32S3 */
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+#define BIG_CHAR_W   11   /* 10 px glyph + 1 px spacing */
+#define BIG_CHAR_H   16   /* 14 px glyph + 2 px spacing */
+#define BIG_MAX_COLS (OLED_WIDTH / BIG_CHAR_W)
+#define BIG_MAX_ROWS (OLED_HEIGHT / BIG_CHAR_H)
+#endif
 
 /* Static framebuffer */
 static uint8_t framebuffer[FB_SIZE];
@@ -61,6 +88,16 @@ static i2c_master_dev_handle_t i2c_dev = NULL;
 static void fb_clear(void)
 {
     memset(framebuffer, 0, FB_SIZE);
+}
+
+static void fb_set_pixel(int x, int y)
+{
+    if (x < 0 || x >= OLED_WIDTH || y < 0 || y >= OLED_HEIGHT)
+        return;
+
+    int page = y / 8;
+    int bit  = y % 8;
+    framebuffer[page * OLED_WIDTH + x] |= (1 << bit);
 }
 
 static void fb_draw_char(int col, int page, char c)
@@ -84,6 +121,43 @@ static void fb_draw_string(int page, const char *str)
     }
 }
 
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+static void fb_draw_char_2x(int x, int y, char c)
+{
+    if (c < 0x20 || c > 0x7E)
+        c = '?';
+
+    const uint8_t *glyph = &font5x7[(c - 0x20) * 5];
+
+    for (int gx = 0; gx < 5; gx++) {
+        uint8_t col_bits = glyph[gx];
+
+        for (int gy = 0; gy < 7; gy++) {
+            if (col_bits & (1 << gy)) {
+                int px = x + gx * 2;
+                int py = y + gy * 2;
+
+                fb_set_pixel(px,     py);
+                fb_set_pixel(px + 1, py);
+                fb_set_pixel(px,     py + 1);
+                fb_set_pixel(px + 1, py + 1);
+            }
+        }
+    }
+}
+
+static void fb_draw_string_2x(int row, const char *str)
+{
+    int x = 0;
+    int y = row * BIG_CHAR_H;
+
+    for (int i = 0; str[i] && i < BIG_MAX_COLS; i++) {
+        fb_draw_char_2x(x, y, str[i]);
+        x += BIG_CHAR_W;
+    }
+}
+#endif
+
 /* ---- I2C / SSD1306 low-level ---- */
 
 static esp_err_t oled_cmd(uint8_t cmd)
@@ -94,6 +168,27 @@ static esp_err_t oled_cmd(uint8_t cmd)
 
 static esp_err_t oled_init_display(void)
 {
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+    /* SSD1306 init sequence for 128x64 */
+    static const uint8_t init_cmds[] = {
+        0xAE,       /* Display off */
+        0xD5, 0x80, /* Clock divide ratio */
+        0xA8, 0x3F, /* Multiplex ratio = 63 (64 rows) */
+        0xD3, 0x00, /* Display offset = 0 */
+        0x40,       /* Start line = 0 */
+        0x8D, 0x14, /* Charge pump enable */
+        0x20, 0x00, /* Horizontal addressing mode */
+        0xA1,       /* Segment remap */
+        0xC8,       /* COM scan descending */
+        0xDA, 0x12, /* COM pins config for 128x64 */
+        0x81, 0xCF, /* Contrast */
+        0xD9, 0xF1, /* Pre-charge period */
+        0xDB, 0x40, /* VCOMH deselect level */
+        0xA4,       /* Display from RAM */
+        0xA6,       /* Normal display */
+        0xAF,       /* Display on */
+    };
+#else
     /* SSD1306 init sequence for 72x40 */
     static const uint8_t init_cmds[] = {
         0xAE,       /* Display off */
@@ -113,6 +208,7 @@ static esp_err_t oled_init_display(void)
         0xA6,       /* Normal display (not inverted) */
         0xAF,       /* Display on */
     };
+#endif
 
     for (size_t i = 0; i < sizeof(init_cmds); i++) {
         esp_err_t err = oled_cmd(init_cmds[i]);
@@ -141,18 +237,68 @@ static esp_err_t oled_flush(void)
     return i2c_master_transmit(i2c_dev, tx_buf, sizeof(tx_buf), 200);
 }
 
+/* format pages */
+static void format_ip(char *out, size_t out_sz, uint32_t ip)
+{
+    if (ip == 0) {
+        snprintf(out, out_sz, "No IP");
+        return;
+    }
+
+    ip4_addr_t addr;
+    addr.addr = ip;
+    snprintf(out, out_sz, IPSTR, IP2STR(&addr));
+}
+
 /* ---- Status rendering ---- */
 
-static void render_status(void)
+static void render_status(int page)
 {
-    char line[20];  /* sized for IP and status formatting, truncated by fb_draw_string */
+    char line[24];
+    char ipbuf[20];
 
     fb_clear();
 
-    /* Line 0: AP SSID (truncated by fb_draw_string) */
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+
+    if (page == 0) {
+        /* Page 1: SSIDs with big labels and normal values */
+        fb_draw_string_2x(0, "AP");
+        fb_draw_string(2, (ap_ssid != NULL && ap_ssid[0] != '\0') ? ap_ssid : "NO AP");
+
+        fb_draw_string_2x(2, "UP");
+        fb_draw_string(6, (ssid != NULL && ssid[0] != '\0') ? ssid : "NO UPLINK");
+
+        fb_draw_string(7, "Page 1/2");
+    } else {
+        /* Page 2: IPs with big labels and normal values */
+        fb_draw_string_2x(0, "AP IP");
+        format_ip(ipbuf, sizeof(ipbuf), my_ap_ip);
+        fb_draw_string(2, ipbuf);
+
+        fb_draw_string_2x(2, "STA IP");
+        if (ap_connect) {
+            format_ip(ipbuf, sizeof(ipbuf), my_ip);
+            fb_draw_string(6, ipbuf);
+
+            wifi_ap_record_t ap_info;
+            if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+                snprintf(line, sizeof(line), "%ddB C:%u  2/2", ap_info.rssi, (unsigned)connect_count);
+            } else {
+                snprintf(line, sizeof(line), "UP C:%u  2/2", (unsigned)connect_count);
+            }
+        } else {
+            fb_draw_string(6, "DOWN");
+            snprintf(line, sizeof(line), "C:%u  2/2", (unsigned)connect_count);
+        }
+
+        fb_draw_string(7, line);
+    }
+
+#else
+    /* Keep the original compact layout on C3 */
     fb_draw_string(0, ap_ssid != NULL ? ap_ssid : "NO AP");
 
-    /* Line 1: STA status with RSSI */
     if (ap_connect) {
         const char *status = vpn_is_connected() ? "VPN" : "UP";
         wifi_ap_record_t ap_info;
@@ -166,7 +312,6 @@ static void render_status(void)
         fb_draw_string(1, "DOWN");
     }
 
-    /* Line 2: STA IP (truncated from front if too long for display) */
     if (ap_connect && my_ip != 0) {
         ip4_addr_t addr;
         addr.addr = my_ip;
@@ -177,23 +322,48 @@ static void render_status(void)
         fb_draw_string(2, "No IP");
     }
 
-    /* Line 3: Client count */
     snprintf(line, sizeof(line), "Clients: %d", connect_count);
     fb_draw_string(3, line);
 
-    /* Line 4: Sent/Received MB */
     snprintf(line, sizeof(line), "%.1f/%.1f MB",
              sta_bytes_sent / (1024.0 * 1024.0),
              sta_bytes_received / (1024.0 * 1024.0));
     fb_draw_string(4, line);
+#endif
 }
 
 /* ---- FreeRTOS task ---- */
+
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+static void heltec_oled_power_and_reset(void)
+{
+    /* Turn on Vext: LOW = ON */
+    gpio_reset_pin(HELTEC_VEXT_GPIO);
+    gpio_set_direction(HELTEC_VEXT_GPIO, GPIO_MODE_OUTPUT);
+    gpio_set_level(HELTEC_VEXT_GPIO, 0);
+    vTaskDelay(pdMS_TO_TICKS(50));
+
+    /* Reset OLED */
+    gpio_reset_pin(HELTEC_OLED_RST_GPIO);
+    gpio_set_direction(HELTEC_OLED_RST_GPIO, GPIO_MODE_OUTPUT);
+
+    gpio_set_level(HELTEC_OLED_RST_GPIO, 1);
+    vTaskDelay(pdMS_TO_TICKS(5));
+    gpio_set_level(HELTEC_OLED_RST_GPIO, 0);
+    vTaskDelay(pdMS_TO_TICKS(20));
+    gpio_set_level(HELTEC_OLED_RST_GPIO, 1);
+    vTaskDelay(pdMS_TO_TICKS(50));
+}
+#endif
 
 static void oled_task(void *arg)
 {
     int sda = ((int *)arg)[0];
     int scl = ((int *)arg)[1];
+
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+    heltec_oled_power_and_reset();
+#endif
 
     /* Configure I2C master bus */
     i2c_master_bus_config_t bus_cfg = {
@@ -236,21 +406,27 @@ static void oled_task(void *arg)
         return;
     }
 
-    ESP_LOGI(TAG, "OLED 72x40 running on SDA=%d SCL=%d", sda, scl);
+    ESP_LOGI(TAG, "OLED %dx%d running on SDA=%d SCL=%d", OLED_WIDTH, OLED_HEIGHT, sda, scl);
 
     int resync_counter = 0;
+    int current_page = 0;
+
     while (true) {
         if (++resync_counter >= 30) {
             resync_connect_count();
             resync_counter = 0;
         }
-        render_status();
+
+        render_status(current_page);
+
         err = oled_flush();
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "OLED write failed: %s - stopping", esp_err_to_name(err));
             break;
         }
-        vTaskDelay(pdMS_TO_TICKS(2000));
+
+        current_page = (current_page + 1) % OLED_PAGE_COUNT;
+        vTaskDelay(pdMS_TO_TICKS(OLED_PAGE_INTERVAL));
     }
 
     /* Cleanup on failure */
@@ -342,4 +518,4 @@ void oled_display_get_config(bool *enabled, int *sda, int *scl)
     nvs_close(nvs);
 }
 
-#endif /* CONFIG_IDF_TARGET_ESP32C3 */
+#endif /* CONFIG_IDF_TARGET_ESP32C3 || CONFIG_IDF_TARGET_ESP32S3 */

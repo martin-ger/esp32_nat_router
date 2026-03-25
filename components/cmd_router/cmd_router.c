@@ -87,7 +87,7 @@ static void register_set_rf_switch(void);
 static void register_acl(void);
 static void register_remote_console_cmd(void);
 static void register_syslog_cmd(void);
-#ifdef CONFIG_IDF_TARGET_ESP32C3
+#if defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32S3)
 static void register_set_oled(void);
 static void register_set_oled_gpio(void);
 #endif
@@ -315,7 +315,7 @@ void register_router(void)
     register_syslog_cmd();
     register_set_tz();
     register_set_vpn();
-#ifdef CONFIG_IDF_TARGET_ESP32C3
+#if defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32S3)
     register_set_oled();
     register_set_oled_gpio();
 #endif
@@ -3042,7 +3042,7 @@ static void register_set_tz(void)
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }
 
-#ifdef CONFIG_IDF_TARGET_ESP32C3
+#if defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32S3)
 
 /* 'set_oled' command - enable/disable OLED display */
 static int set_oled_cmd(int argc, char **argv)
@@ -3132,7 +3132,7 @@ static void register_set_oled_gpio(void)
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }
 
-#endif /* CONFIG_IDF_TARGET_ESP32C3 */
+#endif /* CONFIG_IDF_TARGET_ESP32C3 || CONFIG_IDF_TARGET_ESP32S3 */
 
 #if !CONFIG_ETH_UPLINK
 /* Helper function to convert auth mode to string */
