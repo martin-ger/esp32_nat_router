@@ -419,7 +419,7 @@ esp_err_t remote_console_get_status(remote_console_status_t *status) {
     status->failed_auths = rc_state.failed_auths;
 
     if (rc_state.state == RC_STATE_ACTIVE) {
-        strncpy(status->client_ip, rc_state.client_ip, sizeof(status->client_ip) - 1);
+        strncpy(status->client_ip, rc_state.client_ip, sizeof(status->client_ip));
         int64_t now = esp_timer_get_time();
         status->session_duration_sec = (uint32_t)((now - rc_state.session_start_time) / 1000000);
         status->idle_sec = (uint32_t)((now - rc_state.last_activity_time) / 1000000);

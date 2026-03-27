@@ -278,7 +278,7 @@ static int syslog_vprintf(const char *fmt, va_list args)
                         snprintf(timestamp, sizeof(timestamp), "Jan  1 00:00:00");
                     }
 
-                    const char *host = (hostname && hostname[0]) ? hostname : "ESP32";
+                    const char *host = hostname;
                     int severity = esp_level_to_syslog(level_char);
                     int priority = SYSLOG_FACILITY * 8 + severity;
 

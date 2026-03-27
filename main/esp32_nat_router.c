@@ -808,9 +808,7 @@ void eth_init(const char* static_ip, const char* subnet_mask, const char* gatewa
     esp_netif_attach(ethNetif, esp_eth_new_netif_glue(eth_handle));
 
     // Set DHCP client hostname (Option 12)
-    if (hostname && hostname[0]) {
-        esp_netif_set_hostname(ethNetif, hostname);
-    }
+    esp_netif_set_hostname(ethNetif, hostname);
 
     // Static IP on ETH if configured
     if (strlen(static_ip) > 0 && strlen(subnet_mask) > 0 && strlen(gateway_addr) > 0) {
@@ -901,9 +899,7 @@ void wifi_init(const uint8_t* mac, const char* ssid, const char* ent_username, c
     wifiSTA = esp_netif_create_default_wifi_sta();
 
     // Set DHCP client hostname (Option 12)
-    if (hostname && hostname[0]) {
-        esp_netif_set_hostname(wifiSTA, hostname);
-    }
+    esp_netif_set_hostname(wifiSTA, hostname);
 
     esp_netif_ip_info_t ipInfo_sta;
     if ((strlen(ssid) > 0) && (strlen(static_ip) > 0) && (strlen(subnet_mask) > 0) && (strlen(gateway_addr) > 0)) {
@@ -1157,8 +1153,9 @@ void app_main(void)
         ap_dns = param_set_default("");
     }
     get_config_param_str("hostname", &hostname);
-    if (hostname == NULL) {
-        hostname = param_set_default("");
+    if (hostname == NULL || hostname[0] == '\0') {            
+        free(hostname);                                       
+        hostname = param_set_default(DEFAULT_HOSTNAME);
     }
 
     get_portmap_tab();

@@ -438,7 +438,7 @@ static void publish_state(void *arg)
     char uplink_ssid[33] = "";
     if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
         rssi = ap_info.rssi;
-        strncpy(uplink_ssid, (const char *)ap_info.ssid, sizeof(uplink_ssid) - 1);
+        strncpy(uplink_ssid, (const char *)ap_info.ssid, sizeof(uplink_ssid));
     }
 
     /* Router-level state */

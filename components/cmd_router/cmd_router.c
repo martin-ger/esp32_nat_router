@@ -1401,7 +1401,7 @@ static int show(int argc, char **argv)
         } else {
             printf("  Static IP: <not configured>\n");
         }
-        printf("  Hostname: %s\n", (hostname && hostname[0]) ? hostname : "(default)");
+        printf("  Hostname: %s\n", hostname);
 
         printf("\nAP Settings:\n");
         printf("  SSID: %s\n", ap_ssid != NULL ? ap_ssid : "<undef>");
