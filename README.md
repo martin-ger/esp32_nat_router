@@ -105,6 +105,12 @@ idf.py flash monitor
 
 See the [Building](https://github.com/martin-ger/esp32_nat_router/wiki/Building) wiki page for PlatformIO, WT32-ETH01, and multi-target build instructions.
 
+## Performance
+
+The performance of the Router depends on several factors, of course including WiFi signal strength and congestion of the used frequencies. Expect something in the range from 5 - 15 mbps under reasonable conditions. Single video streams should be possible, but it is not intended as a 2$ full replacement for a professional home router.
+
+Internally the speed depends on the processing power of the used ESP32 chip (single core vs. dual core, clock speed) and available RAM for buffering. All "hot pathes", i.e. the direct routing of packets are optimized, any additional features, especially VPN, ACL processing, per client statistics, and packet capturing, introduce some delays. If you need maximum speed, dynamically disable all unused features in the configuration. However in default config everything is already disabled, the only major feature, that is running, is the web interface. Especially on the C3 and C5 with small RAM (and combined DRAM and IRAM) this can result in an additional performance boost, due to the additional buffer space. If required, you can re-enable the web interface via the remote console at any time (with a reboot).
+
 ## Licence
 
 The WireGuard submodul has the following licence_
