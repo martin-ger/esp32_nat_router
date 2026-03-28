@@ -32,7 +32,7 @@ void vpn_set_subnet(uint32_t ip, uint32_t mask) {
     vpn_subnet_mask = mask;
 }
 
-bool vpn_in_subnet(uint32_t ip) {
+IRAM_ATTR bool vpn_in_subnet(uint32_t ip) {
     if (vpn_subnet_mask == 0) return false;
     return (ip & vpn_subnet_mask) == vpn_subnet_ip;
 }
@@ -125,7 +125,7 @@ void vpn_disconnect(void)
     ESP_LOGI(TAG, "WireGuard VPN disconnected, MSS/PMTU disabled");
 }
 
-bool vpn_is_connected(void)
+IRAM_ATTR bool vpn_is_connected(void)
 {
     if (!wg_initialized || !vpn_connected || !wg_ctx.netif) {
         return false;

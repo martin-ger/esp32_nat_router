@@ -80,6 +80,7 @@ static void register_set_led_gpio(void);
 static void register_set_led_lowactive(void);
 static void register_set_led_strip(void);
 static void register_set_ttl(void);
+static void register_client_stats_cmd(void);
 static void register_set_tx_power(void);
 #if defined(CONFIG_IDF_TARGET_ESP32C6)
 static void register_set_rf_switch(void);
@@ -297,6 +298,7 @@ void register_router(void)
     register_set_led_lowactive();
     register_set_led_strip();
     register_set_ttl();
+    register_client_stats_cmd();
     register_set_tx_power();
     register_set_ap_hidden();
     register_set_ap_auth();
@@ -1294,13 +1296,18 @@ static int show(int argc, char **argv)
             int count = get_connected_clients(clients, 8);
 
             if (count > 0) {
-                // Fetch per-client traffic stats
+                // Fetch per-client traffic stats only when enabled
                 client_stats_entry_t stats[CLIENT_STATS_MAX];
-                int stats_count = client_stats_get_all(stats, CLIENT_STATS_MAX);
+                int stats_count = client_stats_enabled ? client_stats_get_all(stats, CLIENT_STATS_MAX) : 0;
 
                 printf("\nClient Details:\n");
-                printf("MAC Address       IP Address       Device Name          TX / RX\n");
-                printf("----------------  ---------------  -------------------  ------------------\n");
+                if (client_stats_enabled) {
+                    printf("MAC Address       IP Address       Device Name          TX / RX\n");
+                    printf("----------------  ---------------  -------------------  ------------------\n");
+                } else {
+                    printf("MAC Address       IP Address       Device Name\n");
+                    printf("----------------  ---------------  -------------------\n");
+                }
 
                 for (int i = 0; i < count; i++) {
                     char mac_str[18];
@@ -1315,19 +1322,21 @@ static int show(int argc, char **argv)
                         sprintf(ip_str, IPSTR, IP2STR(&addr));
                     }
 
-                    // Find matching traffic stats by MAC
-                    char traffic_str[32] = "-";
-                    for (int j = 0; j < stats_count; j++) {
-                        if (memcmp(stats[j].mac, clients[i].mac, 6) == 0) {
-                            char tx_buf[12], rx_buf[12];
-                            format_bytes_human(stats[j].bytes_sent, tx_buf, sizeof(tx_buf));
-                            format_bytes_human(stats[j].bytes_received, rx_buf, sizeof(rx_buf));
-                            snprintf(traffic_str, sizeof(traffic_str), "%s / %s", tx_buf, rx_buf);
-                            break;
+                    if (client_stats_enabled) {
+                        char traffic_str[32] = "-";
+                        for (int j = 0; j < stats_count; j++) {
+                            if (memcmp(stats[j].mac, clients[i].mac, 6) == 0) {
+                                char tx_buf[12], rx_buf[12];
+                                format_bytes_human(stats[j].bytes_sent, tx_buf, sizeof(tx_buf));
+                                format_bytes_human(stats[j].bytes_received, rx_buf, sizeof(rx_buf));
+                                snprintf(traffic_str, sizeof(traffic_str), "%s / %s", tx_buf, rx_buf);
+                                break;
+                            }
                         }
+                        printf("%-17s  %-15s  %-19s  %s\n", mac_str, ip_str, clients[i].name, traffic_str);
+                    } else {
+                        printf("%-17s  %-15s  %s\n", mac_str, ip_str, clients[i].name);
                     }
-
-                    printf("%-17s  %-15s  %-19s  %s\n", mac_str, ip_str, clients[i].name, traffic_str);
                 }
             }
         }
@@ -2069,6 +2078,46 @@ static void register_set_ttl(void)
         .help = "Set TTL override for upstream STA packets (0 = disabled)",
         .hint = NULL,
         .func = &set_ttl_cmd,
+    };
+    ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
+}
+
+/* 'client_stats' command - enable/disable per-client traffic statistics */
+static int client_stats_cmd(int argc, char **argv)
+{
+    if (argc < 2) {
+        printf("Per-client stats: %s\n", client_stats_enabled ? "enabled" : "disabled");
+        printf("Usage: client_stats <enable|disable>\n");
+        return 0;
+    }
+
+    bool enable;
+    if (strcmp(argv[1], "enable") == 0) {
+        enable = true;
+    } else if (strcmp(argv[1], "disable") == 0) {
+        enable = false;
+    } else {
+        printf("Usage: client_stats <enable|disable>\n");
+        return 1;
+    }
+
+    esp_err_t err = set_config_param_int("cstats_en", enable ? 1 : 0);
+    if (err != ESP_OK) {
+        printf("Failed to save setting\n");
+        return 1;
+    }
+    client_stats_enabled = enable;
+    printf("Per-client stats %s.\n", enable ? "enabled" : "disabled");
+    return 0;
+}
+
+static void register_client_stats_cmd(void)
+{
+    const esp_console_cmd_t cmd = {
+        .command = "client_stats",
+        .help = "Enable or disable per-client traffic statistics",
+        .hint = NULL,
+        .func = &client_stats_cmd,
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }

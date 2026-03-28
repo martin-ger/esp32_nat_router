@@ -249,7 +249,7 @@ void pcap_init(void)
     ESP_LOGI(TAG, "PCAP capture available (server starts on demand)");
 }
 
-bool pcap_should_capture(bool is_acl_monitored, bool is_ap_interface)
+IRAM_ATTR bool pcap_should_capture(bool is_acl_monitored, bool is_ap_interface)
 {
     // Must have a client connected to capture anything
     if (!client_connected) {
@@ -269,7 +269,7 @@ bool pcap_should_capture(bool is_acl_monitored, bool is_ap_interface)
     return false;
 }
 
-void pcap_capture_packet(struct pbuf *p)
+IRAM_ATTR void pcap_capture_packet(struct pbuf *p)
 {
     if (p == NULL || !client_connected) {
         return;

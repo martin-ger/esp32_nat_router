@@ -5,6 +5,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <stdbool.h>
 #include <string.h>
 #include "router_config.h"
 
@@ -32,3 +33,6 @@ void client_stats_reset_all(void);
 
 /* Format byte count as human-readable string (e.g. "1.2 MB") */
 void format_bytes_human(uint64_t bytes, char *buf, size_t len);
+
+/* Per-client stats collection enabled flag (default false, persisted in NVS "cstats_en") */
+extern bool client_stats_enabled;

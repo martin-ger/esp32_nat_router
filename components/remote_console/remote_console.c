@@ -103,9 +103,9 @@ static struct {
 /* Output redirection state */
 static int rc_client_fd = -1;           /* Socket for active session output */
 
-/* Capture buffer for stdout - larger for help output */
-#define RC_CAPTURE_BUF_SIZE 8192
-static char rc_capture_buf[RC_CAPTURE_BUF_SIZE];
+/* Capture buffer for stdout - allocated only while a session is active */
+#define RC_CAPTURE_BUF_SIZE 10240
+static char *rc_capture_buf = NULL;
 static size_t rc_capture_pos = 0;
 static bool rc_capturing = false;
 
@@ -130,7 +130,7 @@ extern size_t __real_fwrite(const void *ptr, size_t size, size_t nmemb, FILE *st
  * @brief Helper to add data to capture buffer
  */
 static void rc_capture_add(const char *data, size_t len) {
-    if (!rc_capturing || len == 0) return;
+    if (!rc_capturing || len == 0 || rc_capture_buf == NULL) return;
     if (rc_capture_pos >= RC_CAPTURE_BUF_SIZE - 1) return;
 
     size_t copy_len = len;
@@ -625,6 +625,15 @@ static void handle_session(int client_fd) {
     /* Set client fd for any direct sends */
     rc_client_fd = client_fd;
 
+    /* Allocate capture buffer for the duration of this session */
+    rc_capture_buf = malloc(RC_CAPTURE_BUF_SIZE);
+    if (rc_capture_buf == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate capture buffer");
+        rc_client_fd = -1;
+        rc_state.state = RC_STATE_LISTENING;
+        return;
+    }
+
     /* Send initial prompt */
     send_string(client_fd, RC_PROMPT);
 
@@ -698,6 +707,11 @@ static void handle_session(int client_fd) {
     /* Clear state */
     rc_client_fd = -1;
     rc_capturing = false;  /* Ensure capturing is disabled */
+
+    /* Free capture buffer */
+    free(rc_capture_buf);
+    rc_capture_buf = NULL;
+    rc_capture_pos = 0;
 
     ESP_LOGI(TAG, "Session ended with %s", rc_state.client_ip);
 }

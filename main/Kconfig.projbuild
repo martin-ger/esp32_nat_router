@@ -53,7 +53,7 @@ menu "MQTT Home Assistant"
             Home Assistant auto-discovery. Adds ~58 KB flash.
             RAM is only used when a broker is configured and enabled.
 
-    config MQTT_BUFFER_SIZE
+    config MQTT_HA_BUFFER_SIZE
         int "MQTT buffer size (bytes)"
         default 1024
         depends on MQTT_HOMEASSISTANT

@@ -62,6 +62,7 @@
 #include "router_globals.h"
 #include "lwip/ip_addr.h"
 #include "esp_netif.h"
+#include "client_stats.h"
 #include "pcap_capture.h"
 #include "remote_console.h"
 #include "syslog_client.h"
@@ -1199,6 +1200,15 @@ void app_main(void)
         ESP_LOGI(TAG, "XIAO ESP32-C6 RF switch: external antenna enabled");
     }
 #endif
+
+    // Load per-client stats enabled flag from NVS (default 0 = disabled)
+    int cstats_setting = 0;
+    if (get_config_param_int("cstats_en", &cstats_setting) == ESP_OK) {
+        client_stats_enabled = (cstats_setting != 0);
+    }
+    if (client_stats_enabled) {
+        ESP_LOGI(TAG, "Per-client stats enabled");
+    }
 
     // Load TTL override setting from NVS (default 0 = disabled)
     int ttl_setting = 0;

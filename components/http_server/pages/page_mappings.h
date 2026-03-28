@@ -85,6 +85,22 @@ document.getElementById('dhcp_mac').scrollIntoView({behavior: 'smooth', block: '
 </thead>\
 <tbody>"
 
+/* Same header without the Traffic column (used when per-client stats are disabled) */
+#define MAPPINGS_CHUNK_MID2_NOSTATS "\
+</div>\
+<div class='section'>\
+<h2>Connected Clients</h2>\
+<table class='data-table'>\
+<thead>\
+<tr>\
+<th>MAC Address</th>\
+<th>IP Address</th>\
+<th>Device Name</th>\
+<th>Action</th>\
+</tr>\
+</thead>\
+<tbody>"
+
 /* After clients tbody, before dhcp tbody */
 #define MAPPINGS_CHUNK_MID3 "\
 </tbody>\

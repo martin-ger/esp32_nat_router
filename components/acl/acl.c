@@ -59,6 +59,9 @@ static acl_stats_t acl_stats[MAX_ACL_LISTS];
 /* Mutex protecting acl_lists and acl_stats from concurrent access */
 static SemaphoreHandle_t acl_mutex = NULL;
 
+/* Per-list rule count - written under acl_mutex, read lock-free in hot path */
+static volatile uint8_t acl_rule_count[MAX_ACL_LISTS];
+
 void acl_init(void)
 {
     if (acl_mutex == NULL) {
@@ -67,6 +70,7 @@ void acl_init(void)
     }
     memset(acl_lists, 0, sizeof(acl_lists));
     memset(acl_stats, 0, sizeof(acl_stats));
+    memset((void *)acl_rule_count, 0, sizeof(acl_rule_count));
     ESP_LOGI(TAG, "ACL subsystem initialized");
 }
 
@@ -84,22 +88,12 @@ void acl_unlock(void)
     }
 }
 
-bool acl_is_empty(uint8_t acl_no)
+IRAM_ATTR bool acl_is_empty(uint8_t acl_no)
 {
     if (acl_no >= MAX_ACL_LISTS) {
         return true;
     }
-
-    bool empty = true;
-    acl_lock();
-    for (int i = 0; i < MAX_ACL_ENTRIES; i++) {
-        if (acl_lists[acl_no][i].valid) {
-            empty = false;
-            break;
-        }
-    }
-    acl_unlock();
-    return empty;
+    return acl_rule_count[acl_no] == 0;
 }
 
 int acl_get_count(uint8_t acl_no)
@@ -107,16 +101,7 @@ int acl_get_count(uint8_t acl_no)
     if (acl_no >= MAX_ACL_LISTS) {
         return 0;
     }
-
-    acl_lock();
-    int count = 0;
-    for (int i = 0; i < MAX_ACL_ENTRIES; i++) {
-        if (acl_lists[acl_no][i].valid) {
-            count++;
-        }
-    }
-    acl_unlock();
-    return count;
+    return acl_rule_count[acl_no];
 }
 
 void acl_clear(uint8_t acl_no)
@@ -127,6 +112,7 @@ void acl_clear(uint8_t acl_no)
 
     acl_lock();
     memset(acl_lists[acl_no], 0, sizeof(acl_lists[acl_no]));
+    acl_rule_count[acl_no] = 0;
     acl_unlock();
     ESP_LOGI(TAG, "Cleared ACL list %s", acl_names[acl_no]);
 }
@@ -185,6 +171,7 @@ bool acl_add(uint8_t acl_no, uint32_t src, uint32_t s_mask,
     entry->allow = allow;
     entry->hit_count = 0;
     entry->valid = 1;
+    acl_rule_count[acl_no]++;
 
     acl_unlock();
     ESP_LOGI(TAG, "Added rule %d to ACL %s", slot, acl_names[acl_no]);
@@ -216,6 +203,9 @@ bool acl_delete(uint8_t acl_no, uint8_t rule_idx)
             break;
         }
     }
+    if (acl_rule_count[acl_no] > 0) {
+        acl_rule_count[acl_no]--;
+    }
 
     acl_unlock();
     ESP_LOGI(TAG, "Deleted rule %d from ACL %s", rule_idx, acl_names[acl_no]);
@@ -228,7 +218,7 @@ bool acl_delete(uint8_t acl_no, uint8_t rule_idx)
 #define ETH_TYPE_ARP   0x0806
 #define ETH_TYPE_IPV6  0x86DD
 
-uint8_t acl_check_packet(uint8_t acl_no, struct pbuf *p)
+IRAM_ATTR uint8_t acl_check_packet(uint8_t acl_no, struct pbuf *p)
 {
     if (acl_no >= MAX_ACL_LISTS || p == NULL) {
         return ACL_NO_MATCH;

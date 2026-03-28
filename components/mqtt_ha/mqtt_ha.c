@@ -618,8 +618,8 @@ esp_err_t mqtt_ha_start(void)
             .qos = 1,
             .retain = 1,
         },
-        .buffer.size = CONFIG_MQTT_BUFFER_SIZE,
-        .buffer.out_size = CONFIG_MQTT_BUFFER_SIZE,
+        .buffer.size = CONFIG_MQTT_HA_BUFFER_SIZE,
+        .buffer.out_size = CONFIG_MQTT_HA_BUFFER_SIZE,
     };
 
     s_client = esp_mqtt_client_init(&cfg);

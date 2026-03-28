@@ -20,8 +20,8 @@ extern "C" {
 #define PROTO_UDP 17
 
 // One active connection uses about 5kB RAM
-#if CONFIG_IDF_TARGET_ESP32C3
-// ESP32c3 has less RAM
+#if CONFIG_IDF_TARGET_ESP32C3 || CONFIG_IDF_TARGET_ESP32C5
+// Unified SRAM: IRAM and heap share the same pool, leaving ~135 KB free
 #define AP_MAX_CONNECTIONS 5
 #else
 #define AP_MAX_CONNECTIONS 8

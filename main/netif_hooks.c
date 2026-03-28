@@ -49,7 +49,10 @@ static struct netif *ap_netif = NULL;
 // Per-client traffic statistics for AP clients
 static client_stats_entry_t client_stats[CLIENT_STATS_MAX];
 
-static inline client_stats_entry_t* find_client_stats(const uint8_t *mac) {
+// Per-client stats enabled flag (default off; persisted in NVS "cstats_en")
+bool client_stats_enabled = false;
+
+static IRAM_ATTR client_stats_entry_t* find_client_stats(const uint8_t *mac) {
     for (int i = 0; i < CLIENT_STATS_MAX; i++) {
         if (client_stats[i].active && memcmp(client_stats[i].mac, mac, 6) == 0) {
             return &client_stats[i];
@@ -129,7 +132,7 @@ void format_bytes_human(uint64_t bytes, char *buf, size_t len) {
 }
 
 // Hook function to count received bytes via netif input and ACL check
-static err_t netif_input_hook(struct pbuf *p, struct netif *netif) {
+static IRAM_ATTR err_t netif_input_hook(struct pbuf *p, struct netif *netif) {
     bool is_acl_monitored = false;
 
     // Check to_esp ACL (packets from Internet to ESP32)
@@ -177,7 +180,7 @@ static err_t netif_input_hook(struct pbuf *p, struct netif *netif) {
 
 
 // Hook function to count sent bytes via netif linkoutput and ACL check
-static err_t netif_linkoutput_hook(struct netif *netif, struct pbuf *p) {
+static IRAM_ATTR err_t netif_linkoutput_hook(struct netif *netif, struct pbuf *p) {
     bool is_acl_monitored = false;
 
     // Check from_esp ACL (packets from ESP32 to Internet)
@@ -490,7 +493,7 @@ static void send_icmp_frag_needed(struct pbuf *p, struct netif *netif, uint16_t 
 }
 
 // AP netif hook functions (for PCAP capture and ACL)
-static err_t ap_netif_input_hook(struct pbuf *p, struct netif *netif) {
+static IRAM_ATTR err_t ap_netif_input_hook(struct pbuf *p, struct netif *netif) {
     bool is_acl_monitored = false;
 
     // Check to_ap ACL (packets from Clients to ESP32)
@@ -548,7 +551,7 @@ static err_t ap_netif_input_hook(struct pbuf *p, struct netif *netif) {
     clamp_tcp_mss(p, ap_mss_clamp);
 
     // Per-client byte counting: source MAC = client
-    if (p != NULL && p->len >= 14) {
+    if (client_stats_enabled && p != NULL && p->len >= 14) {
         const uint8_t *src_mac = ((const uint8_t *)p->payload) + 6;
         client_stats_entry_t *entry = find_client_stats(src_mac);
         if (entry) {
@@ -570,7 +573,7 @@ static err_t ap_netif_input_hook(struct pbuf *p, struct netif *netif) {
     return ERR_VAL;
 }
 
-static err_t ap_netif_linkoutput_hook(struct netif *netif, struct pbuf *p) {
+static IRAM_ATTR err_t ap_netif_linkoutput_hook(struct netif *netif, struct pbuf *p) {
     bool is_acl_monitored = false;
 
     // Check from_ap ACL (packets from ESP32 to Clients)
@@ -594,7 +597,7 @@ static err_t ap_netif_linkoutput_hook(struct netif *netif, struct pbuf *p) {
     clamp_tcp_mss(p, ap_mss_clamp);
 
     // Per-client byte counting: dest MAC = client
-    if (p != NULL && p->len >= 14) {
+    if (client_stats_enabled && p != NULL && p->len >= 14) {
         const uint8_t *dst_mac = (const uint8_t *)p->payload;
         client_stats_entry_t *entry = find_client_stats(dst_mac);
         if (entry) {
