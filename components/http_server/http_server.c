@@ -1127,6 +1127,14 @@ static esp_err_t config_get_handler(httpd_req_t *req)
                         ESP_LOGI(TAG, "AP interface %s", ap_en ? "enabled" : "disabled");
                     }
 
+                    // Handle AP NAT setting (checkbox: present = on, absent = off)
+                    {
+                        int nat_val = (httpd_query_key_value(buf, "ap_nat", param5, sizeof(param5)) == ESP_OK) ? 1 : 0;
+                        set_config_param_int("ap_nat", nat_val);
+                        ap_nat_enabled = (uint8_t)nat_val;
+                        ESP_LOGI(TAG, "AP NAT %s", nat_val ? "enabled" : "disabled");
+                    }
+
                     // Handle AP hidden SSID setting
                     // Checkbox sends value only when checked, so absence means "off"
                     {
@@ -1541,6 +1549,7 @@ static esp_err_t config_get_handler(httpd_req_t *req)
         (int)ap_channel,
 #endif
         auth_sel0, auth_sel1, auth_sel2,
+        ap_nat_enabled ? "checked" : "",
         ap_en_checked, ap_open_checked, ap_hidden_checked);
     httpd_resp_send_chunk(req, section, HTTPD_RESP_USE_STRLEN);
 
@@ -2019,59 +2028,68 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
             HTTPD_RESP_USE_STRLEN);
     }
 
-    /* Chunk 9: DHCP form and port forwarding table header */
+    /* Chunk 9: DHCP reservation form */
     httpd_resp_send_chunk(req, MAPPINGS_CHUNK_MID4, HTTPD_RESP_USE_STRLEN);
 
-    /* Chunk 10: Stream port mapping rows */
-    bool has_mappings = false;
-    for (int i = 0; i < IP_PORTMAP_MAX; i++) {
-        if (portmap_tab[i].valid) {
-            has_mappings = true;
+    /* Chunk 10: Port forwarding section (hidden when NAT is disabled) */
+    if (ap_nat_enabled) {
+        httpd_resp_send_chunk(req, MAPPINGS_CHUNK_PORTFWD_HEAD, HTTPD_RESP_USE_STRLEN);
 
-            /* Try to look up device name for destination IP */
-            const char *name = lookup_device_name_by_ip(portmap_tab[i].daddr);
-            char ip_or_name[DHCP_RESERVATION_NAME_LEN];
-            if (name) {
-                snprintf(ip_or_name, sizeof(ip_or_name), "%s", name);
-            } else {
-                esp_ip4_addr_t addr;
-                addr.addr = portmap_tab[i].daddr;
-                snprintf(ip_or_name, sizeof(ip_or_name), IPSTR, IP2STR(&addr));
-            }
+        bool has_mappings = false;
+        for (int i = 0; i < IP_PORTMAP_MAX; i++) {
+            if (portmap_tab[i].valid) {
+                has_mappings = true;
 
-            snprintf(row, sizeof(row),
-                "<tr>"
-                "<td>%s</td>"
-                "<td>%s</td>"
-                "<td>%d</td>"
-                "<td>%s</td>"
-                "<td>%d</td>"
-                "<td><a href='/mappings?del_proto=%s&del_port=%d' class='red-button'>Delete</a></td>"
-                "</tr>",
+                const char *name = lookup_device_name_by_ip(portmap_tab[i].daddr);
+                char ip_or_name[DHCP_RESERVATION_NAME_LEN];
+                if (name) {
+                    snprintf(ip_or_name, sizeof(ip_or_name), "%s", name);
+                } else {
+                    esp_ip4_addr_t addr;
+                    addr.addr = portmap_tab[i].daddr;
+                    snprintf(ip_or_name, sizeof(ip_or_name), IPSTR, IP2STR(&addr));
+                }
+
+                snprintf(row, sizeof(row),
+                    "<tr>"
+                    "<td>%s</td>"
+                    "<td>%s</td>"
+                    "<td>%d</td>"
+                    "<td>%s</td>"
+                    "<td>%d</td>"
+                    "<td><a href='/mappings?del_proto=%s&del_port=%d' class='red-button'>Delete</a></td>"
+                    "</tr>",
 #if CONFIG_ETH_UPLINK
-                portmap_tab[i].iface == 1 ? "VPN" : "ETH",
+                    portmap_tab[i].iface == 1 ? "VPN" : "ETH",
 #else
-                portmap_tab[i].iface == 1 ? "VPN" : "STA",
+                    portmap_tab[i].iface == 1 ? "VPN" : "STA",
 #endif
-                portmap_tab[i].proto == PROTO_TCP ? "TCP" : "UDP",
-                portmap_tab[i].mport,
-                ip_or_name,
-                portmap_tab[i].dport,
-                portmap_tab[i].proto == PROTO_TCP ? "TCP" : "UDP",
-                portmap_tab[i].mport
-            );
-            httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
+                    portmap_tab[i].proto == PROTO_TCP ? "TCP" : "UDP",
+                    portmap_tab[i].mport,
+                    ip_or_name,
+                    portmap_tab[i].dport,
+                    portmap_tab[i].proto == PROTO_TCP ? "TCP" : "UDP",
+                    portmap_tab[i].mport
+                );
+                httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
+            }
         }
-    }
 
-    if (!has_mappings) {
+        if (!has_mappings) {
+            httpd_resp_send_chunk(req,
+                "<tr><td colspan='6' style='text-align:center; color:#888;'>No port mappings configured</td></tr>",
+                HTTPD_RESP_USE_STRLEN);
+        }
+
+        httpd_resp_send_chunk(req, MAPPINGS_CHUNK_PORTFWD_TAIL, HTTPD_RESP_USE_STRLEN);
+    } else {
         httpd_resp_send_chunk(req,
-            "<tr><td colspan='6' style='text-align:center; color:#888;'>No port mappings configured</td></tr>",
+            "<div class='section'><p style='color:#888; padding: 0.5rem 0;'>Port forwarding is not available in routed mode (NAT disabled).</p></div>",
             HTTPD_RESP_USE_STRLEN);
     }
 
-    /* Chunk 11: Page tail (port form, footer) */
-    httpd_resp_send_chunk(req, MAPPINGS_CHUNK_TAIL, HTTPD_RESP_USE_STRLEN);
+    /* Chunk 11: Page footer */
+    httpd_resp_send_chunk(req, MAPPINGS_CHUNK_PAGE_FOOTER, HTTPD_RESP_USE_STRLEN);
 
     /* End chunked response */
     httpd_resp_send_chunk(req, NULL, 0);
@@ -2691,6 +2709,16 @@ static esp_err_t setup_get_handler(httpd_req_t *req)
                     if (strlen(param2) == 0) {
                         strlcpy(param2, ap_passwd, sizeof(param2));
                     }
+
+                    /* Reset AP parameters to defaults (keep SSID/password from form) */
+                    set_config_param_str("ap_ip",      "192.168.4.1");
+                    set_config_param_str("ap_dns",     "");
+                    free(ap_dns); ap_dns = strdup("");
+                    set_config_param_int("ap_hidden",   0); ap_ssid_hidden = 0;
+                    set_config_param_int("ap_authmode", 0); ap_authmode    = 0;
+                    set_config_param_int("ap_disabled", 0); ap_disabled    = false;
+                    set_config_param_int("ap_nat",      1); ap_nat_enabled = 1;
+
                     int argc = 3;
                     char* argv[3];
                     argv[0] = "set_ap";
@@ -2709,6 +2737,18 @@ static esp_err_t setup_get_handler(httpd_req_t *req)
                     if (strlen(param2) == 0) {
                         strlcpy(param2, passwd, sizeof(param2));
                     }
+
+                    /* Reset STA parameters to defaults (keep SSID/password from form) */
+                    set_config_param_str("static_ip",    ""); free(static_ip);   static_ip   = strdup("");
+                    set_config_param_str("subnet_mask",  ""); free(subnet_mask); subnet_mask = strdup("");
+                    set_config_param_str("gateway_addr", ""); free(gateway_addr); gateway_addr = strdup("");
+                    set_config_param_str("ent_username", ""); free(ent_username); ent_username = strdup("");
+                    set_config_param_str("ent_identity", ""); free(ent_identity); ent_identity = strdup("");
+                    set_config_param_int("eap_method",  0); eap_method        = 0;
+                    set_config_param_int("ttls_phase2", 0); ttls_phase2       = 0;
+                    set_config_param_int("cert_bundle", 0); use_cert_bundle   = 0;
+                    set_config_param_int("no_time_chk", 0); disable_time_check = 0;
+
                     int argc = 3;
                     char* argv[3];
                     argv[0] = "set_sta";

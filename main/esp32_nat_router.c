@@ -160,6 +160,7 @@ struct dhcp_reservation_entry dhcp_reservations[MAX_DHCP_RESERVATIONS];
 
 esp_netif_t* wifiAP;
 bool ap_disabled = false;
+uint8_t ap_nat_enabled = 1;
 #if CONFIG_ETH_UPLINK
 esp_netif_t* ethNetif = NULL;
 esp_eth_handle_t eth_handle = NULL;
@@ -738,7 +739,7 @@ void ap_set_enabled(bool enabled)
 #if CONFIG_ETH_UPLINK
     if (enabled) {
         esp_wifi_start();
-        ip_napt_enable(my_ap_ip, 1);
+        if (ap_nat_enabled) ip_napt_enable(my_ap_ip, 1);
     } else {
         connect_count = 0;
         esp_wifi_stop();
@@ -746,7 +747,7 @@ void ap_set_enabled(bool enabled)
 #else
     if (enabled) {
         esp_wifi_set_mode(WIFI_MODE_APSTA);
-        ip_napt_enable(my_ap_ip, 1);
+        if (ap_nat_enabled) ip_napt_enable(my_ap_ip, 1);
     } else {
         connect_count = 0;
         esp_wifi_set_mode(WIFI_MODE_STA);
@@ -1230,6 +1231,15 @@ void app_main(void)
         ESP_LOGI(TAG, "AP interface disabled (NVS)");
     }
 
+    // Load AP NAT setting from NVS (default 1 = NAT enabled)
+    int ap_nat_setting = 1;
+    if (get_config_param_int("ap_nat", &ap_nat_setting) == ESP_OK) {
+        ap_nat_enabled = (ap_nat_setting != 0) ? 1 : 0;
+    }
+    if (!ap_nat_enabled) {
+        ESP_LOGI(TAG, "AP NAT disabled (routed mode)");
+    }
+
     // Load AP SSID hidden setting from NVS (default 0 = visible)
     int hidden_setting = 0;
     if (get_config_param_int("ap_hidden", &hidden_setting) == ESP_OK) {
@@ -1379,8 +1389,12 @@ void app_main(void)
     pthread_create(&t1, NULL, led_status_thread, NULL);
 
     if (!ap_disabled) {
-        ip_napt_enable(my_ap_ip, 1);
-        ESP_LOGI(TAG, "NAT is enabled");
+        if (ap_nat_enabled) {
+            ip_napt_enable(my_ap_ip, 1);
+            ESP_LOGI(TAG, "NAT is enabled");
+        } else {
+            ESP_LOGI(TAG, "NAT is disabled (routed mode)");
+        }
     }
 
     char* web_disabled = NULL;

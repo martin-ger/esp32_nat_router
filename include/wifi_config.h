@@ -81,6 +81,9 @@ int set_ap_ip(int argc, char **argv);
 // AP disable flag (persisted in NVS as "ap_disabled")
 extern bool ap_disabled;
 
+// AP NAT mode (1 = NAT enabled (default), 0 = routed/no NAT; persisted in NVS as "ap_nat")
+extern uint8_t ap_nat_enabled;
+
 // Dynamically enable or disable the AP interface (persists to NVS)
 void ap_set_enabled(bool enabled);
 

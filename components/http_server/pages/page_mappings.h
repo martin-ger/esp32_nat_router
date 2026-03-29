@@ -137,7 +137,9 @@ document.getElementById('dhcp_mac').scrollIntoView({behavior: 'smooth', block: '
 <input type='submit' name='dhcp_action' value='Block' class='red-button' style='width:100%;padding:0.75rem 1.5rem;font-size:0.95rem;border-radius:8px;margin-top:0.5rem;' onclick=\"document.getElementById('dhcp_ip').value='0.0.0.0';\"/></td></tr>\
 </table>\
 </form>\
-</div>\
+</div>"
+
+#define MAPPINGS_CHUNK_PORTFWD_HEAD "\
 <div class='section'>\
 <h2>Port Forwarding</h2>\
 <table class='data-table' style='table-layout:fixed;'>\
@@ -160,7 +162,7 @@ document.getElementById('dhcp_mac').scrollIntoView({behavior: 'smooth', block: '
 #endif
 
 /* After portmap tbody to end */
-#define MAPPINGS_CHUNK_TAIL "\
+#define MAPPINGS_CHUNK_PORTFWD_TAIL "\
 </tbody>\
 </table>\
 <h2>Add Port Forwards</h2>\
@@ -174,9 +176,11 @@ document.getElementById('dhcp_mac').scrollIntoView({behavior: 'smooth', block: '
 <tr><td></td><td><input type='submit' name='port_action' value='Add Forward' class='ok-button'/></td></tr>\
 </table>\
 </form>\
-</div>\
+</div>"
+
+#define MAPPINGS_CHUNK_PAGE_FOOTER "\
 <div style='margin-top: 2rem; text-align: center;'>\
-<a href='/' style='padding: 0.75rem 2rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #fff; border: none; border-radius: 8px; text-decoration: none; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: all 0.3s; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4); display: inline-block;'>🏠 Home</a>\
+<a href='/' style='padding: 0.75rem 2rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #fff; border: none; border-radius: 8px; text-decoration: none; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: all 0.3s; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4); display: inline-block;'>&#127968; Home</a>\
 </div>\
 </div>\
 </body>\

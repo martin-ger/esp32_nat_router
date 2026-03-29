@@ -428,6 +428,21 @@ async def set_ap_mac(mac: str) -> str:
 
 
 @mcp.tool()
+async def set_ap_nat(enabled: bool) -> str:
+    """Enable or disable NAT on the hotspot (AP) interface. Requires restart.
+
+    When NAT is enabled (default), all hotspot clients share the router's uplink IP
+    via address masquerading.  When disabled, the hotspot subnet is exposed directly
+    to the upstream network (routed mode) — the upstream router must have a static
+    route for the AP subnet pointing to this device.
+
+    Args:
+        enabled: True to enable NAT (default), False for routed/no-NAT mode.
+    """
+    return await _cmd(f"set_ap_nat {'on' if enabled else 'off'}")
+
+
+@mcp.tool()
 async def set_ap_hidden(hidden: bool) -> str:
     """Hide or show the hotspot network name in WiFi scans. Requires restart.
 

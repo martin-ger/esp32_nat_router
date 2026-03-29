@@ -81,6 +81,7 @@ static void register_set_led_lowactive(void);
 static void register_set_led_strip(void);
 static void register_set_ttl(void);
 static void register_client_stats_cmd(void);
+static void register_set_ap_nat(void);
 static void register_set_tx_power(void);
 #if defined(CONFIG_IDF_TARGET_ESP32C6)
 static void register_set_rf_switch(void);
@@ -299,6 +300,7 @@ void register_router(void)
     register_set_led_strip();
     register_set_ttl();
     register_client_stats_cmd();
+    register_set_ap_nat();
     register_set_tx_power();
     register_set_ap_hidden();
     register_set_ap_auth();
@@ -2118,6 +2120,41 @@ static void register_client_stats_cmd(void)
         .help = "Enable or disable per-client traffic statistics",
         .hint = NULL,
         .func = &client_stats_cmd,
+    };
+    ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
+}
+
+/* 'set_ap_nat' command - enable or disable NAT on the AP interface */
+static int set_ap_nat_cmd(int argc, char **argv)
+{
+    if (argc < 2) {
+        printf("NAT: %s\n", ap_nat_enabled ? "enabled" : "disabled (routed mode)");
+        printf("Usage: set_ap_nat <on|off>  (requires restart)\n");
+        return 0;
+    }
+    const char *mode = argv[1];
+    int val;
+    if (strcasecmp(mode, "on") == 0 || strcmp(mode, "1") == 0) {
+        val = 1;
+    } else if (strcasecmp(mode, "off") == 0 || strcmp(mode, "0") == 0) {
+        val = 0;
+    } else {
+        printf("Usage: set_ap_nat <on|off>\n");
+        return 1;
+    }
+    set_config_param_int("ap_nat", val);
+    ap_nat_enabled = (uint8_t)val;
+    printf("AP NAT %s. Restart to apply.\n", val ? "enabled" : "disabled (routed mode)");
+    return 0;
+}
+
+static void register_set_ap_nat(void)
+{
+    const esp_console_cmd_t cmd = {
+        .command = "set_ap_nat",
+        .help = "Enable or disable NAT on the AP interface (default: on). Requires restart.",
+        .hint = NULL,
+        .func = &set_ap_nat_cmd,
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }
