@@ -26,9 +26,9 @@ static const char *TAG = "pcap_capture";
 #define PCAP_TCP_PORT           19000
 #define PCAP_TASK_STACK         3072
 #define PCAP_TASK_PRIORITY      5
-#if CONFIG_IDF_TARGET_ESP32C3
-#define PCAP_RINGBUF_SIZE       (16 * 1024)  // 16KB ring buffer for ESP32-C3
-#define PCAP_SNAPLEN_DEFAULT    64           // Default max packet capture size for ESP32-C3
+#if CONFIG_IDF_TARGET_ESP32C3 || CONFIG_IDF_TARGET_ESP32C5
+#define PCAP_RINGBUF_SIZE       (16 * 1024)  // 16KB ring buffer for ESP32-C3/C5
+#define PCAP_SNAPLEN_DEFAULT    64           // Default max packet capture size for ESP32-C3/C5
 #else
 #define PCAP_RINGBUF_SIZE       (32 * 1024)  // 32KB ring buffer
 #define PCAP_SNAPLEN_DEFAULT    96           // Default max packet capture size
