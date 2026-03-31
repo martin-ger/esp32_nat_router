@@ -191,6 +191,18 @@ uint32_t lookup_dhcp_reservation(const uint8_t *mac) {
     return 0;
 }
 
+bool is_ip_reserved_for_other(uint32_t ip, const uint8_t *mac) {
+    if (ip == 0) return false;
+    for (int i = 0; i < MAX_DHCP_RESERVATIONS; i++) {
+        if (dhcp_reservations[i].valid &&
+            dhcp_reservations[i].ip == ip &&
+            memcmp(dhcp_reservations[i].mac, mac, 6) != 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool is_mac_blocked(const uint8_t *mac) {
     for (int i = 0; i < MAX_DHCP_RESERVATIONS; i++) {
         if (dhcp_reservations[i].valid &&

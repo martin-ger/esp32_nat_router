@@ -52,6 +52,7 @@ esp_err_t add_dhcp_reservation(const uint8_t *mac, uint32_t ip, const char *name
 esp_err_t del_dhcp_reservation(const uint8_t *mac);
 esp_err_t clear_all_dhcp_reservations(void);
 uint32_t lookup_dhcp_reservation(const uint8_t *mac);
+bool is_ip_reserved_for_other(uint32_t ip, const uint8_t *mac);
 bool is_mac_blocked(const uint8_t *mac);
 
 /**

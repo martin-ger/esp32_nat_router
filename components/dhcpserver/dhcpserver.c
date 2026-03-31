@@ -1116,6 +1116,16 @@ static s16_t parse_msg(dhcps_t *dhcps, struct dhcps_msg *m, u16_t len)
             dhcps->client_address.addr = first_address.addr;
         }
 
+        // Skip IPs that are reserved for a different MAC
+        while (dhcps->client_address.addr <= dhcps->dhcps_poll.end_ip.addr &&
+               is_ip_reserved_for_other(dhcps->client_address.addr, m->chaddr)) {
+            ip4_addr_t tmp;
+            tmp.addr = htonl(dhcps->client_address.addr);
+            tmp.addr++;
+            dhcps->client_address.addr = htonl(tmp.addr);
+            ESP_LOGD(TAG, "Skipping IP reserved for another device");
+        }
+
         // Check for DHCP reservation for this MAC address
         uint32_t reserved_ip = lookup_dhcp_reservation(m->chaddr);
         if (reserved_ip != 0) {
