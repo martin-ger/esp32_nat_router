@@ -292,20 +292,54 @@ document.getElementById('importStatus').innerHTML='<span style=\"color:#ff5252;\
 r.readAsText(f);\
 }\
 </script>\
+"
+
+/* Danger Zone section - uses %s for: web_bind_ap_chk, web_bind_sta_chk, web_bind_vpn_chk.
+ * ETH_UPLINK variant labels the uplink checkbox "ETH" instead of "STA". */
+#define CONFIG_CHUNK_DANGER_COMMON_HEAD "\
 <div style='margin-top: 2rem; padding: 1rem; background: #fff3cd; border: 2px solid #ff9800; border-radius: 8px;'>\
-<h2 style='color: #ff6b00; margin-bottom: 0.5rem;'>⚠ Danger Zone</h2>\
-<p style='margin-bottom: 1rem; color: #666; font-size: 0.9rem;'>This will disable the web interface completely. You can only re-enable it via the console using the 'web_ui enable' command.</p>\
+<h2 style='color: #ff6b00; margin-bottom: 0.5rem;'>&#x26A0; Danger Zone</h2>\
+<h3 style='font-size:1rem;color:#cc6600;margin:0.75rem 0 0.5rem;'>Web UI Access</h3>\
+<p style='margin-bottom:0.75rem;color:#666;font-size:0.9rem;'>Restrict which network interface can reach the web UI. Unchecking the interface you are currently using will lock you out (re-enable via console: <code>web_ui bind all</code>).</p>\
+<form action='' method='GET'>\
+<input type='hidden' name='web_bind_save' value='1'/>\
+<table>\
+<tr><td style='color:#d32f2f;font-weight:bold;'>Interfaces</td><td>\
+<label style='margin-right:0.8rem;color:#666;'><input type='checkbox' name='web_bind_ap' value='1' %s> AP</label>"
+
+#define CONFIG_CHUNK_DANGER_COMMON_TAIL "\
+<label style='color:#666;'><input type='checkbox' name='web_bind_vpn' value='1' %s> VPN</label>\
+</td></tr>\
+<tr><td></td><td><input type='submit' value='Save' class='red-button' onclick='return confirm(\"Restricting access may lock you out. Continue?\");'/></td></tr>\
+</table>\
+</form>\
+<h3 style='font-size:1rem;color:#cc6600;margin:1.5rem 0 0.5rem;'>Disable Web Interface</h3>\
+<p style='margin-bottom:1rem;color:#666;font-size:0.9rem;'>Disables the web interface completely. Re-enable via console: <code>web_ui enable</code>.</p>\
 <form action='' method='GET'>\
 <table>\
-<tr><td style='color: #d32f2f; font-weight: bold;'>Disable Interface</td>\
+<tr><td style='color:#d32f2f;font-weight:bold;'>Disable</td>\
 <td><input type='submit' name='disable_interface' value='Disable' class='red-button' onclick='return confirm(\"Are you sure? The web interface will be disabled and can only be re-enabled via the console.\");'/></td></tr>\
 </table>\
 </form>\
 </div>\
 <div style='margin-top: 2rem; text-align: center;'>\
-<a href='/' style='padding: 0.75rem 2rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #fff; border: none; border-radius: 8px; text-decoration: none; font-size: 0.95rem; font-weight: 600;'>🏠 Home</a>\
+<a href='/' style='padding: 0.75rem 2rem; background: linear-gradient(135deg, #667eea 0%%, #764ba2 100%%); color: #fff; border: none; border-radius: 8px; text-decoration: none; font-size: 0.95rem; font-weight: 600;'>&#127968; Home</a>\
 </div>\
 </div>\
 </body>\
 </html>"
+
+#if CONFIG_ETH_UPLINK
+/* ETH_UPLINK: uplink checkbox labeled "ETH" (maps to RC_BIND_STA / web_bind_sta) */
+#define CONFIG_CHUNK_DANGER \
+    CONFIG_CHUNK_DANGER_COMMON_HEAD \
+    "<label style='margin-right:0.8rem;color:#666;'><input type='checkbox' name='web_bind_sta' value='1' %s> ETH</label>" \
+    CONFIG_CHUNK_DANGER_COMMON_TAIL
+#else
+/* STA variant */
+#define CONFIG_CHUNK_DANGER \
+    CONFIG_CHUNK_DANGER_COMMON_HEAD \
+    "<label style='margin-right:0.8rem;color:#666;'><input type='checkbox' name='web_bind_sta' value='1' %s> STA</label>" \
+    CONFIG_CHUNK_DANGER_COMMON_TAIL
+#endif
 
