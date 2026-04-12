@@ -36,6 +36,7 @@
 #include "pages.h"
 #include "favicon_png.h"
 #include "router_globals.h"
+#include "vpn_config.h"
 #include "pcap_capture.h"
 #include "acl.h"
 #include "remote_console.h"
@@ -43,6 +44,9 @@
 #include "esp_ota_ops.h"
 #include "esp_app_format.h"
 #include "esp_app_desc.h"
+#include "mbedtls/pkcs5.h"
+#include "mbedtls/md.h"
+#include "mbedtls/base64.h"
 
 static const char *TAG = "HTTPServer";
 
@@ -222,8 +226,9 @@ static bool get_cookie_value(httpd_req_t *req, const char* cookie_name,
 }
 
 /* Check if request has valid session cookie */
-/* CSRF check: if the browser sends an Origin header it must match our AP IP.
- * Requests without Origin (curl, API clients) are allowed through.
+/* CSRF check: if the browser sends an Origin header it must match one of our
+ * own IP addresses (AP or STA).  Requests without Origin (curl, API clients)
+ * are allowed through.
  * Returns true if the request is safe to process. */
 static bool check_csrf(httpd_req_t *req)
 {
@@ -232,10 +237,28 @@ static bool check_csrf(httpd_req_t *req)
         return true;  /* No Origin — non-browser or same-origin fetch, allow */
     }
     char expected[32];
-    ip4_addr_t ap;
-    ap.addr = my_ap_ip;
-    snprintf(expected, sizeof(expected), "http://" IPSTR, IP2STR(&ap));
-    return (strncmp(origin, expected, strlen(expected)) == 0);
+    ip4_addr_t addr;
+
+    /* Accept requests originating from the AP interface */
+    addr.addr = my_ap_ip;
+    snprintf(expected, sizeof(expected), "http://" IPSTR, IP2STR(&addr));
+    if (strcmp(origin, expected) == 0) return true;
+
+    /* Also accept requests originating from the STA interface */
+    if (my_ip != 0) {
+        addr.addr = my_ip;
+        snprintf(expected, sizeof(expected), "http://" IPSTR, IP2STR(&addr));
+        if (strcmp(origin, expected) == 0) return true;
+    }
+
+    /* Also accept requests originating from the VPN/WireGuard interface */
+    if (vpn_tunnel_ip != 0) {
+        addr.addr = vpn_tunnel_ip;
+        snprintf(expected, sizeof(expected), "http://" IPSTR, IP2STR(&addr));
+        if (strcmp(origin, expected) == 0) return true;
+    }
+
+    return false;
 }
 
 /* Check if request has valid session cookie */
@@ -294,7 +317,36 @@ static esp_err_t create_session(httpd_req_t *req)
 
 /* --- Config Export/Import helpers --- */
 
-#define CONFIG_IMPORT_MAX_SIZE 8192
+/*
+ * Encrypted config file format (JSON envelope):
+ *   {"enc":1,"s":"<hex 16-byte salt>","n":"<hex 24-byte nonce>","c":"<base64 ciphertext>"}
+ *
+ * Key derivation : PBKDF2-HMAC-SHA256, 10 000 iterations, 32-byte output
+ * Encryption     : XChaCha20-Poly1305 AEAD (24-byte nonce, 16-byte auth tag)
+ *
+ * The XChaCha20-Poly1305 implementation is the one bundled with the WireGuard
+ * managed component; the symbols are already compiled into the binary.
+ */
+
+/* Forward-declare XChaCha20-Poly1305 from managed_components/esp_wireguard */
+extern void xchacha20poly1305_encrypt(uint8_t *dst, const uint8_t *src, size_t src_len,
+                                      const uint8_t *ad, size_t ad_len,
+                                      const uint8_t *nonce, const uint8_t *key);
+extern bool xchacha20poly1305_decrypt(uint8_t *dst, const uint8_t *src, size_t src_len,
+                                      const uint8_t *ad, size_t ad_len,
+                                      const uint8_t *nonce, const uint8_t *key);
+
+#define ENC_SALT_LEN    16
+#define ENC_NONCE_LEN   24
+#define ENC_KEY_LEN     32
+#define ENC_TAG_LEN     16
+#define ENC_PBKDF2_ITER 10000
+
+/* Encrypted payload is larger than the raw JSON: base64(plaintext + 16 tag)
+ * plus the JSON envelope headers (~100 bytes).
+ * Max plaintext 8 192 B → cipher 8 208 B → base64 ~10 944 B → total ~11 100 B.
+ * Use 16 384 as the import limit to cover both plain and encrypted files. */
+#define CONFIG_IMPORT_MAX_SIZE 16384
 
 static char *bytes_to_hex(const uint8_t *src, size_t len)
 {
@@ -315,6 +367,112 @@ static int hex_to_bytes(const char *src, uint8_t *dst, size_t len)
         dst[i] = (uint8_t)byte;
     }
     return 0;
+}
+
+/* Derive a 32-byte key from passphrase + salt using PBKDF2-HMAC-SHA256. */
+static void config_derive_key(const char *pass, const uint8_t *salt, uint8_t key[ENC_KEY_LEN])
+{
+    mbedtls_pkcs5_pbkdf2_hmac_ext(MBEDTLS_MD_SHA256,
+                                  (const uint8_t *)pass, strlen(pass),
+                                  salt, ENC_SALT_LEN,
+                                  ENC_PBKDF2_ITER,
+                                  ENC_KEY_LEN, key);
+}
+
+/*
+ * Encrypt plain JSON string with the given passphrase.
+ * Returns a malloc'd JSON envelope string, or NULL on allocation failure.
+ */
+static char *config_encrypt_json(const char *plain, size_t plain_len, const char *pass)
+{
+    uint8_t salt[ENC_SALT_LEN], nonce[ENC_NONCE_LEN], key[ENC_KEY_LEN];
+    esp_fill_random(salt, sizeof(salt));
+    esp_fill_random(nonce, sizeof(nonce));
+    config_derive_key(pass, salt, key);
+
+    size_t cipher_len = plain_len + ENC_TAG_LEN;
+    uint8_t *cipher = malloc(cipher_len);
+    if (!cipher) return NULL;
+    xchacha20poly1305_encrypt(cipher, (const uint8_t *)plain, plain_len,
+                              NULL, 0, nonce, key);
+
+    /* Base64-encode ciphertext */
+    size_t b64_olen = 0;
+    mbedtls_base64_encode(NULL, 0, &b64_olen, cipher, cipher_len); /* query size */
+    char *b64 = malloc(b64_olen + 1);
+    if (!b64) { free(cipher); return NULL; }
+    mbedtls_base64_encode((unsigned char *)b64, b64_olen + 1, &b64_olen, cipher, cipher_len);
+    b64[b64_olen] = '\0';
+    free(cipher);
+
+    /* Hex-encode salt and nonce inline */
+    char salt_hex[ENC_SALT_LEN * 2 + 1];
+    char nonce_hex[ENC_NONCE_LEN * 2 + 1];
+    for (int i = 0; i < ENC_SALT_LEN; i++)  sprintf(salt_hex  + i*2, "%02x", salt[i]);
+    for (int i = 0; i < ENC_NONCE_LEN; i++) sprintf(nonce_hex + i*2, "%02x", nonce[i]);
+    salt_hex[ENC_SALT_LEN * 2]   = '\0';
+    nonce_hex[ENC_NONCE_LEN * 2] = '\0';
+
+    /* Build envelope: {"enc":1,"s":"...","n":"...","c":"..."} */
+    size_t out_len = b64_olen + sizeof(salt_hex) + sizeof(nonce_hex) + 32;
+    char *out = malloc(out_len);
+    if (!out) { free(b64); return NULL; }
+    snprintf(out, out_len, "{\"enc\":1,\"s\":\"%s\",\"n\":\"%s\",\"c\":\"%s\"}",
+             salt_hex, nonce_hex, b64);
+    free(b64);
+    return out;
+}
+
+/*
+ * Decrypt an envelope produced by config_encrypt_json().
+ * Returns a malloc'd null-terminated plaintext string, or NULL on failure
+ * (wrong passphrase or corrupt data → authentication tag mismatch).
+ */
+static char *config_decrypt_json(const char *enc_json, const char *pass)
+{
+    cJSON *j = cJSON_Parse(enc_json);
+    if (!j) return NULL;
+
+    cJSON *s_item = cJSON_GetObjectItem(j, "s");
+    cJSON *n_item = cJSON_GetObjectItem(j, "n");
+    cJSON *c_item = cJSON_GetObjectItem(j, "c");
+    if (!cJSON_IsString(s_item) || !cJSON_IsString(n_item) || !cJSON_IsString(c_item)) {
+        cJSON_Delete(j); return NULL;
+    }
+
+    uint8_t salt[ENC_SALT_LEN], nonce[ENC_NONCE_LEN];
+    if (hex_to_bytes(s_item->valuestring, salt,  ENC_SALT_LEN)  != 0 ||
+        hex_to_bytes(n_item->valuestring, nonce, ENC_NONCE_LEN) != 0) {
+        cJSON_Delete(j); return NULL;
+    }
+
+    /* Base64-decode ciphertext */
+    size_t b64_in_len = strlen(c_item->valuestring);
+    size_t cipher_len = 0;
+    mbedtls_base64_decode(NULL, 0, &cipher_len,
+                          (const unsigned char *)c_item->valuestring, b64_in_len);
+    uint8_t *cipher = malloc(cipher_len);
+    if (!cipher) { cJSON_Delete(j); return NULL; }
+    size_t actual_cipher_len = 0;
+    int rc = mbedtls_base64_decode(cipher, cipher_len, &actual_cipher_len,
+                                   (const unsigned char *)c_item->valuestring, b64_in_len);
+    cJSON_Delete(j);
+    if (rc != 0 || actual_cipher_len < ENC_TAG_LEN) { free(cipher); return NULL; }
+
+    uint8_t key[ENC_KEY_LEN];
+    config_derive_key(pass, salt, key);
+
+    size_t plain_len = actual_cipher_len - ENC_TAG_LEN;
+    uint8_t *plain = malloc(plain_len + 1);
+    if (!plain) { free(cipher); return NULL; }
+
+    bool ok = xchacha20poly1305_decrypt(plain, cipher, actual_cipher_len,
+                                        NULL, 0, nonce, key);
+    free(cipher);
+    if (!ok) { free(plain); return NULL; }  /* wrong passphrase / tampered data */
+
+    plain[plain_len] = '\0';
+    return (char *)plain;
 }
 
 static char *nvs_export_to_json_robust(void)
@@ -500,25 +658,61 @@ static inline void resume_sta_if_scan_idle(void)
 
 static esp_err_t config_export_handler(httpd_req_t *req)
 {
+    if (!check_csrf(req)) {
+        { char _ip[16]; ESP_LOGW(TAG, "CSRF rejected /api/config-export from %s", get_client_ip(req, _ip, sizeof(_ip))); }
+        httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "CSRF check failed");
+        return ESP_FAIL;
+    }
     bool password_protection_enabled = is_web_password_set();
     if (password_protection_enabled && !is_authenticated(req)) {
         { char _ip[16]; ESP_LOGW(TAG, "Unauthenticated access to /api/config-export from %s", get_client_ip(req, _ip, sizeof(_ip))); }
-        httpd_resp_set_status(req, "303 See Other");
-        httpd_resp_set_hdr(req, "Location", "/?auth_required=1");
-        httpd_resp_send(req, NULL, 0);
-        return ESP_OK;
+        httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "Not authenticated");
+        return ESP_FAIL;
     }
 
-    char *json = nvs_export_to_json_robust();
-    if (!json) {
+    /* Read optional passphrase from POST JSON body: {"pass":"..."} */
+    char pass[128] = {0};
+    if (req->content_len > 0 && req->content_len < 256) {
+        char body[256];
+        int recv_len = httpd_req_recv(req, body, req->content_len);
+        if (recv_len > 0) {
+            body[recv_len] = '\0';
+            cJSON *j = cJSON_Parse(body);
+            if (j) {
+                cJSON *p = cJSON_GetObjectItem(j, "pass");
+                if (cJSON_IsString(p) && p->valuestring[0] != '\0') {
+                    strlcpy(pass, p->valuestring, sizeof(pass));
+                }
+                cJSON_Delete(j);
+            }
+        }
+    }
+
+    char *plain = nvs_export_to_json_robust();
+    if (!plain) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Export failed");
         return ESP_FAIL;
     }
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_set_hdr(req, "Content-Disposition", "attachment; filename=\"esp32_nat_config.json\"");
-    httpd_resp_send(req, json, HTTPD_RESP_USE_STRLEN);
-    free(json);
+
+    if (pass[0] == '\0') {
+        /* No passphrase — send plain JSON */
+        httpd_resp_send(req, plain, HTTPD_RESP_USE_STRLEN);
+        free(plain);
+    } else {
+        /* Encrypt with PBKDF2-derived XChaCha20-Poly1305 key */
+        char *enc = config_encrypt_json(plain, strlen(plain), pass);
+        free(plain);
+        if (!enc) {
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Encryption failed");
+            return ESP_FAIL;
+        }
+        ESP_LOGI(TAG, "Config exported (encrypted)");
+        httpd_resp_send(req, enc, HTTPD_RESP_USE_STRLEN);
+        free(enc);
+    }
     return ESP_OK;
 }
 
@@ -562,8 +756,45 @@ static esp_err_t config_import_handler(httpd_req_t *req)
     }
     body[total] = '\0';
 
-    esp_err_t err = nvs_import_from_json_robust(body);
+    /* Detect encrypted envelope by checking for "enc":1 key */
+    char *json_to_import = body;
+    char *decrypted = NULL;
+    cJSON *probe = cJSON_Parse(body);
+    bool is_encrypted = false;
+    if (probe) {
+        cJSON *enc_field = cJSON_GetObjectItem(probe, "enc");
+        if (cJSON_IsNumber(enc_field) && enc_field->valueint == 1) {
+            is_encrypted = true;
+        }
+        cJSON_Delete(probe);
+    }
+
+    if (is_encrypted) {
+        /* Read passphrase from X-Config-Pass header */
+        char pass[128] = {0};
+        httpd_req_get_hdr_value_str(req, "X-Config-Pass", pass, sizeof(pass));
+
+        if (pass[0] == '\0') {
+            free(body);
+            httpd_resp_set_type(req, "application/json");
+            httpd_resp_send(req, "{\"ok\":false,\"msg\":\"Encrypted config requires passphrase\"}", HTTPD_RESP_USE_STRLEN);
+            return ESP_OK;
+        }
+
+        decrypted = config_decrypt_json(body, pass);
+        if (!decrypted) {
+            free(body);
+            httpd_resp_set_type(req, "application/json");
+            httpd_resp_send(req, "{\"ok\":false,\"msg\":\"Decryption failed: wrong passphrase or corrupt file\"}", HTTPD_RESP_USE_STRLEN);
+            return ESP_OK;
+        }
+        ESP_LOGI(TAG, "Config import: decryption OK");
+        json_to_import = decrypted;
+    }
+
+    esp_err_t err = nvs_import_from_json_robust(json_to_import);
     free(body);
+    if (decrypted) free(decrypted);
 
     httpd_resp_set_type(req, "application/json");
     if (err == ESP_OK) {
@@ -577,7 +808,7 @@ static esp_err_t config_import_handler(httpd_req_t *req)
 
 static httpd_uri_t config_exportp = {
     .uri       = "/api/config-export",
-    .method    = HTTP_GET,
+    .method    = HTTP_POST,
     .handler   = config_export_handler,
 };
 

@@ -216,8 +216,13 @@ setTimeout(\"location.href = '/'\", 10000);\
 </table>\
 <h3 style='font-size:1rem;color:#aaa;margin:1.5rem 0 0.5rem;'>Config Backup / Restore</h3>\
 <table>\
-<tr><td>Export</td><td><a href='/api/config-export' class='ok-button' style='display:inline-block;text-align:center;text-decoration:none;'>Write Config</a></td></tr>\
+<tr><td>Export</td><td>\
+<input type='password' id='expPass' placeholder='Passphrase (leave empty for plain)' style='width:100%;margin-bottom:0.4rem;background:rgba(22,33,62,0.6);border:1px solid rgba(0,217,255,0.2);border-radius:8px;color:#e0e0e0;padding:0.6rem;font-size:0.9rem;box-sizing:border-box;'/><br/>\
+<button type='button' onclick='downloadConfig()' class='ok-button'>Write Config</button>\
+<div id='exportStatus' style='margin-top:0.5rem;font-size:0.9rem;'></div>\
+</td></tr>\
 <tr><td>Import</td><td>\
+<input type='password' id='impPass' placeholder='Passphrase (if encrypted)' style='width:100%;margin-bottom:0.4rem;background:rgba(22,33,62,0.6);border:1px solid rgba(0,217,255,0.2);border-radius:8px;color:#e0e0e0;padding:0.6rem;font-size:0.9rem;box-sizing:border-box;'/><br/>\
 <label style='display:inline-block;padding:0.6rem 1rem;background:rgba(22,33,62,0.6);border:1px solid rgba(0,217,255,0.2);border-radius:8px;color:#e0e0e0;font-size:0.9rem;cursor:pointer;transition:all 0.3s;margin-bottom:0.5rem;'>\
 <input type='file' id='cfgFile' accept='.json' style='display:none;'/>\
 <span id='cfgFileName'>Choose file...</span>\
@@ -268,13 +273,38 @@ xhr.onerror=function(){document.getElementById('otaStatus').innerHTML='<span sty
 xhr.send(f);\
 }\
 document.getElementById('cfgFile').addEventListener('change',function(){document.getElementById('cfgFileName').textContent=this.files[0]?this.files[0].name:'Choose file...';});\
+function downloadConfig(){\
+var pass=document.getElementById('expPass').value;\
+document.getElementById('exportStatus').textContent='Downloading...';\
+fetch('/api/config-export',{method:'POST',body:JSON.stringify({pass:pass}),headers:{'Content-Type':'application/json'}})\
+.then(function(res){\
+if(!res.ok){return res.text().then(function(t){throw new Error(t);});}\
+var cd=res.headers.get('Content-Disposition')||'';\
+var fn='esp32_nat_config.json';\
+var m=cd.match(/filename=\"([^\"]+)\"/);\
+if(m)fn=m[1];\
+return res.blob().then(function(b){return{blob:b,fn:fn};});\
+})\
+.then(function(obj){\
+var url=URL.createObjectURL(obj.blob);\
+var a=document.createElement('a');\
+a.href=url;a.download=obj.fn;\
+document.body.appendChild(a);a.click();\
+setTimeout(function(){URL.revokeObjectURL(url);a.remove();},100);\
+document.getElementById('exportStatus').textContent=pass?'Downloaded (encrypted).':'Downloaded (plain).';\
+})\
+.catch(function(){document.getElementById('exportStatus').innerHTML='<span style=\"color:#ff5252;\">Export failed</span>';});\
+}\
 function uploadConfig(){\
 var f=document.getElementById('cfgFile').files[0];\
+var pass=document.getElementById('impPass').value;\
 if(!f){document.getElementById('importStatus').textContent='Select a file first.';return;}\
 var r=new FileReader();\
 r.onload=function(){\
 document.getElementById('importStatus').textContent='Uploading...';\
-fetch('/api/config-import',{method:'POST',body:r.result,headers:{'Content-Type':'application/json'}})\
+var hdrs={'Content-Type':'application/json'};\
+if(pass)hdrs['X-Config-Pass']=pass;\
+fetch('/api/config-import',{method:'POST',body:r.result,headers:hdrs})\
 .then(function(res){return res.json();})\
 .then(function(d){\
 if(d.ok){\

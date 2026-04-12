@@ -2,7 +2,7 @@
 # in this exact order for cmake to work correctly
 cmake_minimum_required(VERSION 3.16)
 
-set(PROJECT_VER "2.4.7")
+set(PROJECT_VER "2.4.8")
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(esp32_nat_router)
 
