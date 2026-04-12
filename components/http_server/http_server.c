@@ -475,7 +475,9 @@ static char *config_decrypt_json(const char *enc_json, const char *pass)
     return (char *)plain;
 }
 
-static char *nvs_export_to_json_robust(void)
+/* include_secrets: if false, WireGuard private key and PSK are omitted (plain-text export).
+ *                  if true,  all keys are included (encrypted export only). */
+static char *nvs_export_to_json_robust(bool include_secrets)
 {
     nvs_handle_t nvs;
     esp_err_t err = nvs_open(PARAM_NAMESPACE, NVS_READONLY, &nvs);
@@ -490,8 +492,16 @@ static char *nvs_export_to_json_robust(void)
         nvs_entry_info_t info;
         nvs_entry_info(it, &info);
 
-        // Skip WireGuard secrets for security
-        if (strcmp(info.key, "vpn_privkey") == 0 || strcmp(info.key, "vpn_psk") == 0) {
+        /* Skip secrets for plain (unencrypted) exports:
+         *   passwd      — STA WiFi password (also used as WPA-Enterprise EAP password)
+         *   ap_passwd   — AP WiFi password
+         *   vpn_privkey — WireGuard private key
+         *   vpn_psk     — WireGuard pre-shared key */
+        if (!include_secrets &&
+            (strcmp(info.key, "passwd")      == 0 ||
+             strcmp(info.key, "ap_passwd")   == 0 ||
+             strcmp(info.key, "vpn_privkey") == 0 ||
+             strcmp(info.key, "vpn_psk")     == 0)) {
             err = nvs_entry_next(&it);
             continue;
         }
@@ -688,7 +698,8 @@ static esp_err_t config_export_handler(httpd_req_t *req)
         }
     }
 
-    char *plain = nvs_export_to_json_robust();
+    /* Include WireGuard secrets only in encrypted exports */
+    char *plain = nvs_export_to_json_robust(pass[0] != '\0');
     if (!plain) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Export failed");
         return ESP_FAIL;
@@ -698,7 +709,7 @@ static esp_err_t config_export_handler(httpd_req_t *req)
     httpd_resp_set_hdr(req, "Content-Disposition", "attachment; filename=\"esp32_nat_config.json\"");
 
     if (pass[0] == '\0') {
-        /* No passphrase — send plain JSON */
+        /* No passphrase — send plain JSON (WireGuard secrets already omitted) */
         httpd_resp_send(req, plain, HTTPD_RESP_USE_STRLEN);
         free(plain);
     } else {
