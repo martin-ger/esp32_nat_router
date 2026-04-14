@@ -46,6 +46,8 @@ extern uint16_t connect_count;
 extern bool ap_connect;
 extern bool wifi_scan_active;
 
+#define DEFAULT_AP_IP "192.168.4.1"
+
 extern uint32_t my_ip;
 extern uint32_t my_ap_ip;
 

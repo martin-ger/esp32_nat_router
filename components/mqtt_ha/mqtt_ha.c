@@ -93,10 +93,9 @@ static void build_device_id(void)
 /* Shared device JSON fragment (embedded in every discovery payload). */
 static int device_json(char *buf, size_t len)
 {
-    char ip_str[16] = "192.168.4.1";
-    if (my_ip != 0) {
-        snprintf(ip_str, sizeof(ip_str), IPSTR, IP2STR((esp_ip4_addr_t *)&my_ip));
-    }
+    char ip_str[16];
+    uint32_t cfg_ip = my_ip != 0 ? my_ip : my_ap_ip;
+    snprintf(ip_str, sizeof(ip_str), IPSTR, IP2STR((esp_ip4_addr_t *)&cfg_ip));
     return snprintf(buf, len,
         "\"dev\":{\"ids\":[\"%s\"],"
         "\"name\":\"%s\","

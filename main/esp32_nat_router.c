@@ -132,7 +132,6 @@ static EventGroupHandle_t wifi_event_group;
  * - are we connected to the AP with an IP? */
 const int WIFI_CONNECTED_BIT = BIT0;
 
-#define DEFAULT_AP_IP "192.168.4.1"
 #define DEFAULT_DNS "8.8.8.8"
 
 #if !CONFIG_ETH_UPLINK
@@ -1025,7 +1024,7 @@ void wifi_init(const uint8_t* mac, const char* ssid, const char* ent_username, c
         const char *dns_src = (ap_dns && ap_dns[0]) ? ap_dns : "1.1.1.1";
         dnsserver.ip.u_addr.ip4.addr = esp_ip4addr_aton(dns_src);
     } else {
-        dnsserver.ip.u_addr.ip4.addr = esp_ip4addr_aton(DEFAULT_AP_IP);
+        dnsserver.ip.u_addr.ip4.addr = my_ap_ip;
     }
     dnsserver.ip.type = ESP_IPADDR_TYPE_V4;
     esp_netif_set_dns_info(wifiAP, ESP_NETIF_DNS_MAIN, &dnsserver);

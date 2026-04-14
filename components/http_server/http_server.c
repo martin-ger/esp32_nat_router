@@ -1,4 +1,4 @@
-/* Web interface (HTTP server) at 192.168.4.1.
+/* Web interface (HTTP server)
  *
  * Pages:
  *   /          - Status dashboard: connection state, clients, heap, uptime, login
@@ -1805,7 +1805,7 @@ static esp_err_t config_get_handler(httpd_req_t *req)
     if (ap_ip_str == NULL) {
         ap_ip_str = malloc(16);
         if (ap_ip_str != NULL) {
-            strcpy(ap_ip_str, "192.168.4.1");
+            snprintf(ap_ip_str, 16, IPSTR, IP2STR((esp_ip4_addr_t *)&my_ap_ip));
         }
     }
 
@@ -3103,7 +3103,7 @@ static esp_err_t setup_get_handler(httpd_req_t *req)
                     }
 
                     /* Reset AP parameters to defaults (keep SSID/password from form) */
-                    set_config_param_str("ap_ip",      "192.168.4.1");
+                    set_config_param_str("ap_ip",      DEFAULT_AP_IP);
                     set_config_param_str("ap_dns",     "");
                     free(ap_dns); ap_dns = strdup("");
                     set_config_param_int("ap_hidden",   0); ap_ssid_hidden = 0;
@@ -3494,7 +3494,7 @@ static void stop_webserver(httpd_handle_t server)
 
 // ---------- Captive portal ----------
 
-// DNS server: resolve every query to 192.168.4.1 so captive-portal checks succeed
+// DNS server: resolve every query to the AP IP so captive-portal checks succeed
 static void dns_server_task(void *pvParameters)
 {
     int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
@@ -3531,7 +3531,8 @@ static void dns_server_task(void *pvParameters)
         buf[3] = 0x80;  // RA=1
         buf[6] = 0x00;  buf[7] = 0x01;  // 1 answer
 
-        // Append A record: name-pointer, type A, class IN, TTL 60, 192.168.4.1
+        // Append A record: name-pointer, type A, class IN, TTL 60, AP IP
+        uint8_t *ip_bytes = (uint8_t *)&my_ap_ip;
         int pos = len;
         buf[pos++] = 0xC0; buf[pos++] = 0x0C;
         buf[pos++] = 0x00; buf[pos++] = 0x01;
@@ -3539,8 +3540,8 @@ static void dns_server_task(void *pvParameters)
         buf[pos++] = 0x00; buf[pos++] = 0x00;
         buf[pos++] = 0x00; buf[pos++] = 0x3C;
         buf[pos++] = 0x00; buf[pos++] = 0x04;
-        buf[pos++] = 192;  buf[pos++] = 168;
-        buf[pos++] = 4;    buf[pos++] = 1;
+        buf[pos++] = ip_bytes[0]; buf[pos++] = ip_bytes[1];
+        buf[pos++] = ip_bytes[2]; buf[pos++] = ip_bytes[3];
 
         sendto(sock, buf, pos, 0,
                (struct sockaddr *)&client, client_len);
@@ -3553,10 +3554,16 @@ void web_server_start_captive_dns(void)
 }
 
 // 404 handler: redirect unknown URIs to the main page (captive portal trigger)
+static char captive_redirect_url[32];
+
 static esp_err_t captive_redirect_handler(httpd_req_t *req, httpd_err_code_t err)
 {
+    if (captive_redirect_url[0] == '\0') {
+        snprintf(captive_redirect_url, sizeof(captive_redirect_url),
+                 "http://" IPSTR "/", IP2STR((esp_ip4_addr_t *)&my_ap_ip));
+    }
     httpd_resp_set_status(req, "302 Found");
-    httpd_resp_set_hdr(req, "Location", "http://192.168.4.1/");
+    httpd_resp_set_hdr(req, "Location", captive_redirect_url);
     httpd_resp_send(req, NULL, 0);
     return ESP_OK;
 }
