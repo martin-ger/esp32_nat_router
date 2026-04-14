@@ -383,7 +383,12 @@ static void config_derive_key(const char *pass, const uint8_t *salt, uint8_t key
  * Encrypt plain JSON string with the given passphrase.
  * Returns a malloc'd JSON envelope string, or NULL on allocation failure.
  */
-static char *config_encrypt_json(const char *plain, size_t plain_len, const char *pass)
+/*
+ * Encrypt plaintext JSON into a JSON envelope.
+ * Takes ownership of `plain` (frees it) to reduce peak heap usage —
+ * the caller must NOT free plain after this call.
+ */
+static char *config_encrypt_json(char *plain, size_t plain_len, const char *pass)
 {
     uint8_t salt[ENC_SALT_LEN], nonce[ENC_NONCE_LEN], key[ENC_KEY_LEN];
     esp_fill_random(salt, sizeof(salt));
@@ -392,20 +397,12 @@ static char *config_encrypt_json(const char *plain, size_t plain_len, const char
 
     size_t cipher_len = plain_len + ENC_TAG_LEN;
     uint8_t *cipher = malloc(cipher_len);
-    if (!cipher) return NULL;
+    if (!cipher) { free(plain); return NULL; }
     xchacha20poly1305_encrypt(cipher, (const uint8_t *)plain, plain_len,
                               NULL, 0, nonce, key);
+    free(plain); /* Release early — no longer needed after encryption */
 
-    /* Base64-encode ciphertext */
-    size_t b64_olen = 0;
-    mbedtls_base64_encode(NULL, 0, &b64_olen, cipher, cipher_len); /* query size */
-    char *b64 = malloc(b64_olen + 1);
-    if (!b64) { free(cipher); return NULL; }
-    mbedtls_base64_encode((unsigned char *)b64, b64_olen + 1, &b64_olen, cipher, cipher_len);
-    b64[b64_olen] = '\0';
-    free(cipher);
-
-    /* Hex-encode salt and nonce inline */
+    /* Hex-encode salt and nonce */
     char salt_hex[ENC_SALT_LEN * 2 + 1];
     char nonce_hex[ENC_NONCE_LEN * 2 + 1];
     for (int i = 0; i < ENC_SALT_LEN; i++)  sprintf(salt_hex  + i*2, "%02x", salt[i]);
@@ -413,13 +410,34 @@ static char *config_encrypt_json(const char *plain, size_t plain_len, const char
     salt_hex[ENC_SALT_LEN * 2]   = '\0';
     nonce_hex[ENC_NONCE_LEN * 2] = '\0';
 
-    /* Build envelope: {"enc":1,"s":"...","n":"...","c":"..."} */
-    size_t out_len = b64_olen + sizeof(salt_hex) + sizeof(nonce_hex) + 32;
+    /* Query base64 output size (b64_needed includes trailing NUL) */
+    size_t b64_needed = 0;
+    mbedtls_base64_encode(NULL, 0, &b64_needed, cipher, cipher_len);
+    size_t b64_str_len = b64_needed > 0 ? b64_needed - 1 : 0;
+
+    /* Build JSON prefix and suffix so we can base64-encode directly into
+     * the output buffer, avoiding a separate b64 allocation. */
+    size_t pre_len = (size_t)snprintf(NULL, 0,
+                        "{\"enc\":1,\"s\":\"%s\",\"n\":\"%s\",\"c\":\"",
+                        salt_hex, nonce_hex);
+    size_t out_len = pre_len + b64_str_len + 2 + 1; /* 2 for "}, 1 for NUL */
     char *out = malloc(out_len);
-    if (!out) { free(b64); return NULL; }
-    snprintf(out, out_len, "{\"enc\":1,\"s\":\"%s\",\"n\":\"%s\",\"c\":\"%s\"}",
-             salt_hex, nonce_hex, b64);
-    free(b64);
+    if (!out) { free(cipher); return NULL; }
+
+    /* Write JSON prefix */
+    snprintf(out, pre_len + 1,
+             "{\"enc\":1,\"s\":\"%s\",\"n\":\"%s\",\"c\":\"",
+             salt_hex, nonce_hex);
+
+    /* Base64-encode ciphertext directly into the output buffer */
+    size_t b64_written = 0;
+    mbedtls_base64_encode((unsigned char *)(out + pre_len),
+                          out_len - pre_len, &b64_written,
+                          cipher, cipher_len);
+    free(cipher);
+
+    /* Close the JSON envelope (overwrite the base64 NUL terminator) */
+    memcpy(out + pre_len + b64_written, "\"}", 3); /* includes NUL */
     return out;
 }
 
@@ -713,9 +731,9 @@ static esp_err_t config_export_handler(httpd_req_t *req)
         httpd_resp_send(req, plain, HTTPD_RESP_USE_STRLEN);
         free(plain);
     } else {
-        /* Encrypt with PBKDF2-derived XChaCha20-Poly1305 key */
+        /* Encrypt with PBKDF2-derived XChaCha20-Poly1305 key
+         * config_encrypt_json() takes ownership of plain and frees it. */
         char *enc = config_encrypt_json(plain, strlen(plain), pass);
-        free(plain);
         if (!enc) {
             httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Encryption failed");
             return ESP_FAIL;
@@ -767,18 +785,12 @@ static esp_err_t config_import_handler(httpd_req_t *req)
     }
     body[total] = '\0';
 
-    /* Detect encrypted envelope by checking for "enc":1 key */
+    /* Detect encrypted envelope with a cheap string search instead of
+     * parsing the entire JSON — saves a full cJSON tree allocation. */
     char *json_to_import = body;
     char *decrypted = NULL;
-    cJSON *probe = cJSON_Parse(body);
-    bool is_encrypted = false;
-    if (probe) {
-        cJSON *enc_field = cJSON_GetObjectItem(probe, "enc");
-        if (cJSON_IsNumber(enc_field) && enc_field->valueint == 1) {
-            is_encrypted = true;
-        }
-        cJSON_Delete(probe);
-    }
+    bool is_encrypted = (strstr(body, "\"enc\"") != NULL &&
+                         strstr(body, "\"c\"")   != NULL);
 
     if (is_encrypted) {
         /* Read passphrase from X-Config-Pass header */
@@ -800,11 +812,13 @@ static esp_err_t config_import_handler(httpd_req_t *req)
             return ESP_OK;
         }
         ESP_LOGI(TAG, "Config import: decryption OK");
+        free(body);          /* Release early — no longer needed after decryption */
+        body = NULL;
         json_to_import = decrypted;
     }
 
     esp_err_t err = nvs_import_from_json_robust(json_to_import);
-    free(body);
+    free(body);              /* NULL-safe: no-op if already freed above */
     if (decrypted) free(decrypted);
 
     httpd_resp_set_type(req, "application/json");
