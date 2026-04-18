@@ -793,6 +793,10 @@ void eth_init(const char* static_ip, const char* subnet_mask, const char* gatewa
     eth_esp32_emac_config_t emac_config = ETH_ESP32_EMAC_DEFAULT_CONFIG();
     emac_config.smi_gpio.mdc_num = CONFIG_ETH_MDC_GPIO;
     emac_config.smi_gpio.mdio_num = CONFIG_ETH_MDIO_GPIO;
+#if defined(CONFIG_ETH_RMII_CLK_OUTPUT_GPIO) && CONFIG_ETH_RMII_CLK_OUTPUT_GPIO >= 0
+    emac_config.clock_config.rmii.clock_mode = EMAC_CLK_OUT;
+    emac_config.clock_config.rmii.clock_gpio = CONFIG_ETH_RMII_CLK_OUTPUT_GPIO;
+#endif
     esp_eth_mac_t *mac = esp_eth_mac_new_esp32(&emac_config, &mac_config);
 
     eth_phy_config_t phy_config = ETH_PHY_DEFAULT_CONFIG();

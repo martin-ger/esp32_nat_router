@@ -41,6 +41,15 @@ menu "NAT Router Uplink"
         default 16
         depends on ETH_UPLINK
 
+    config ETH_RMII_CLK_OUTPUT_GPIO
+        int "RMII clock output GPIO (-1 = input from PHY)"
+        default -1
+        depends on ETH_UPLINK
+        help
+            Set to the GPIO number on which the ESP32 should generate the 50 MHz
+            RMII reference clock (e.g. GPIO 17 for the Olimex ESP32-POE-ISO).
+            Leave at -1 when the PHY provides the clock (e.g. WT32-ETH01).
+
 endmenu
 
 menu "MQTT Home Assistant"
