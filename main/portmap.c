@@ -12,7 +12,6 @@
 #include "esp_netif.h"
 #include "router_config.h"
 #include "portmap.h"
-#include "vpn_config.h"
 #include "dhcp_reservations.h"
 #include "wifi_config.h"
 
@@ -23,14 +22,7 @@ static const char *TAG = "portmap";
 esp_err_t apply_portmap_tab() {
     for (int i = 0; i<IP_PORTMAP_MAX; i++) {
         if (portmap_tab[i].valid) {
-            uint32_t bind_ip;
-            if (portmap_tab[i].iface == 1) {
-                if (vpn_tunnel_ip == 0) continue;  // VPN not connected, skip
-                bind_ip = vpn_tunnel_ip;
-            } else {
-                bind_ip = my_ip;
-            }
-            ip_portmap_add(portmap_tab[i].proto, bind_ip, portmap_tab[i].mport, portmap_tab[i].daddr, portmap_tab[i].dport);
+            ip_portmap_add(portmap_tab[i].proto, my_ip, portmap_tab[i].mport, portmap_tab[i].daddr, portmap_tab[i].dport);
         }
     }
     return ESP_OK;
@@ -48,14 +40,9 @@ esp_err_t delete_portmap_tab() {
 void print_portmap_tab() {
     for (int i = 0; i<IP_PORTMAP_MAX; i++) {
         if (portmap_tab[i].valid) {
-#if CONFIG_ETH_UPLINK
-            const char *iface_name = portmap_tab[i].iface == 1 ? "VPN" : "ETH";
-#else
-            const char *iface_name = portmap_tab[i].iface == 1 ? "VPN" : "STA";
-#endif
-            printf ("%s %s ", iface_name, portmap_tab[i].proto == PROTO_TCP?"TCP":"UDP");
+            printf ("STA %s ", portmap_tab[i].proto == PROTO_TCP?"TCP":"UDP");
             ip4_addr_t addr;
-            addr.addr = portmap_tab[i].iface == 1 ? vpn_tunnel_ip : my_ip;
+            addr.addr = my_ip;
             printf (IPSTR":%d -> ", IP2STR(&addr), portmap_tab[i].mport);
 
             /* Try to look up device name for destination IP */
@@ -92,9 +79,9 @@ esp_err_t get_portmap_tab() {
     }
     nvs_close(nvs);
 
-    /* Sanitize iface field (backward compat with old NVS blobs) */
+    /* Sanitize iface field (old NVS blobs may have VPN=1 entries) */
     for (int i = 0; i < IP_PORTMAP_MAX; i++) {
-        if (portmap_tab[i].valid && portmap_tab[i].iface > 1) {
+        if (portmap_tab[i].valid && portmap_tab[i].iface != 0) {
             portmap_tab[i].iface = 0;
         }
     }
@@ -103,6 +90,7 @@ esp_err_t get_portmap_tab() {
 }
 
 esp_err_t add_portmap(u8_t proto, u16_t mport, u32_t daddr, u16_t dport, u8_t iface) {
+    (void)iface;
     for (int i = 0; i<IP_PORTMAP_MAX; i++) {
         if (!portmap_tab[i].valid) {
             portmap_tab[i].proto = proto;
@@ -110,16 +98,15 @@ esp_err_t add_portmap(u8_t proto, u16_t mport, u32_t daddr, u16_t dport, u8_t if
             portmap_tab[i].daddr = daddr;
             portmap_tab[i].dport = dport;
             portmap_tab[i].valid = 1;
-            portmap_tab[i].iface = iface;
+            portmap_tab[i].iface = 0;
 
             esp_err_t err = set_config_param_blob("portmap_tab", portmap_tab, PORTMAP_TAB_SIZE);
             if (err == ESP_OK) {
                 ESP_LOGI(TAG, "New portmap table stored.");
             }
 
-            uint32_t bind_ip = (iface == 1) ? vpn_tunnel_ip : my_ip;
-            if (bind_ip != 0) {
-                ip_portmap_add(proto, bind_ip, mport, daddr, dport);
+            if (my_ip != 0) {
+                ip_portmap_add(proto, my_ip, mport, daddr, dport);
             }
 
             return err;

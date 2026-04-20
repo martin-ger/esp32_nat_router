@@ -13,6 +13,5 @@
 #include "dhcp_reservations.h"
 #include "portmap.h"
 #include "wifi_config.h"
-#include "vpn_config.h"
 #include "acl.h"
 #include "web_password.h"

@@ -17,7 +17,7 @@ struct portmap_table_entry {
     uint16_t dport;
     uint8_t proto;
     uint8_t valid;
-    uint8_t iface;       // 0=STA/ETH (uplink), 1=VPN
+    uint8_t iface;       // 0=STA (uplink); other values reserved
 };
 
 extern struct portmap_table_entry portmap_tab[];

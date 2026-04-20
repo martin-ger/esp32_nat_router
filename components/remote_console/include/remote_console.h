@@ -25,7 +25,6 @@ extern "C" {
 /** Interface binding bitmask */
 #define RC_BIND_AP    0x01   /**< Listen on AP interface */
 #define RC_BIND_STA   0x02   /**< Listen on STA interface */
-#define RC_BIND_VPN   0x04   /**< Listen on VPN tunnel interface */
 
 /** Session state */
 typedef enum {

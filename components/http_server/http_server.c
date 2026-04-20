@@ -5,7 +5,6 @@
  *   /config    - Router configuration: AP/STA settings, static IP, MAC addresses
  *   /mappings  - DHCP reservations and port forwarding management
  *   /firewall  - ACL firewall rules (4 lists, add/delete, hit statistics)
- *   /vpn       - WireGuard VPN configuration and status
  *   /scan      - WiFi network scanner (STA uplink only)
  *
  * Password-protected pages use cookie-based sessions (30-min timeout).
@@ -36,7 +35,6 @@
 #include "pages.h"
 #include "favicon_png.h"
 #include "router_globals.h"
-#include "vpn_config.h"
 #include "pcap_capture.h"
 #include "acl.h"
 #include "remote_console.h"
@@ -47,6 +45,7 @@
 #include "mbedtls/pkcs5.h"
 #include "mbedtls/md.h"
 #include "mbedtls/base64.h"
+#include "mbedtls/chachapoly.h"
 
 static const char *TAG = "HTTPServer";
 
@@ -73,9 +72,9 @@ static const char *get_client_ip(httpd_req_t *req, char *buf, size_t buf_len)
     return buf;
 }
 
-/* Web UI interface access bitmask (RC_BIND_AP, RC_BIND_STA, RC_BIND_VPN).
+/* Web UI interface access bitmask (RC_BIND_AP, RC_BIND_STA).
  * Loaded from NVS in start_webserver(). Default: all interfaces allowed. */
-static uint8_t s_web_bind = RC_BIND_AP | RC_BIND_STA | RC_BIND_VPN;
+static uint8_t s_web_bind = RC_BIND_AP | RC_BIND_STA;
 
 /* Check whether an incoming HTTP connection is allowed based on which
  * network interface it arrived on.  Called by esp_http_server before any
@@ -105,19 +104,11 @@ static esp_err_t http_open_fn(httpd_handle_t hd, int sockfd)
     /* Identify which interface the connection arrived on */
     bool on_ap  = (local_ip != 0 && local_ip == my_ap_ip);
     bool on_sta = (local_ip != 0 && local_ip == my_ip);
-    bool on_vpn = false;
-    if (local_ip != 0 && vpn_connected && vpn_address && vpn_address[0]) {
-        ip4_addr_t vpn_addr;
-        if (ip4addr_aton(vpn_address, &vpn_addr) && local_ip == vpn_addr.addr) {
-            on_vpn = true;
-        }
-    }
 
     /* Enforce interface access policy */
     bool allowed = false;
     if (on_ap  && (s_web_bind & RC_BIND_AP))  allowed = true;
     if (on_sta && (s_web_bind & RC_BIND_STA)) allowed = true;
-    if (on_vpn && (s_web_bind & RC_BIND_VPN)) allowed = true;
     /* If local_ip could not be determined, allow through (fail open) */
     if (local_ip == 0) allowed = true;
 
@@ -251,13 +242,6 @@ static bool check_csrf(httpd_req_t *req)
         if (strcmp(origin, expected) == 0) return true;
     }
 
-    /* Also accept requests originating from the VPN/WireGuard interface */
-    if (vpn_tunnel_ip != 0) {
-        addr.addr = vpn_tunnel_ip;
-        snprintf(expected, sizeof(expected), "http://" IPSTR, IP2STR(&addr));
-        if (strcmp(origin, expected) == 0) return true;
-    }
-
     return false;
 }
 
@@ -319,25 +303,14 @@ static esp_err_t create_session(httpd_req_t *req)
 
 /*
  * Encrypted config file format (JSON envelope):
- *   {"enc":1,"s":"<hex 16-byte salt>","n":"<hex 24-byte nonce>","c":"<base64 ciphertext>"}
+ *   {"enc":1,"s":"<hex 16-byte salt>","n":"<hex 12-byte nonce>","c":"<base64 ciphertext>"}
  *
  * Key derivation : PBKDF2-HMAC-SHA256, 10 000 iterations, 32-byte output
- * Encryption     : XChaCha20-Poly1305 AEAD (24-byte nonce, 16-byte auth tag)
- *
- * The XChaCha20-Poly1305 implementation is the one bundled with the WireGuard
- * managed component; the symbols are already compiled into the binary.
+ * Encryption     : ChaCha20-Poly1305 AEAD (12-byte nonce, 16-byte auth tag)
  */
 
-/* Forward-declare XChaCha20-Poly1305 from managed_components/esp_wireguard */
-extern void xchacha20poly1305_encrypt(uint8_t *dst, const uint8_t *src, size_t src_len,
-                                      const uint8_t *ad, size_t ad_len,
-                                      const uint8_t *nonce, const uint8_t *key);
-extern bool xchacha20poly1305_decrypt(uint8_t *dst, const uint8_t *src, size_t src_len,
-                                      const uint8_t *ad, size_t ad_len,
-                                      const uint8_t *nonce, const uint8_t *key);
-
 #define ENC_SALT_LEN    16
-#define ENC_NONCE_LEN   24
+#define ENC_NONCE_LEN   12
 #define ENC_KEY_LEN     32
 #define ENC_TAG_LEN     16
 #define ENC_PBKDF2_ITER 10000
@@ -398,8 +371,18 @@ static char *config_encrypt_json(char *plain, size_t plain_len, const char *pass
     size_t cipher_len = plain_len + ENC_TAG_LEN;
     uint8_t *cipher = malloc(cipher_len);
     if (!cipher) { free(plain); return NULL; }
-    xchacha20poly1305_encrypt(cipher, (const uint8_t *)plain, plain_len,
-                              NULL, 0, nonce, key);
+
+    mbedtls_chachapoly_context cctx;
+    mbedtls_chachapoly_init(&cctx);
+    int crc = mbedtls_chachapoly_setkey(&cctx, key);
+    if (crc == 0) {
+        crc = mbedtls_chachapoly_encrypt_and_tag(&cctx, plain_len, nonce,
+                                                  NULL, 0,
+                                                  (const uint8_t *)plain,
+                                                  cipher, cipher + plain_len);
+    }
+    mbedtls_chachapoly_free(&cctx);
+    if (crc != 0) { free(cipher); free(plain); return NULL; }
     free(plain); /* Release early — no longer needed after encryption */
 
     /* Hex-encode salt and nonce */
@@ -484,16 +467,24 @@ static char *config_decrypt_json(const char *enc_json, const char *pass)
     uint8_t *plain = malloc(plain_len + 1);
     if (!plain) { free(cipher); return NULL; }
 
-    bool ok = xchacha20poly1305_decrypt(plain, cipher, actual_cipher_len,
-                                        NULL, 0, nonce, key);
+    mbedtls_chachapoly_context cctx;
+    mbedtls_chachapoly_init(&cctx);
+    int crc = mbedtls_chachapoly_setkey(&cctx, key);
+    if (crc == 0) {
+        crc = mbedtls_chachapoly_auth_decrypt(&cctx, plain_len, nonce,
+                                               NULL, 0,
+                                               cipher + plain_len,
+                                               cipher, plain);
+    }
+    mbedtls_chachapoly_free(&cctx);
     free(cipher);
-    if (!ok) { free(plain); return NULL; }  /* wrong passphrase / tampered data */
+    if (crc != 0) { free(plain); return NULL; }  /* wrong passphrase / tampered data */
 
     plain[plain_len] = '\0';
     return (char *)plain;
 }
 
-/* include_secrets: if false, WireGuard private key and PSK are omitted (plain-text export).
+/* include_secrets: if false, WiFi passwords are omitted (plain-text export).
  *                  if true,  all keys are included (encrypted export only). */
 static char *nvs_export_to_json_robust(bool include_secrets)
 {
@@ -511,15 +502,11 @@ static char *nvs_export_to_json_robust(bool include_secrets)
         nvs_entry_info(it, &info);
 
         /* Skip secrets for plain (unencrypted) exports:
-         *   passwd      — STA WiFi password (also used as WPA-Enterprise EAP password)
-         *   ap_passwd   — AP WiFi password
-         *   vpn_privkey — WireGuard private key
-         *   vpn_psk     — WireGuard pre-shared key */
+         *   passwd    — STA WiFi password (also used as WPA-Enterprise EAP password)
+         *   ap_passwd — AP WiFi password */
         if (!include_secrets &&
-            (strcmp(info.key, "passwd")      == 0 ||
-             strcmp(info.key, "ap_passwd")   == 0 ||
-             strcmp(info.key, "vpn_privkey") == 0 ||
-             strcmp(info.key, "vpn_psk")     == 0)) {
+            (strcmp(info.key, "passwd")    == 0 ||
+             strcmp(info.key, "ap_passwd") == 0)) {
             err = nvs_entry_next(&it);
             continue;
         }
@@ -716,7 +703,7 @@ static esp_err_t config_export_handler(httpd_req_t *req)
         }
     }
 
-    /* Include WireGuard secrets only in encrypted exports */
+    /* Include secrets only in encrypted exports */
     char *plain = nvs_export_to_json_robust(pass[0] != '\0');
     if (!plain) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Export failed");
@@ -727,11 +714,11 @@ static esp_err_t config_export_handler(httpd_req_t *req)
     httpd_resp_set_hdr(req, "Content-Disposition", "attachment; filename=\"esp32_nat_config.json\"");
 
     if (pass[0] == '\0') {
-        /* No passphrase — send plain JSON (WireGuard secrets already omitted) */
+        /* No passphrase — send plain JSON (passwords already omitted) */
         httpd_resp_send(req, plain, HTTPD_RESP_USE_STRLEN);
         free(plain);
     } else {
-        /* Encrypt with PBKDF2-derived XChaCha20-Poly1305 key
+        /* Encrypt with PBKDF2-derived ChaCha20-Poly1305 key
          * config_encrypt_json() takes ownership of plain and frees it. */
         char *enc = config_encrypt_json(plain, strlen(plain), pass);
         if (!enc) {
@@ -1176,13 +1163,6 @@ static esp_err_t index_get_handler(httpd_req_t *req)
     }
 
     /* Stream Uplink row */
-#if CONFIG_ETH_UPLINK
-    if (ap_connect) {
-        httpd_resp_send_chunk(req, "<tr><td>Uplink:</td><td><strong>Ethernet Connected</strong></td></tr>", HTTPD_RESP_USE_STRLEN);
-    } else {
-        httpd_resp_send_chunk(req, "<tr><td>Uplink:</td><td><strong>Ethernet Disconnected</strong></td></tr>", HTTPD_RESP_USE_STRLEN);
-    }
-#else
     if (ap_connect) {
         wifi_ap_record_t ap_info;
         if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
@@ -1194,37 +1174,16 @@ static esp_err_t index_get_handler(httpd_req_t *req)
     } else {
         httpd_resp_send_chunk(req, "<tr><td>Uplink:</td><td><strong>Disconnected</strong></td></tr>", HTTPD_RESP_USE_STRLEN);
     }
-#endif
 
     /* Stream uplink IP row */
     if (ap_connect) {
         esp_ip4_addr_t addr;
         addr.addr = my_ip;
-#if CONFIG_ETH_UPLINK
-        snprintf(row, sizeof(row), "<tr><td>ETH IP:</td><td>" IPSTR "</td></tr>", IP2STR(&addr));
-#else
         snprintf(row, sizeof(row), "<tr><td>STA IP:</td><td>" IPSTR "</td></tr>", IP2STR(&addr));
-#endif
     } else {
-#if CONFIG_ETH_UPLINK
-        snprintf(row, sizeof(row), "<tr><td>ETH IP:</td><td>N/A</td></tr>");
-#else
         snprintf(row, sizeof(row), "<tr><td>STA IP:</td><td>N/A</td></tr>");
-#endif
     }
     httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
-
-    /* Stream VPN status row */
-    if (vpn_enabled) {
-        if (vpn_is_connected()) {
-            snprintf(row, sizeof(row), "<tr><td>VPN:</td><td><span style='color: #4caf50;'>Connected</span></td></tr>");
-        } else if (vpn_connected) {
-            snprintf(row, sizeof(row), "<tr><td>VPN:</td><td><span style='color: #ffc107;'>Handshake Pending</span></td></tr>");
-        } else {
-            snprintf(row, sizeof(row), "<tr><td>VPN:</td><td><span style='color: #f44336;'>Disconnected</span></td></tr>");
-        }
-        httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
-    }
 
     /* Stream Bytes row (sent/received combined) */
     uint64_t bytes_sent = get_sta_bytes_sent();
@@ -1351,16 +1310,11 @@ uint8_t web_ui_get_bind(void)
 void web_ui_set_bind(uint8_t bind)
 {
     if (bind == 0) bind = RC_BIND_AP;  /* must keep at least one */
-    s_web_bind = bind & (RC_BIND_AP | RC_BIND_STA | RC_BIND_VPN);
+    s_web_bind = bind & (RC_BIND_AP | RC_BIND_STA);
     set_config_param_int("web_bind", (int32_t)s_web_bind);
     char buf[20] = "";
     if (s_web_bind & RC_BIND_AP)  strcat(buf, "AP ");
-#if CONFIG_ETH_UPLINK
-    if (s_web_bind & RC_BIND_STA) strcat(buf, "ETH ");
-#else
     if (s_web_bind & RC_BIND_STA) strcat(buf, "STA ");
-#endif
-    if (s_web_bind & RC_BIND_VPN) strcat(buf, "VPN ");
     ESP_LOGI(TAG, "Web UI bind set to: %s", buf);
 }
 
@@ -1405,7 +1359,6 @@ static esp_err_t config_get_handler(httpd_req_t *req)
                 uint8_t bind = 0;
                 if (httpd_query_key_value(buf, "web_bind_ap",  param1, sizeof(param1)) == ESP_OK) bind |= RC_BIND_AP;
                 if (httpd_query_key_value(buf, "web_bind_sta", param1, sizeof(param1)) == ESP_OK) bind |= RC_BIND_STA;
-                if (httpd_query_key_value(buf, "web_bind_vpn", param1, sizeof(param1)) == ESP_OK) bind |= RC_BIND_VPN;
                 if (bind == 0) bind = RC_BIND_AP;
                 web_ui_set_bind(bind);
                 ESP_LOGI(TAG, "Web UI bind interfaces updated via web");
@@ -1539,23 +1492,10 @@ static esp_err_t config_get_handler(httpd_req_t *req)
                         }
                     }
 
-#if CONFIG_ETH_UPLINK
-                    // Handle AP channel setting (ETH_UPLINK only)
-                    if (httpd_query_key_value(buf, "ap_channel", param5, sizeof(param5)) == ESP_OK) {
-                        int channel_val = atoi(param5);
-                        if (channel_val >= 0 && channel_val <= 13) {
-                            set_config_param_int("ap_channel", channel_val);
-                            ap_channel = (uint8_t)channel_val;
-                            ESP_LOGI(TAG, "AP channel set to: %d", channel_val);
-                        }
-                    }
-#endif
-
                     esp_timer_start_once(restart_timer, 500000);
                 }
             }
 
-#if !CONFIG_ETH_UPLINK
             /* Handle STA settings with optional MAC */
             if (httpd_query_key_value(buf, "ssid", param1, sizeof(param1)) == ESP_OK) {
                 ESP_LOGI(TAG, "Found URL query parameter => ssid=%s", param1);
@@ -1670,7 +1610,6 @@ static esp_err_t config_get_handler(httpd_req_t *req)
                     }
                 }
             }
-#endif
 
             /* Handle static IP settings */
             if (httpd_query_key_value(buf, "staticip", param1, sizeof(param1)) == ESP_OK) {
@@ -1717,7 +1656,6 @@ static esp_err_t config_get_handler(httpd_req_t *req)
                 uint8_t bind = 0;
                 if (httpd_query_key_value(buf, "rc_bind_ap", param1, sizeof(param1)) == ESP_OK) bind |= RC_BIND_AP;
                 if (httpd_query_key_value(buf, "rc_bind_sta", param1, sizeof(param1)) == ESP_OK) bind |= RC_BIND_STA;
-                if (httpd_query_key_value(buf, "rc_bind_vpn", param1, sizeof(param1)) == ESP_OK) bind |= RC_BIND_VPN;
                 if (bind == 0) bind = RC_BIND_AP;
                 remote_console_set_bind(bind);
                 /* Timeout */
@@ -1777,7 +1715,6 @@ static esp_err_t config_get_handler(httpd_req_t *req)
         free(buf);
     }
 
-#if !CONFIG_ETH_UPLINK
     /* Check for SSID pre-fill from scan page */
     char prefill_ssid[64] = "";
     buf_len = httpd_req_get_url_query_len(req) + 1;
@@ -1796,7 +1733,6 @@ static esp_err_t config_get_handler(httpd_req_t *req)
     char* safe_ssid = html_escape(prefill_ssid[0] ? prefill_ssid : ssid);
     char* safe_ent_username = html_escape(ent_username);
     char* safe_ent_identity = html_escape(ent_identity);
-#endif
     char* safe_ap_ssid = html_escape(ap_ssid);
 
     // Get current AP IP address
@@ -1811,18 +1747,14 @@ static esp_err_t config_get_handler(httpd_req_t *req)
 
     // Check if any html_escape failed
     if (safe_ap_ssid == NULL ||
-#if !CONFIG_ETH_UPLINK
         safe_ssid == NULL ||
         safe_ent_username == NULL || safe_ent_identity == NULL ||
-#endif
         ap_ip_str == NULL) {
         ESP_LOGE(TAG, "Failed to escape HTML strings");
         free(safe_ap_ssid);
-#if !CONFIG_ETH_UPLINK
         free(safe_ssid);
         free(safe_ent_username);
         free(safe_ent_identity);
-#endif
         free(ap_ip_str);
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
         return ESP_ERR_NO_MEM;
@@ -1835,13 +1767,11 @@ static esp_err_t config_get_handler(httpd_req_t *req)
         sprintf(ap_mac_str, "%02X:%02X:%02X:%02X:%02X:%02X",
                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     }
-#if !CONFIG_ETH_UPLINK
     char sta_mac_str[18] = "";
     if (esp_wifi_get_mac(ESP_IF_WIFI_STA, mac) == ESP_OK) {
         sprintf(sta_mac_str, "%02X:%02X:%02X:%02X:%02X:%02X",
                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     }
-#endif
 
     // Remote Console state
     remote_console_config_t rc_config;
@@ -1888,7 +1818,6 @@ static esp_err_t config_get_handler(httpd_req_t *req)
 
     const char* rc_ap_chk = (rc_config.bind & RC_BIND_AP) ? "checked" : "";
     const char* rc_sta_chk = (rc_config.bind & RC_BIND_STA) ? "checked" : "";
-    const char* rc_vpn_chk = (rc_config.bind & RC_BIND_VPN) ? "checked" : "";
 
     // PCAP state
     pcap_capture_mode_t pcap_mode = pcap_get_mode();
@@ -1926,20 +1855,11 @@ static esp_err_t config_get_handler(httpd_req_t *req)
     const char* auth_sel2 = (ap_authmode == 2) ? "selected" : "";
     snprintf(section, sizeof(section), CONFIG_CHUNK_AP,
         safe_ap_ssid, ap_ip_str, ap_dns ? ap_dns : "", ap_mac_str,
-#if CONFIG_ETH_UPLINK
-        (int)ap_channel,
-#endif
         auth_sel0, auth_sel1, auth_sel2,
         ap_nat_enabled ? "checked" : "",
         ap_en_checked, ap_open_checked, ap_hidden_checked);
     httpd_resp_send_chunk(req, section, HTTPD_RESP_USE_STRLEN);
 
-#if CONFIG_ETH_UPLINK
-    /* Chunk 5: ETH info */
-    httpd_resp_send_chunk(req,
-        "<h2>Uplink Settings</h2><table><tr><td>Mode:</td><td>Ethernet (LAN8720)</td></tr></table>",
-        HTTPD_RESP_USE_STRLEN);
-#else
     /* Chunk 5: STA Settings */
     snprintf(section, sizeof(section), CONFIG_CHUNK_STA,
         safe_ssid,
@@ -1956,7 +1876,6 @@ static esp_err_t config_get_handler(httpd_req_t *req)
         use_cert_bundle ? "checked" : "", disable_time_check ? "checked" : "",
         sta_mac_str);
     httpd_resp_send_chunk(req, section, HTTPD_RESP_USE_STRLEN);
-#endif
 
     /* Chunk 6: Static IP Settings */
     snprintf(section, sizeof(section), CONFIG_CHUNK_STATIC,
@@ -1968,7 +1887,7 @@ static esp_err_t config_get_handler(httpd_req_t *req)
         rc_enabled_checked, rc_disabled_checked,
         rc_status_color, rc_status_text, rc_kick_section,
         rc_config.port,
-        rc_ap_chk, rc_sta_chk, rc_vpn_chk,
+        rc_ap_chk, rc_sta_chk,
         (unsigned long)rc_config.idle_timeout_sec);
     httpd_resp_send_chunk(req, section, HTTPD_RESP_USE_STRLEN);
 
@@ -2014,8 +1933,7 @@ static esp_err_t config_get_handler(httpd_req_t *req)
         char danger[2560];
         snprintf(danger, sizeof(danger), CONFIG_CHUNK_DANGER,
             (s_web_bind & RC_BIND_AP)  ? "checked" : "",
-            (s_web_bind & RC_BIND_STA) ? "checked" : "",
-            (s_web_bind & RC_BIND_VPN) ? "checked" : "");
+            (s_web_bind & RC_BIND_STA) ? "checked" : "");
         httpd_resp_send_chunk(req, danger, HTTPD_RESP_USE_STRLEN);
     }
 
@@ -2024,11 +1942,9 @@ static esp_err_t config_get_handler(httpd_req_t *req)
 
     /* Cleanup */
     free(safe_ap_ssid);
-#if !CONFIG_ETH_UPLINK
     free(safe_ssid);
     free(safe_ent_username);
     free(safe_ent_identity);
-#endif
     free(ap_ip_str);
 
     return ESP_OK;
@@ -2206,19 +2122,9 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
                         }
 
                         if (err_msg == NULL) {
-                            uint8_t iface = 0;  // Default: STA
-                            char iface_param[8];
-                            if (httpd_query_key_value(buf, "iface", iface_param, sizeof(iface_param)) == ESP_OK) {
-                                if (strcmp(iface_param, "VPN") == 0) iface = 1;
-                            }
-                            add_portmap(proto, ext_port, int_ip, int_port, iface);
-#if CONFIG_ETH_UPLINK
-                            ESP_LOGI(TAG, "Added port mapping: %s %s %d -> %s:%d",
-                                     iface ? "VPN" : "ETH", param1, ext_port, param3, int_port);
-#else
-                            ESP_LOGI(TAG, "Added port mapping: %s %s %d -> %s:%d",
-                                     iface ? "VPN" : "STA", param1, ext_port, param3, int_port);
-#endif
+                            add_portmap(proto, ext_port, int_ip, int_port, 0 /* STA */);
+                            ESP_LOGI(TAG, "Added port mapping: STA %s %d -> %s:%d",
+                                     param1, ext_port, param3, int_port);
                         } else {
                             /* Redirect back with error parameter */
                             char redirect_url[128];
@@ -2451,11 +2357,7 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
                     "<td>%d</td>"
                     "<td><a href='/mappings?del_proto=%s&del_port=%d' class='red-button'>Delete</a></td>"
                     "</tr>",
-#if CONFIG_ETH_UPLINK
-                    portmap_tab[i].iface == 1 ? "VPN" : "ETH",
-#else
-                    portmap_tab[i].iface == 1 ? "VPN" : "STA",
-#endif
+                    "STA",
                     portmap_tab[i].proto == PROTO_TCP ? "TCP" : "UDP",
                     portmap_tab[i].mport,
                     ip_or_name,
@@ -2881,7 +2783,6 @@ static void url_encode(const char *src, char *dst, size_t dst_len)
     dst[i] = '\0';
 }
 
-#if !CONFIG_ETH_UPLINK
 /* WiFi Scan page GET handler - NOT password protected */
 static esp_err_t scan_get_handler(httpd_req_t *req)
 {
@@ -3069,9 +2970,7 @@ static httpd_uri_t scanp = {
     .method    = HTTP_GET,
     .handler   = scan_get_handler,
 };
-#endif
 
-#if !CONFIG_ETH_UPLINK
 /* Getting Started page GET handler */
 static esp_err_t setup_get_handler(httpd_req_t *req)
 {
@@ -3120,7 +3019,6 @@ static esp_err_t setup_get_handler(httpd_req_t *req)
                 }
             }
 
-#if !CONFIG_ETH_UPLINK
             /* Handle STA settings */
             if (httpd_query_key_value(buf, "ssid", param1, sizeof(param1)) == ESP_OK) {
                 preprocess_string(param1);
@@ -3150,12 +3048,10 @@ static esp_err_t setup_get_handler(httpd_req_t *req)
                     esp_timer_start_once(restart_timer, 500000);
                 }
             }
-#endif
         }
         free(buf);
     }
 
-#if !CONFIG_ETH_UPLINK
     /* Check for SSID pre-fill from scan page */
     char prefill_ssid[64] = "";
     buf_len = httpd_req_get_url_query_len(req) + 1;
@@ -3168,7 +3064,6 @@ static esp_err_t setup_get_handler(httpd_req_t *req)
         }
         if (buf) free(buf);
     }
-#endif
 
     /* Render page */
     httpd_resp_set_type(req, "text/html");
@@ -3178,13 +3073,6 @@ static esp_err_t setup_get_handler(httpd_req_t *req)
     char* safe_ap_ssid = html_escape(ap_ssid);
     if (safe_ap_ssid == NULL) safe_ap_ssid = strdup("");
 
-#if CONFIG_ETH_UPLINK
-    char section[1024];
-    snprintf(section, sizeof(section), SETUP_CHUNK_FORM,
-        safe_ap_ssid, "");
-    httpd_resp_send_chunk(req, section, HTTPD_RESP_USE_STRLEN);
-    free(safe_ap_ssid);
-#else
     char* safe_ssid = html_escape(prefill_ssid[0] ? prefill_ssid : ssid);
     if (safe_ssid == NULL) safe_ssid = strdup("");
 
@@ -3195,7 +3083,6 @@ static esp_err_t setup_get_handler(httpd_req_t *req)
 
     free(safe_ap_ssid);
     free(safe_ssid);
-#endif
 
     httpd_resp_send_chunk(req, NULL, 0);
     return ESP_OK;
@@ -3205,218 +3092,6 @@ static httpd_uri_t setupp = {
     .uri       = "/setup",
     .method    = HTTP_GET,
     .handler   = setup_get_handler,
-};
-#endif /* !CONFIG_ETH_UPLINK */
-
-/* VPN page GET handler */
-static esp_err_t vpn_get_handler(httpd_req_t *req)
-{
-    resume_sta_if_scan_idle();
-    /* Check authentication if password protection is enabled */
-    bool password_protection_enabled = is_web_password_set();
-
-    if (password_protection_enabled && !is_authenticated(req)) {
-        { char _ip[16]; ESP_LOGW(TAG, "Unauthenticated access to /vpn from %s", get_client_ip(req, _ip, sizeof(_ip))); }
-        httpd_resp_set_status(req, "303 See Other");
-        httpd_resp_set_hdr(req, "Location", "/?auth_required=1");
-        httpd_resp_send(req, NULL, 0);
-        return ESP_OK;
-    }
-
-    char* buf = NULL;
-    size_t buf_len;
-
-    /* Read URL query string */
-    buf_len = httpd_req_get_url_query_len(req) + 1;
-    if (buf_len > 1) {
-        buf = malloc(buf_len);
-        if (buf != NULL && httpd_req_get_url_query_str(req, buf, buf_len) == ESP_OK) {
-            ESP_LOGI(TAG, "VPN query => %s", buf);
-
-            char param[128];
-            bool has_config = false;
-
-            /* Check if this is a form submission */
-            if (httpd_query_key_value(buf, "vpn_enabled", param, sizeof(param)) == ESP_OK) {
-                has_config = true;
-                nvs_handle_t nvs;
-                if (nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs) == ESP_OK) {
-                    nvs_set_i32(nvs, "vpn_enabled", atoi(param));
-
-                    if (httpd_query_key_value(buf, "vpn_privkey", param, sizeof(param)) == ESP_OK) {
-                        preprocess_string(param);
-                        nvs_set_str(nvs, "vpn_privkey", param);
-                    }
-                    if (httpd_query_key_value(buf, "vpn_pubkey", param, sizeof(param)) == ESP_OK) {
-                        preprocess_string(param);
-                        nvs_set_str(nvs, "vpn_pubkey", param);
-                    }
-                    if (httpd_query_key_value(buf, "vpn_psk", param, sizeof(param)) == ESP_OK) {
-                        preprocess_string(param);
-                        nvs_set_str(nvs, "vpn_psk", param);
-                    }
-                    if (httpd_query_key_value(buf, "vpn_endpoint", param, sizeof(param)) == ESP_OK) {
-                        preprocess_string(param);
-                        nvs_set_str(nvs, "vpn_endpoint", param);
-                    }
-                    if (httpd_query_key_value(buf, "vpn_port", param, sizeof(param)) == ESP_OK) {
-                        nvs_set_i32(nvs, "vpn_port", atoi(param));
-                    }
-                    if (httpd_query_key_value(buf, "vpn_ip", param, sizeof(param)) == ESP_OK) {
-                        preprocess_string(param);
-                        nvs_set_str(nvs, "vpn_ip", param);
-                    }
-                    if (httpd_query_key_value(buf, "vpn_mask", param, sizeof(param)) == ESP_OK) {
-                        preprocess_string(param);
-                        nvs_set_str(nvs, "vpn_mask", param);
-                    }
-                    if (httpd_query_key_value(buf, "vpn_ka", param, sizeof(param)) == ESP_OK) {
-                        nvs_set_i32(nvs, "vpn_ka", atoi(param));
-                    }
-                    if (httpd_query_key_value(buf, "vpn_ks", param, sizeof(param)) == ESP_OK) {
-                        nvs_set_i32(nvs, "vpn_ks", atoi(param));
-                    }
-                    if (httpd_query_key_value(buf, "vpn_rall", param, sizeof(param)) == ESP_OK) {
-                        nvs_set_i32(nvs, "vpn_rall", atoi(param));
-                    }
-
-                    nvs_commit(nvs);
-                    nvs_close(nvs);
-                    ESP_LOGI(TAG, "VPN settings saved, scheduling restart");
-                    esp_timer_start_once(restart_timer, 500000);
-                }
-            }
-
-            /* If config was submitted, let the JS handle the "rebooting" message */
-            if (has_config) {
-                /* Fall through to render the page (JS will detect query params and show reboot msg) */
-            }
-        }
-        if (buf) free(buf);
-    }
-
-    /* Reusable buffer for VPN page rows */
-    #define VPN_BUF_SIZE 768
-    char *row = malloc(VPN_BUF_SIZE);
-    if (row == NULL) {
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
-        return ESP_ERR_NO_MEM;
-    }
-
-    /* Head */
-    httpd_resp_send_chunk(req, VPN_CHUNK_HEAD, HTTPD_RESP_USE_STRLEN);
-
-    /* Logout button if authenticated */
-    if (session_active && password_protection_enabled) {
-        httpd_resp_send_chunk(req,
-            "<a href='/?logout=1' style='padding: 0.4rem 1rem; background: rgba(255,82,82,0.15); color: #ff5252; border: 1px solid #ff5252; border-radius: 6px; text-decoration: none; font-size: 0.85rem; font-weight: 500;'>Logout</a>",
-            HTTPD_RESP_USE_STRLEN);
-    }
-
-    /* Mid (script) */
-    httpd_resp_send_chunk(req, VPN_CHUNK_MID, HTTPD_RESP_USE_STRLEN);
-
-    /* Status section */
-    httpd_resp_send_chunk(req, "<h2>Status</h2><div class='status-table'><table>", HTTPD_RESP_USE_STRLEN);
-
-    if (vpn_enabled) {
-        const char *state, *color;
-        if (vpn_is_connected()) {
-            state = "Connected"; color = "#4caf50";
-        } else if (vpn_connected) {
-            state = "Handshake Pending"; color = "#ffc107";
-        } else {
-            state = "Disconnected"; color = "#f44336";
-        }
-        snprintf(row, VPN_BUF_SIZE, "<tr><td>VPN:</td><td><strong style='color:%s;'>%s</strong></td></tr>", color, state);
-    } else {
-        snprintf(row, VPN_BUF_SIZE, "<tr><td>VPN:</td><td><strong style='color:#888;'>Disabled</strong></td></tr>");
-    }
-    httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
-
-    if (vpn_address && vpn_address[0]) {
-        snprintf(row, VPN_BUF_SIZE, "<tr><td>Tunnel IP:</td><td>%s</td></tr>", vpn_address);
-        httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
-    }
-    snprintf(row, VPN_BUF_SIZE, "<tr><td>MSS Clamp:</td><td>%u</td></tr><tr><td>Path MTU:</td><td>%u</td></tr>",
-             ap_mss_clamp, ap_pmtu);
-    httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
-
-    snprintf(row, VPN_BUF_SIZE, "<tr><td>Kill Switch:</td><td><strong style='color:%s;'>%s</strong></td></tr>",
-             vpn_killswitch ? "#4caf50" : "#888", vpn_killswitch ? "On" : "Off");
-    httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
-
-    snprintf(row, VPN_BUF_SIZE, "<tr><td>Route All:</td><td><strong style='color:%s;'>%s</strong></td></tr>",
-             vpn_route_all ? "#4caf50" : "#2196f3", vpn_route_all ? "Yes" : "No (split tunnel)");
-    httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
-
-    httpd_resp_send_chunk(req, "</table></div>", HTTPD_RESP_USE_STRLEN);
-
-    /* Form - streamed field by field to avoid large snprintf */
-    httpd_resp_send_chunk(req, VPN_CHUNK_FORM_OPEN, HTTPD_RESP_USE_STRLEN);
-
-    snprintf(row, VPN_BUF_SIZE,
-        "<tr><td>Enabled</td><td><select name='vpn_enabled'>"
-        "<option value='1' %s>On</option><option value='0' %s>Off</option>"
-        "</select></td></tr>",
-        vpn_enabled ? "selected" : "", vpn_enabled ? "" : "selected");
-    httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
-
-    snprintf(row, VPN_BUF_SIZE,
-        "<tr><td>Private Key</td><td><input type='password' name='vpn_privkey' value='%s' placeholder='Base64 private key'/></td></tr>",
-        vpn_private_key ? vpn_private_key : "");
-    httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
-
-    snprintf(row, VPN_BUF_SIZE,
-        "<tr><td>Public Key</td><td><input type='text' name='vpn_pubkey' value='%s' placeholder='Peer base64 public key'/></td></tr>",
-        vpn_public_key ? vpn_public_key : "");
-    httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
-
-    snprintf(row, VPN_BUF_SIZE,
-        "<tr><td>Preshared Key</td><td><input type='password' name='vpn_psk' value='%s' placeholder='Optional'/></td></tr>",
-        vpn_preshared_key ? vpn_preshared_key : "");
-    httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
-
-    snprintf(row, VPN_BUF_SIZE,
-        "<tr><td>Endpoint</td><td><input type='text' name='vpn_endpoint' value='%s' placeholder='Host or IP'/></td></tr>"
-        "<tr><td>Port</td><td><input type='number' name='vpn_port' value='%d' min='1' max='65535'/></td></tr>"
-        "<tr><td>Tunnel IP</td><td><input type='text' name='vpn_ip' value='%s' placeholder='e.g. 10.0.0.2'/></td></tr>"
-        "<tr><td>Netmask</td><td><input type='text' name='vpn_mask' value='%s' placeholder='255.255.255.0'/></td></tr>"
-        "<tr><td>Keepalive (sec)</td><td><input type='number' name='vpn_ka' value='%d' min='0' max='65535'/></td></tr>",
-        vpn_endpoint ? vpn_endpoint : "",
-        (int)vpn_port,
-        vpn_address ? vpn_address : "",
-        vpn_netmask ? vpn_netmask : "255.255.255.0",
-        (int)vpn_keepalive);
-    httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
-
-    snprintf(row, VPN_BUF_SIZE,
-        "<tr><td>Kill Switch</td><td><select name='vpn_ks'>"
-        "<option value='1' %s>On</option><option value='0' %s>Off</option>"
-        "</select></td></tr>",
-        vpn_killswitch ? "selected" : "", vpn_killswitch ? "" : "selected");
-    httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
-
-    snprintf(row, VPN_BUF_SIZE,
-        "<tr><td>Route All</td><td><select name='vpn_rall'>"
-        "<option value='1' %s>Yes (all traffic)</option><option value='0' %s>No (split tunnel)</option>"
-        "</select></td></tr>",
-        vpn_route_all ? "selected" : "", vpn_route_all ? "" : "selected");
-    httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
-
-    httpd_resp_send_chunk(req, VPN_CHUNK_FORM_CLOSE, HTTPD_RESP_USE_STRLEN);
-
-    /* End chunked response */
-    httpd_resp_send_chunk(req, NULL, 0);
-
-    free(row);
-    return ESP_OK;
-}
-
-static httpd_uri_t vpnp = {
-    .uri       = "/vpn",
-    .method    = HTTP_GET,
-    .handler   = vpn_get_handler,
 };
 
 static esp_err_t captive_redirect_handler(httpd_req_t *req, httpd_err_code_t err);
@@ -3433,9 +3108,9 @@ httpd_handle_t start_webserver(uint16_t port)
 
     /* Load web UI interface bind mask from NVS */
     {
-        int bind_val = (int)(RC_BIND_AP | RC_BIND_STA | RC_BIND_VPN);
+        int bind_val = (int)(RC_BIND_AP | RC_BIND_STA);
         get_config_param_int("web_bind", &bind_val);
-        s_web_bind = (uint8_t)(bind_val & (RC_BIND_AP | RC_BIND_STA | RC_BIND_VPN));
+        s_web_bind = (uint8_t)(bind_val & (RC_BIND_AP | RC_BIND_STA));
         if (s_web_bind == 0) s_web_bind = RC_BIND_AP;
     }
 
@@ -3450,33 +3125,19 @@ httpd_handle_t start_webserver(uint16_t port)
         httpd_register_uri_handler(server, &configp);
         httpd_register_uri_handler(server, &mappingsp);
         httpd_register_uri_handler(server, &firewallp);
-#if !CONFIG_ETH_UPLINK
         httpd_register_uri_handler(server, &scanp);
-#endif
-        httpd_register_uri_handler(server, &vpnp);
-#if !CONFIG_ETH_UPLINK
         httpd_register_uri_handler(server, &setupp);
-#endif
         httpd_register_uri_handler(server, &favicon_uri);
         httpd_register_uri_handler(server, &config_exportp);
         httpd_register_uri_handler(server, &config_importp);
         httpd_register_uri_handler(server, &ota_uploadp);
 
-#if CONFIG_ETH_UPLINK
-        // In ETH mode, start captive portal if router appears unconfigured
-        if (strlen(ap_passwd) == 0 && !is_web_password_set()) {
-            ESP_LOGI(TAG, "No AP/web password set, starting captive portal DNS");
-            httpd_register_err_handler(server, HTTPD_404_NOT_FOUND, captive_redirect_handler);
-            web_server_start_captive_dns();
-        }
-#else
         // Start captive portal DNS only when no upstream WiFi is configured
         if (ssid == NULL || strlen(ssid) == 0) {
             ESP_LOGI(TAG, "No STA configured, starting captive portal DNS");
             httpd_register_err_handler(server, HTTPD_404_NOT_FOUND, captive_redirect_handler);
             web_server_start_captive_dns();
         }
-#endif
 
         return server;
     }

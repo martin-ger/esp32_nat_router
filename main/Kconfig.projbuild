@@ -10,45 +10,22 @@ menu "Example Configuration"
 
 endmenu
 
-menu "NAT Router Uplink"
+menu "WiFi Repeater"
 
-    choice UPLINK_TYPE
-        prompt "Uplink interface"
-        default WIFI_STA_UPLINK
-        config WIFI_STA_UPLINK
-            bool "WiFi STA"
-        config ETH_UPLINK
-            bool "Ethernet (LAN8720)"
-    endchoice
-
-    config ETH_MDC_GPIO
-        int "ETH MDC GPIO"
-        default 23
-        depends on ETH_UPLINK
-
-    config ETH_MDIO_GPIO
-        int "ETH MDIO GPIO"
-        default 18
-        depends on ETH_UPLINK
-
-    config ETH_PHY_ADDR
-        int "ETH PHY address"
-        default 1
-        depends on ETH_UPLINK
-
-    config ETH_PHY_POWER_GPIO
-        int "ETH PHY power GPIO (-1 for none)"
-        default 16
-        depends on ETH_UPLINK
-
-    config ETH_RMII_CLK_OUTPUT_GPIO
-        int "RMII clock output GPIO (-1 = input from PHY)"
-        default -1
-        depends on ETH_UPLINK
+    config REPEATER_MODE
+        bool "Enable L2 WiFi AP-STA repeater mode"
+        default n
         help
-            Set to the GPIO number on which the ESP32 should generate the 50 MHz
-            RMII reference clock (e.g. GPIO 17 for the Olimex ESP32-POE-ISO).
-            Leave at -1 when the PHY provides the clock (e.g. WT32-ETH01).
+            When enabled, the ESP32 acts as a true L2 bridge between the
+            upstream WiFi STA and the downstream WiFi AP: no NAPT, no
+            AP-side DHCP server. AP clients receive DHCP leases from the
+            upstream server via Option 61 proxying and live on the
+            upstream subnet. The ESP32 itself takes a single IP on that
+            subnet via its STA; all local services (web UI, console,
+            OTA) bind to that IP.
+
+            When disabled, the firmware behaves as a traditional NAT
+            router (NAPT + AP-side DHCPS).
 
 endmenu
 

@@ -60,13 +60,6 @@ setTimeout(\"location.href = '/'\", 10000);\
 </script>"
 
 /* AP Settings section - uses %s for: ap_ssid, ap_ip, ap_dns, ap_mac, ap_en_checked, open_checked, hidden_checked */
-/* ETH_UPLINK builds add an extra %d for ap_channel */
-#if CONFIG_ETH_UPLINK
-#define CONFIG_CHUNK_AP_CHANNEL_ROW \
-"<tr><td>Channel</td><td><input type='number' name='ap_channel' min='0' max='13' value='%d' style='width:4em'/> <span style='color:#888;font-size:0.85rem;'>(0 = auto)</span></td></tr>"
-#else
-#define CONFIG_CHUNK_AP_CHANNEL_ROW ""
-#endif
 #define CONFIG_CHUNK_AP "\
 <h2>Access Point Settings</h2>\
 <form action='' method='GET'>\
@@ -76,7 +69,6 @@ setTimeout(\"location.href = '/'\", 10000);\
 <tr><td>AP IP Address</td><td><input type='text' name='ap_ip_addr' value='%s' placeholder='192.168.4.1'/></td></tr>\
 <tr><td>DNS Server</td><td><input type='text' name='ap_dns' value='%s' placeholder='empty = use upstream DNS'/></td></tr>\
 <tr><td>MAC Address</td><td><input type='text' name='ap_mac' value='%s' placeholder='AA:BB:CC:DD:EE:FF'/></td></tr>\
-" CONFIG_CHUNK_AP_CHANNEL_ROW "\
 <tr><td>Security</td><td><select name='ap_auth'><option value='0' %s>WPA2/WPA3</option><option value='1' %s>WPA2 only</option><option value='2' %s>WPA3 only</option></select></td></tr>\
 <tr><td>NAT</td><td><input type='checkbox' name='ap_nat' value='1' %s> <span style='color:#888;font-size:0.85rem;'>Enabled (uncheck for routed mode)</span></td></tr>\
 <tr><td>Enabled</td><td><input type='checkbox' name='ap_enabled' value='1' %s> <span style='color:#888;font-size:0.85rem;'>AP interface active</span></td></tr>\
@@ -85,7 +77,6 @@ setTimeout(\"location.href = '/'\", 10000);\
 </table>\
 </form>"
 
-#if !CONFIG_ETH_UPLINK
 /* STA band preference row (5 GHz capable targets only) */
 /* Uses %s x3 for: auto_selected, 2.4_selected, 5_selected */
 #if WIFI_HAS_5GHZ
@@ -133,7 +124,6 @@ setTimeout(\"location.href = '/'\", 10000);\
 <tr><td></td><td><input type='submit' value='Save &amp; Reboot' class='ok-button'/></td></tr>\
 </table>\
 </form>"
-#endif
 
 /* Static IP section - uses %s for: static_ip, subnet_mask, gateway */
 #define CONFIG_CHUNK_STATIC "\
@@ -148,7 +138,7 @@ setTimeout(\"location.href = '/'\", 10000);\
 <small>Leave empty for DHCP</small>\
 </form>"
 
-/* Remote Console section - uses: rc_en_chk, rc_dis_chk, rc_color, rc_status, rc_kick, rc_port, rc_ap_chk, rc_sta_chk, rc_vpn_chk, rc_timeout */
+/* Remote Console section - uses: rc_en_chk, rc_dis_chk, rc_color, rc_status, rc_kick, rc_port, rc_ap_chk, rc_sta_chk, rc_timeout */
 #define CONFIG_CHUNK_RC "\
 <h2>Remote Console</h2>\
 <form action='' method='GET'>\
@@ -162,8 +152,7 @@ setTimeout(\"location.href = '/'\", 10000);\
 <tr><td>Port</td><td><input type='number' name='rc_port' value='%d' min='1' max='65535' style='width: 100px;'/></td></tr>\
 <tr><td>Bind Interfaces</td><td>\
 <label style='margin-right: 0.8rem;'><input type='checkbox' name='rc_bind_ap' value='1' %s> AP</label>\
-<label style='margin-right: 0.8rem;'><input type='checkbox' name='rc_bind_sta' value='1' %s> STA</label>\
-<label><input type='checkbox' name='rc_bind_vpn' value='1' %s> VPN</label>\
+<label><input type='checkbox' name='rc_bind_sta' value='1' %s> STA</label>\
 </td></tr>\
 <tr><td>Idle Timeout</td><td><input type='number' name='rc_timeout' value='%lu' min='0' max='86400' style='width: 100px;'/> sec (0 = no)</td></tr>\
 <tr><td></td><td><input type='submit' value='Save' class='ok-button'/></td></tr>\
@@ -324,9 +313,8 @@ r.readAsText(f);\
 </script>\
 "
 
-/* Danger Zone section - uses %s for: web_bind_ap_chk, web_bind_sta_chk, web_bind_vpn_chk.
- * ETH_UPLINK variant labels the uplink checkbox "ETH" instead of "STA". */
-#define CONFIG_CHUNK_DANGER_COMMON_HEAD "\
+/* Danger Zone section - uses %s for: web_bind_ap_chk, web_bind_sta_chk. */
+#define CONFIG_CHUNK_DANGER "\
 <div style='margin-top: 2rem; padding: 1rem; background: #fff3cd; border: 2px solid #ff9800; border-radius: 8px;'>\
 <h2 style='color: #ff6b00; margin-bottom: 0.5rem;'>&#x26A0; Danger Zone</h2>\
 <h3 style='font-size:1rem;color:#cc6600;margin:0.75rem 0 0.5rem;'>Web UI Access</h3>\
@@ -335,10 +323,8 @@ r.readAsText(f);\
 <input type='hidden' name='web_bind_save' value='1'/>\
 <table>\
 <tr><td style='color:#d32f2f;font-weight:bold;'>Interfaces</td><td>\
-<label style='margin-right:0.8rem;color:#666;'><input type='checkbox' name='web_bind_ap' value='1' %s> AP</label>"
-
-#define CONFIG_CHUNK_DANGER_COMMON_TAIL "\
-<label style='color:#666;'><input type='checkbox' name='web_bind_vpn' value='1' %s> VPN</label>\
+<label style='margin-right:0.8rem;color:#666;'><input type='checkbox' name='web_bind_ap' value='1' %s> AP</label>\
+<label style='color:#666;'><input type='checkbox' name='web_bind_sta' value='1' %s> STA</label>\
 </td></tr>\
 <tr><td></td><td><input type='submit' value='Save' class='red-button' onclick='return confirm(\"Restricting access may lock you out. Continue?\");'/></td></tr>\
 </table>\
@@ -358,18 +344,4 @@ r.readAsText(f);\
 </div>\
 </body>\
 </html>"
-
-#if CONFIG_ETH_UPLINK
-/* ETH_UPLINK: uplink checkbox labeled "ETH" (maps to RC_BIND_STA / web_bind_sta) */
-#define CONFIG_CHUNK_DANGER \
-    CONFIG_CHUNK_DANGER_COMMON_HEAD \
-    "<label style='margin-right:0.8rem;color:#666;'><input type='checkbox' name='web_bind_sta' value='1' %s> ETH</label>" \
-    CONFIG_CHUNK_DANGER_COMMON_TAIL
-#else
-/* STA variant */
-#define CONFIG_CHUNK_DANGER \
-    CONFIG_CHUNK_DANGER_COMMON_HEAD \
-    "<label style='margin-right:0.8rem;color:#666;'><input type='checkbox' name='web_bind_sta' value='1' %s> STA</label>" \
-    CONFIG_CHUNK_DANGER_COMMON_TAIL
-#endif
 

@@ -1,7 +1,6 @@
 /* Getting Started page templates */
 #include "router_config.h"
 
-#if !CONFIG_ETH_UPLINK
 /* Getting Started Page */
 #define SETUP_CHUNK_HEAD "<html>\
 <head>\
@@ -63,4 +62,3 @@ setTimeout(\"location.href = '/'\", 10000);\
 </div>\
 </body>\
 </html>"
-#endif /* !CONFIG_ETH_UPLINK */

@@ -27,7 +27,6 @@
 #include "remote_console.h"
 #include "router_config.h"
 #include "wifi_config.h"
-#include "vpn_config.h"
 #include "web_password.h"
 
 /* MSG_NOSIGNAL may not be defined on all platforms */
@@ -370,13 +369,12 @@ esp_err_t remote_console_set_bind(uint8_t bind) {
         bind = RC_BIND_AP;  /* Must have at least one */
     }
 
-    rc_config.bind = bind & (RC_BIND_AP | RC_BIND_STA | RC_BIND_VPN);
+    rc_config.bind = bind & (RC_BIND_AP | RC_BIND_STA);
     save_config();
 
     char bind_str[32] = "";
     if (rc_config.bind & RC_BIND_AP) strcat(bind_str, "AP ");
     if (rc_config.bind & RC_BIND_STA) strcat(bind_str, "STA ");
-    if (rc_config.bind & RC_BIND_VPN) strcat(bind_str, "VPN ");
     ESP_LOGI(TAG, "Bind set to %s(restart required)", bind_str);
     return ESP_OK;
 }
@@ -465,7 +463,7 @@ static esp_err_t load_config(void) {
             const uint8_t migrate[] = {RC_BIND_AP | RC_BIND_STA, RC_BIND_AP, RC_BIND_STA};
             rc_config.bind = migrate[u8_val];
         } else {
-            rc_config.bind = u8_val & (RC_BIND_AP | RC_BIND_STA | RC_BIND_VPN);
+            rc_config.bind = u8_val & (RC_BIND_AP | RC_BIND_STA);
         }
         if (rc_config.bind == 0) rc_config.bind = RC_BIND_AP;
     }
@@ -791,12 +789,6 @@ static void remote_console_task(void *arg) {
                 bool allowed = false;
                 if ((rc_config.bind & RC_BIND_AP) && local_ip == my_ap_ip) allowed = true;
                 if ((rc_config.bind & RC_BIND_STA) && local_ip == my_ip) allowed = true;
-                if ((rc_config.bind & RC_BIND_VPN) && vpn_connected && vpn_address && vpn_address[0]) {
-                    ip4_addr_t vpn_addr;
-                    if (ip4addr_aton(vpn_address, &vpn_addr) && local_ip == vpn_addr.addr) {
-                        allowed = true;
-                    }
-                }
 
                 if (!allowed) {
                     ESP_LOGW(TAG, "Connection from %s rejected (interface not allowed)", rc_state.client_ip);

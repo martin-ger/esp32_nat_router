@@ -1,11 +1,7 @@
 /* Index page templates */
 #include "router_config.h"
 
-#if CONFIG_ETH_UPLINK
-#define INDEX_TITLE "ESP32 NAT Router (LAN)"
-#else
 #define INDEX_TITLE "ESP32 NAT Router"
-#endif
 
 /* Index Page - Chunked for streaming */
 #define INDEX_CHUNK_HEAD "<html>\
@@ -181,7 +177,6 @@ font-size: 0.8rem;\
 </table>\
 </div>"
 
-#if !CONFIG_ETH_UPLINK
 #define INDEX_CHUNK_BUTTONS "\
 <div class='button-container'>\
 <a href='/setup' class='nav-button'>🚀 Getting Started</a>\
@@ -189,17 +184,7 @@ font-size: 0.8rem;\
 <a href='/config' class='nav-button'>⚙️ Configuration</a>\
 <a href='/mappings' class='nav-button'>🔀 Mappings</a>\
 <a href='/firewall' class='nav-button'>🛡️ Firewall</a>\
-<a href='/vpn' class='nav-button'>🔒 VPN</a>\
 </div>"
-#else
-#define INDEX_CHUNK_BUTTONS "\
-<div class='button-container'>\
-<a href='/config' class='nav-button'>⚙️ Configuration</a>\
-<a href='/mappings' class='nav-button'>🔀 Mappings</a>\
-<a href='/firewall' class='nav-button'>🛡️ Firewall</a>\
-<a href='/vpn' class='nav-button'>🔒 VPN</a>\
-</div>"
-#endif
 /* Auth UI streamed here */
 
 #define INDEX_CHUNK_TAIL "\

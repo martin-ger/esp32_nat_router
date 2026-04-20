@@ -1,7 +1,6 @@
 /* WiFi Scan page templates */
 #include "router_config.h"
 
-#if !CONFIG_ETH_UPLINK
 /* WiFi Scan Page */
 #define SCAN_PAGE "<html>\
 <head>\
@@ -69,4 +68,3 @@ h1 { font-size: 1.5rem; font-weight: 600; color: #00d9ff; margin-bottom: 1rem; t
 </body>\
 </html>\
 "
-#endif /* !CONFIG_ETH_UPLINK */

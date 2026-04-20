@@ -56,21 +56,14 @@ extern void    web_ui_set_bind(uint8_t bind);
 static const char *TAG = "cmd_router";
 
 static void register_set_hostname(void);
-#if !CONFIG_ETH_UPLINK
 static void register_set_sta(void);
 static void register_set_mac(void);
-#else
-static void register_set_ap_mac_only(void);
-#endif
 static void register_set_sta_static(void);
 static void register_set_ap(void);
 static void register_set_ap_ip(void);
 static void register_set_ap_hidden(void);
 static void register_set_ap_auth(void);
 static void register_ap(void);
-#if CONFIG_ETH_UPLINK
-static void register_set_ap_channel(void);
-#endif
 static void register_set_ap_dns(void);
 static void register_show(void);
 static void register_portmap(void);
@@ -96,13 +89,10 @@ static void register_syslog_cmd(void);
 static void register_set_oled(void);
 static void register_set_oled_gpio(void);
 #endif
-#if !CONFIG_ETH_UPLINK
 static void register_scan(void);
-#endif
 #if WIFI_HAS_5GHZ
 static void register_set_sta_band(void);
 #endif
-static void register_set_vpn(void);
 static void register_set_tz(void);
 
 /* ACL helper functions (forward declarations) */
@@ -278,15 +268,9 @@ esp_err_t set_config_param_blob(const char* name, const void* data, size_t len)
 void register_router(void)
 {
     register_show();
-#if !CONFIG_ETH_UPLINK
     register_set_sta();
     register_set_mac();
-#else
-    register_set_ap_mac_only();
-#endif
-#if !CONFIG_ETH_UPLINK
     register_scan();
-#endif
     register_set_sta_static();
     register_set_ap();
     register_set_ap_ip();
@@ -308,9 +292,6 @@ void register_router(void)
     register_set_ap_hidden();
     register_set_ap_auth();
     register_ap();
-#if CONFIG_ETH_UPLINK
-    register_set_ap_channel();
-#endif
     register_set_hostname();
 #if WIFI_HAS_5GHZ
     register_set_sta_band();
@@ -321,14 +302,12 @@ void register_router(void)
     register_remote_console_cmd();
     register_syslog_cmd();
     register_set_tz();
-    register_set_vpn();
 #if defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32S3)
     register_set_oled();
     register_set_oled_gpio();
 #endif
 }
 
-#if !CONFIG_ETH_UPLINK
 /** Arguments used by 'set_sta' function */
 static struct {
     struct arg_str* ssid;
@@ -433,7 +412,6 @@ static void register_set_sta(void)
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }
-#endif
 
 
 /** Arguments used by 'set_sta_static' function */
@@ -554,17 +532,14 @@ esp_err_t set_mac(const char *key, const char *interface, int argc, char **argv)
     return err;
 }
 
-#if !CONFIG_ETH_UPLINK
 int set_sta_mac(int argc, char **argv) {
     return set_mac("mac", "STA", argc, argv);
 }
-#endif
 
 int set_ap_mac(int argc, char **argv) {
     return set_mac("ap_mac", "AP", argc, argv);
 }
 
-#if !CONFIG_ETH_UPLINK
 static void register_set_mac(void)
 {
     set_mac_arg.mac0 = arg_int1(NULL, NULL, "<octet>", "First octet");
@@ -593,27 +568,6 @@ static void register_set_mac(void)
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd_ap) );
 }
-#else
-static void register_set_ap_mac_only(void)
-{
-    set_mac_arg.mac0 = arg_int1(NULL, NULL, "<octet>", "First octet");
-    set_mac_arg.mac1 = arg_int1(NULL, NULL, "<octet>", "Second octet");
-    set_mac_arg.mac2 = arg_int1(NULL, NULL, "<octet>", "Third octet");
-    set_mac_arg.mac3 = arg_int1(NULL, NULL, "<octet>", "Fourth octet");
-    set_mac_arg.mac4 = arg_int1(NULL, NULL, "<octet>", "Fifth octet");
-    set_mac_arg.mac5 = arg_int1(NULL, NULL, "<octet>", "Sixth octet");
-    set_mac_arg.end = arg_end(6);
-
-    const esp_console_cmd_t cmd_ap = {
-        .command = "set_ap_mac",
-        .help = "Set MAC address of the AP interface",
-        .hint = NULL,
-        .func = &set_ap_mac,
-        .argtable = &set_mac_arg
-    };
-    ESP_ERROR_CHECK( esp_console_cmd_register(&cmd_ap) );
-}
-#endif
 
 /** Arguments used by 'set_ap' function */
 static struct {
@@ -864,17 +818,12 @@ static void register_set_hostname(void)
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }
 
-/* Format web UI bind mask as a string, e.g. "AP STA " (or "AP ETH " for ETH_UPLINK) */
+/* Format web UI bind mask as a string, e.g. "AP STA " */
 static void fmt_web_bind(uint8_t bind, char *buf)
 {
     buf[0] = '\0';
     if (bind & RC_BIND_AP)  strcat(buf, "AP ");
-#if CONFIG_ETH_UPLINK
-    if (bind & RC_BIND_STA) strcat(buf, "ETH ");
-#else
     if (bind & RC_BIND_STA) strcat(buf, "STA ");
-#endif
-    if (bind & RC_BIND_VPN) strcat(buf, "VPN ");
     if (buf[0] == '\0') strcpy(buf, "(none)");
 }
 
@@ -895,11 +844,7 @@ static int web_ui_cmd(int argc, char **argv)
         printf("  web_ui enable                     - Enable web interface (after reboot)\n");
         printf("  web_ui disable                    - Disable web interface (after reboot)\n");
         printf("  web_ui port <port>                - Set web server port (after reboot)\n");
-#if CONFIG_ETH_UPLINK
-        printf("  web_ui bind <ap|eth|vpn|all>      - Set allowed interfaces (takes effect immediately)\n");
-#else
-        printf("  web_ui bind <ap|sta|vpn|all>      - Set allowed interfaces (takes effect immediately)\n");
-#endif
+        printf("  web_ui bind <ap|sta|all>          - Set allowed interfaces (takes effect immediately)\n");
         if (lock != NULL) free(lock);
         return 0;
     }
@@ -943,13 +888,8 @@ static int web_ui_cmd(int argc, char **argv)
             char bind_str[20];
             fmt_web_bind(web_ui_get_bind(), bind_str);
             printf("Current web UI bind: %s\n", bind_str);
-#if CONFIG_ETH_UPLINK
-            printf("Usage: web_ui bind <ap|eth|vpn|all>\n");
-            printf("  Interfaces may be comma-separated: web_ui bind ap,eth\n");
-#else
-            printf("Usage: web_ui bind <ap|sta|vpn|all>\n");
+            printf("Usage: web_ui bind <ap|sta|all>\n");
             printf("  Interfaces may be comma-separated: web_ui bind ap,sta\n");
-#endif
             return 0;
         }
         /* Parse comma-separated interface list or "all" */
@@ -957,23 +897,14 @@ static int web_ui_cmd(int argc, char **argv)
         char arg[64];
         strlcpy(arg, argv[2], sizeof(arg));
         if (strcmp(arg, "all") == 0) {
-            bind = RC_BIND_AP | RC_BIND_STA | RC_BIND_VPN;
+            bind = RC_BIND_AP | RC_BIND_STA;
         } else {
             char *tok = strtok(arg, ",");
             while (tok) {
                 if      (strcmp(tok, "ap") == 0 || strcmp(tok, "AP") == 0)   bind |= RC_BIND_AP;
-#if CONFIG_ETH_UPLINK
-                else if (strcmp(tok, "eth") == 0 || strcmp(tok, "ETH") == 0) bind |= RC_BIND_STA;
-#else
                 else if (strcmp(tok, "sta") == 0 || strcmp(tok, "STA") == 0) bind |= RC_BIND_STA;
-#endif
-                else if (strcmp(tok, "vpn") == 0 || strcmp(tok, "VPN") == 0) bind |= RC_BIND_VPN;
                 else {
-#if CONFIG_ETH_UPLINK
-                    printf("Unknown interface '%s' (valid: ap, eth, vpn, all)\n", tok);
-#else
-                    printf("Unknown interface '%s' (valid: ap, sta, vpn, all)\n", tok);
-#endif
+                    printf("Unknown interface '%s' (valid: ap, sta, all)\n", tok);
                     return 1;
                 }
                 tok = strtok(NULL, ",");
@@ -1005,13 +936,8 @@ static void register_web_ui(void)
                 "  web_ui enable                  - Enable web interface (after reboot)\n"
                 "  web_ui disable                 - Disable web interface (after reboot)\n"
                 "  web_ui port <port>             - Set web server port (after reboot)\n"
-#if CONFIG_ETH_UPLINK
-                "  web_ui bind <ap|eth|vpn|all>   - Set allowed interfaces (immediate)",
+                "  web_ui bind <ap|sta|all>       - Set allowed interfaces (immediate)",
         .hint = " <enable|disable|port|bind>",
-#else
-                "  web_ui bind <ap|sta|vpn|all>   - Set allowed interfaces (immediate)",
-        .hint = " <enable|disable|port|bind>",
-#endif
         .func = &web_ui_cmd,
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
@@ -1240,19 +1166,11 @@ int portmap(int argc, char **argv)
             }
         }
 
-        uint8_t iface = 0;  // Default: STA/ETH (uplink)
-        if (portmap_args.iface->count > 0) {
-            if (strcasecmp(portmap_args.iface->sval[0], "VPN") == 0) {
-                iface = 1;
-#if CONFIG_ETH_UPLINK
-            } else if (strcasecmp(portmap_args.iface->sval[0], "ETH") != 0) {
-                printf("Interface must be 'ETH' or 'VPN'\n");
-#else
-            } else if (strcasecmp(portmap_args.iface->sval[0], "STA") != 0) {
-                printf("Interface must be 'STA' or 'VPN'\n");
-#endif
-                return 1;
-            }
+        uint8_t iface = 0;  // STA (uplink)
+        if (portmap_args.iface->count > 0 &&
+            strcasecmp(portmap_args.iface->sval[0], "STA") != 0) {
+            printf("Interface must be 'STA'\n");
+            return 1;
         }
 
         add_portmap(tcp_udp, ext_port, int_ip, int_port, iface);
@@ -1270,11 +1188,7 @@ static void register_portmap(void)
     portmap_args.ext_port = arg_int1(NULL, NULL, "<ext_portno>", "external port number");
     portmap_args.int_ip = arg_str1(NULL, NULL, "<int_ip>", "internal IP or device name");
     portmap_args.int_port = arg_int1(NULL, NULL, "<int_portno>", "internal port number");
-#if CONFIG_ETH_UPLINK
-    portmap_args.iface = arg_str0(NULL, NULL, "[ETH|VPN]", "interface (default: ETH)");
-#else
-    portmap_args.iface = arg_str0(NULL, NULL, "[STA|VPN]", "interface (default: STA)");
-#endif
+    portmap_args.iface = arg_str0(NULL, NULL, "[STA]", "interface (default: STA)");
     portmap_args.end = arg_end(6);
 
     const esp_console_cmd_t cmd = {
@@ -1303,12 +1217,11 @@ static int show(int argc, char **argv)
     }
 
     if (show_args.type->count == 0) {
-        printf("Usage: show <status|config|mappings|acl|vpn|ota>\n");
+        printf("Usage: show <status|config|mappings|acl|ota>\n");
         printf("  status   - Show router status (connection, clients, memory)\n");
         printf("  config   - Show router configuration (AP/STA settings)\n");
         printf("  mappings - Show DHCP pool, reservations and port mappings\n");
         printf("  acl      - Show firewall ACL rules\n");
-        printf("  vpn      - Show WireGuard VPN status and config\n");
         return 1;
     }
 
@@ -1327,13 +1240,6 @@ static int show(int argc, char **argv)
         printf("Uptime: %s (since %s)\n", uptime_str, boot_time_str);
 
         // Connection status
-#if CONFIG_ETH_UPLINK
-        if (ap_connect) {
-            printf("Uplink ETH: connected\n");
-        } else {
-            printf("Uplink ETH: not connected\n");
-        }
-#else
         if (ap_connect) {
             wifi_ap_record_t ap_info;
             if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
@@ -1351,7 +1257,6 @@ static int show(int argc, char **argv)
         } else {
             printf("Uplink AP: not connected\n");
         }
-#endif
         if (ap_connect) {
             ip4_addr_t addr;
             addr.addr = my_ip;
@@ -1440,9 +1345,6 @@ static int show(int argc, char **argv)
         printf("====================\n");
 
         bool hide_pw = remote_console_is_capturing();
-#if CONFIG_ETH_UPLINK
-        printf("Uplink: Ethernet (LAN8720)\n");
-#else
         char* ssid = NULL;
         char* ent_username = NULL;
         char* ent_identity = NULL;
@@ -1482,7 +1384,6 @@ static int show(int argc, char **argv)
         if (ent_username != NULL) free(ent_username);
         if (ent_identity != NULL) free(ent_identity);
         if (passwd != NULL) free(passwd);
-#endif
 
         if (static_ip != NULL && strlen(static_ip) > 0) {
             printf("  Static IP: %s\n", static_ip);
@@ -1504,10 +1405,6 @@ static int show(int argc, char **argv)
             const char *auth_modes[] = {"WPA2/WPA3", "WPA2", "WPA3"};
             printf("  Security: %s\n", auth_modes[ap_authmode <= 2 ? ap_authmode : 0]);
         }
-#if CONFIG_ETH_UPLINK
-        printf("  Channel: %s", ap_channel > 0 ? "" : "auto\n");
-        if (ap_channel > 0) printf("%d\n", ap_channel);
-#endif
 
         char* web_lock = NULL;
         get_config_param_str("web_disabled", &web_lock);
@@ -1554,35 +1451,6 @@ static int show(int argc, char **argv)
             acl_print_with_names(i);
         }
 
-    } else if (strcmp(type, "vpn") == 0) {
-        printf("WireGuard VPN:\n");
-        printf("==============\n");
-        printf("Enabled: %s\n", vpn_enabled ? "yes" : "no");
-        if (vpn_enabled) {
-            const char *state;
-            if (vpn_is_connected()) {
-                state = "peer up";
-            } else if (vpn_connected) {
-                state = "handshake pending";
-            } else {
-                state = "disconnected";
-            }
-            printf("Status: %s\n", state);
-        } else {
-            printf("Status: disabled\n");
-        }
-        printf("Tunnel IP: %s\n", (vpn_address && vpn_address[0]) ? vpn_address : "<not set>");
-        printf("Netmask: %s\n", (vpn_netmask && vpn_netmask[0]) ? vpn_netmask : "255.255.255.0");
-        printf("Endpoint: %s:%ld\n", (vpn_endpoint && vpn_endpoint[0]) ? vpn_endpoint : "<not set>", (long)vpn_port);
-        printf("Keepalive: %ld sec\n", (long)vpn_keepalive);
-        printf("Private Key: %s\n", (vpn_private_key && vpn_private_key[0]) ? "<set>" : "<not set>");
-        printf("Public Key: %s\n", (vpn_public_key && vpn_public_key[0]) ? vpn_public_key : "<not set>");
-        printf("Preshared Key: %s\n", (vpn_preshared_key && vpn_preshared_key[0]) ? "<set>" : "<not set>");
-        printf("MSS Clamp: %u\n", ap_mss_clamp);
-        printf("Path MTU: %u\n", ap_pmtu);
-        printf("Kill Switch: %s\n", vpn_killswitch ? "on" : "off");
-        printf("Route All: %s\n", vpn_route_all ? "yes (all traffic)" : "no (split tunnel)");
-
     } else if (strcmp(type, "ota") == 0) {
         const esp_partition_t *running = esp_ota_get_running_partition();
         const esp_app_desc_t *app_desc = esp_app_get_description();
@@ -1622,7 +1490,7 @@ static int show(int argc, char **argv)
         }
 
     } else {
-        printf("Invalid parameter. Use: show <status|config|mappings|acl|vpn|ota>\n");
+        printf("Invalid parameter. Use: show <status|config|mappings|acl|ota>\n");
         return 1;
     }
 
@@ -1631,12 +1499,12 @@ static int show(int argc, char **argv)
 
 static void register_show(void)
 {
-    show_args.type = arg_str1(NULL, NULL, "[status|config|mappings|acl|vpn|ota]", "Type of information");
+    show_args.type = arg_str1(NULL, NULL, "[status|config|mappings|acl|ota]", "Type of information");
     show_args.end = arg_end(1);
 
     const esp_console_cmd_t cmd = {
         .command = "show",
-        .help = "Show router status, config, mappings, ACL rules, VPN or OTA info",
+        .help = "Show router status, config, mappings, ACL rules, or OTA info",
         .hint = NULL,
         .func = &show,
         .argtable = &show_args
@@ -2450,63 +2318,13 @@ static void register_set_ap_auth(void)
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }
 
-#if CONFIG_ETH_UPLINK
-/* 'set_ap_channel' command - set AP WiFi channel (ETH_UPLINK only) */
-static int set_ap_channel_cmd(int argc, char **argv)
-{
-    if (argc < 2) {
-        if (ap_channel == 0) {
-            printf("AP channel: auto\n");
-        } else {
-            printf("AP channel: %d\n", ap_channel);
-        }
-        return 0;
-    }
-
-    int channel_val = atoi(argv[1]);
-    if (channel_val < 0 || channel_val > 13) {
-        printf("Invalid channel. Use 0 (auto) or 1-13.\n");
-        return 1;
-    }
-
-    esp_err_t err = set_config_param_int("ap_channel", channel_val);
-    if (err == ESP_OK) {
-        ap_channel = (uint8_t)channel_val;
-        if (channel_val == 0) {
-            printf("AP channel set to: auto\n");
-        } else {
-            printf("AP channel set to: %d\n", channel_val);
-        }
-        printf("Restart the device for changes to take effect.\n");
-    } else {
-        printf("Failed to save setting\n");
-    }
-    return err;
-}
-
-static void register_set_ap_channel(void)
-{
-    const esp_console_cmd_t cmd = {
-        .command = "set_ap_channel",
-        .help = "Set AP WiFi channel (0=auto, 1-13=fixed, requires restart)",
-        .hint = NULL,
-        .func = &set_ap_channel_cmd,
-    };
-    ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
-}
-#endif
-
 /* 'ap' command - enable/disable AP interface dynamically */
 static int ap_cmd(int argc, char **argv)
 {
     if (argc < 2) {
         wifi_mode_t mode = WIFI_MODE_NULL;
         esp_wifi_get_mode(&mode);
-#if CONFIG_ETH_UPLINK
-        bool running = (mode == WIFI_MODE_AP);
-#else
         bool running = (mode == WIFI_MODE_APSTA || mode == WIFI_MODE_AP);
-#endif
         printf("AP interface: %s\n", running ? "enabled" : "disabled");
         printf("  (NVS setting: %s)\n", ap_disabled ? "disabled" : "enabled");
         printf("\nUsage:\n");
@@ -3005,8 +2823,8 @@ static int remote_console_cmd(int argc, char **argv)
 
     } else if (strcmp(action, "bind") == 0) {
         if (argc < 3) {
-            printf("Usage: remote_console bind <ap,sta,vpn>\n");
-            printf("  Comma-separated list, e.g.: ap,sta or ap,vpn\n");
+            printf("Usage: remote_console bind <ap,sta>\n");
+            printf("  Comma-separated list, e.g.: ap,sta\n");
             return 1;
         }
         uint8_t bind = 0;
@@ -3017,9 +2835,8 @@ static int remote_console_cmd(int argc, char **argv)
         while (token) {
             if ((strcmp(token, "ap") == 0)||(strcmp(token, "AP")) == 0) bind |= RC_BIND_AP;
             else if ((strcmp(token, "sta") == 0)||(strcmp(token, "STA") == 0)) bind |= RC_BIND_STA;
-            else if ((strcmp(token, "vpn") == 0)||(strcmp(token, "VPN")== 0)) bind |= RC_BIND_VPN;
             else {
-                printf("Unknown interface: %s. Use: ap, sta, vpn\n", token);
+                printf("Unknown interface: %s. Use: ap, sta\n", token);
                 return 1;
             }
             token = strtok(NULL, ",");
@@ -3068,7 +2885,7 @@ static void register_remote_console_cmd(void)
                 "  remote_console enable               - Enable remote console\n"
                 "  remote_console disable              - Disable remote console\n"
                 "  remote_console port <port>          - Set TCP port (default: 2323)\n"
-                "  remote_console bind <ap,sta,vpn>    - Set interface binding\n"
+                "  remote_console bind <ap,sta>        - Set interface binding\n"
                 "  remote_console timeout <seconds>    - Set idle timeout (0=none)\n"
                 "  remote_console kick                 - Disconnect current session",
         .hint = " <action> [<args>]",
@@ -3298,7 +3115,6 @@ static void register_set_oled_gpio(void)
 
 #endif /* CONFIG_IDF_TARGET_ESP32C3 || CONFIG_IDF_TARGET_ESP32S3 */
 
-#if !CONFIG_ETH_UPLINK
 /* Helper function to convert auth mode to string */
 static const char* auth_mode_to_str(wifi_auth_mode_t authmode)
 {
@@ -3401,103 +3217,6 @@ static void register_scan(void)
         .help = "Scan for available WiFi networks",
         .hint = NULL,
         .func = &scan_cmd,
-    };
-    ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
-}
-#endif /* !CONFIG_ETH_UPLINK */
-
-/** Arguments used by 'set_vpn' function */
-static struct {
-    struct arg_str *privkey;
-    struct arg_str *pubkey;
-    struct arg_str *endpoint;
-    struct arg_str *address;
-    struct arg_str *psk;
-    struct arg_str *mask;
-    struct arg_int *port;
-    struct arg_int *keepalive;
-    struct arg_int *enable;
-    struct arg_int *killswitch;
-    struct arg_int *route_all;
-    struct arg_end *end;
-} set_vpn_args;
-
-static int set_vpn_cmd(int argc, char **argv)
-{
-    int nerrors = arg_parse(argc, argv, (void **) &set_vpn_args);
-    if (nerrors != 0) {
-        arg_print_errors(stderr, set_vpn_args.end, argv[0]);
-        return 1;
-    }
-
-    nvs_handle_t nvs;
-    esp_err_t err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
-    if (err != ESP_OK) {
-        printf("Error opening NVS: %s\n", esp_err_to_name(err));
-        return 1;
-    }
-
-    if (set_vpn_args.privkey->count > 0) {
-        nvs_set_str(nvs, "vpn_privkey", set_vpn_args.privkey->sval[0]);
-    }
-    if (set_vpn_args.pubkey->count > 0) {
-        nvs_set_str(nvs, "vpn_pubkey", set_vpn_args.pubkey->sval[0]);
-    }
-    if (set_vpn_args.endpoint->count > 0) {
-        nvs_set_str(nvs, "vpn_endpoint", set_vpn_args.endpoint->sval[0]);
-    }
-    if (set_vpn_args.address->count > 0) {
-        nvs_set_str(nvs, "vpn_ip", set_vpn_args.address->sval[0]);
-    }
-    if (set_vpn_args.psk->count > 0) {
-        nvs_set_str(nvs, "vpn_psk", set_vpn_args.psk->sval[0]);
-    }
-    if (set_vpn_args.mask->count > 0) {
-        nvs_set_str(nvs, "vpn_mask", set_vpn_args.mask->sval[0]);
-    }
-    if (set_vpn_args.port->count > 0) {
-        nvs_set_i32(nvs, "vpn_port", set_vpn_args.port->ival[0]);
-    }
-    if (set_vpn_args.keepalive->count > 0) {
-        nvs_set_i32(nvs, "vpn_ka", set_vpn_args.keepalive->ival[0]);
-    }
-    if (set_vpn_args.enable->count > 0) {
-        nvs_set_i32(nvs, "vpn_enabled", set_vpn_args.enable->ival[0]);
-    }
-    if (set_vpn_args.killswitch->count > 0) {
-        nvs_set_i32(nvs, "vpn_ks", set_vpn_args.killswitch->ival[0]);
-    }
-    if (set_vpn_args.route_all->count > 0) {
-        nvs_set_i32(nvs, "vpn_rall", set_vpn_args.route_all->ival[0]);
-    }
-
-    nvs_commit(nvs);
-    nvs_close(nvs);
-    printf("VPN settings saved. Restart to apply.\n");
-    return 0;
-}
-
-static void register_set_vpn(void)
-{
-    set_vpn_args.privkey   = arg_str0(NULL, NULL, "<private_key>", "WireGuard private key (base64)");
-    set_vpn_args.pubkey    = arg_str0(NULL, NULL, "<public_key>", "Peer public key (base64)");
-    set_vpn_args.endpoint  = arg_str0(NULL, NULL, "<endpoint>", "Peer endpoint host/IP");
-    set_vpn_args.address   = arg_str0(NULL, NULL, "<address>", "Tunnel IP (e.g. 10.0.0.2)");
-    set_vpn_args.psk       = arg_str0("k", "psk", "<preshared_key>", "Preshared key (base64)");
-    set_vpn_args.mask      = arg_str0("m", "mask", "<netmask>", "Tunnel netmask (default 255.255.255.0)");
-    set_vpn_args.port      = arg_int0("p", "port", "<port>", "Peer UDP port (default 51820)");
-    set_vpn_args.keepalive = arg_int0("a", "keepalive", "<seconds>", "Persistent keepalive (0=disabled)");
-    set_vpn_args.enable    = arg_int0("e", "enable", "<0|1>", "Enable/disable VPN");
-    set_vpn_args.killswitch = arg_int0("K", "killswitch", "<0|1>", "Kill switch: block internet when VPN down (default on)");
-    set_vpn_args.route_all = arg_int0("R", "route-all", "<0|1>", "Route all traffic through VPN (0=split tunnel)");
-    set_vpn_args.end       = arg_end(4);
-
-    const esp_console_cmd_t cmd = {
-        .command = "set_vpn",
-        .help = "Configure WireGuard VPN (restart to apply)",
-        .hint = NULL,
-        .func = &set_vpn_cmd,
-        .argtable = &set_vpn_args
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }

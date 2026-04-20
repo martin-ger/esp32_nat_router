@@ -1,8 +1,8 @@
 /* Network interface hooks: byte counting, ACL enforcement, PCAP capture,
- * TTL override, TCP MSS clamping, Path MTU, and VPN kill switch.
+ * TTL override, TCP MSS clamping, and Path MTU.
  *
- * Hooks into the lwIP netif input/linkoutput chains for both STA/ETH
- * and AP interfaces to intercept packets for filtering and monitoring.
+ * Hooks into the lwIP netif input/linkoutput chains for STA and AP
+ * interfaces to intercept packets for filtering and monitoring.
  */
 
 #include <inttypes.h>
@@ -23,15 +23,9 @@
 #include "pcap_capture.h"
 #include "router_config.h"
 #include "wifi_config.h"
-#include "vpn_config.h"
 #include "led_strip_status.h"
 
-#if CONFIG_ETH_UPLINK
-#include "esp_eth.h"
-extern esp_netif_t* ethNetif;
-#else
 extern esp_netif_t* wifiSTA;
-#endif
 extern esp_netif_t* wifiAP;
 
 static const char *TAG = "netif_hooks";
@@ -256,19 +250,6 @@ static IRAM_ATTR err_t netif_linkoutput_hook(struct netif *netif, struct pbuf *p
 }
 
 void init_byte_counter(void) {
-#if CONFIG_ETH_UPLINK
-    if (ethNetif != NULL && original_netif_input == NULL) {
-        extern struct netif *esp_netif_get_netif_impl(esp_netif_t *esp_netif);
-        sta_netif = esp_netif_get_netif_impl(ethNetif);
-        if (sta_netif != NULL) {
-            original_netif_input = sta_netif->input;
-            sta_netif->input = netif_input_hook;
-            original_netif_linkoutput = sta_netif->linkoutput;
-            sta_netif->linkoutput = netif_linkoutput_hook;
-            ESP_LOGI(TAG, "Byte counter initialized for ETH interface (input & output)");
-        }
-    }
-#else
     if (wifiSTA != NULL && original_netif_input == NULL) {
         // Get the underlying lwIP netif structure
         esp_netif_t *sta_netif_handle = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
@@ -290,7 +271,6 @@ void init_byte_counter(void) {
             }
         }
     }
-#endif
 }
 
 uint64_t get_sta_bytes_sent(void) {
@@ -511,34 +491,6 @@ static IRAM_ATTR err_t ap_netif_input_hook(struct pbuf *p, struct netif *netif) 
             }
             pbuf_free(p);
             return ERR_OK;
-        }
-    }
-
-    // VPN kill switch: block traffic when VPN is enabled but not connected
-    // Route-all mode: block all non-AP-subnet traffic (prevents internet leakage)
-    // Split tunnel mode: block only VPN-subnet traffic (internet goes direct via STA)
-    if (vpn_enabled && vpn_killswitch && !vpn_is_connected()) {
-        if (p != NULL && p->len >= 14 + sizeof(struct ip_hdr)) {
-            uint8_t *payload = (uint8_t *)p->payload;
-            if (payload[12] == 0x08 && payload[13] == 0x00) {  // IPv4
-                struct ip_hdr *iphdr = (struct ip_hdr *)(payload + 14);
-                if (IPH_V(iphdr) == 4) {
-                    uint32_t dest = iphdr->dest.addr;
-                    uint32_t ap_subnet = my_ap_ip & htonl(0xFFFFFF00);
-                    bool is_local = (dest & htonl(0xFFFFFF00)) == ap_subnet;
-                    if (!is_local) {
-                        if (vpn_route_all) {
-                            // Block all non-local traffic
-                            pbuf_free(p);
-                            return ERR_OK;
-                        } else if (vpn_in_subnet(dest)) {
-                            // Split tunnel: block only VPN-subnet traffic
-                            pbuf_free(p);
-                            return ERR_OK;
-                        }
-                    }
-                }
-            }
         }
     }
 
