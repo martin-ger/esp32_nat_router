@@ -1,4 +1,4 @@
-/* ESP32 NAT Router - Main application
+/* ESP32 WiFi Repeater - Main application
  *
  * Entry point, global variable definitions, WiFi initialization,
  * event handlers, LED status thread, and console REPL.
@@ -45,6 +45,7 @@
 #include "dhcpserver/dhcpserver.h"
 #include "dhcpserver/dhcpserver_options.h"
 
+#include "mdns.h"
 #include "cmd_system.h"
 #include "cmd_router.h"
 #include <esp_http_server.h>
@@ -129,7 +130,6 @@ uint8_t led_toggle = 0;  // Shared toggle state for packet-driven LED flicker
 uint32_t my_ip;
 uint32_t my_ap_ip;
 
-struct portmap_table_entry portmap_tab[IP_PORTMAP_MAX];
 struct dhcp_reservation_entry dhcp_reservations[MAX_DHCP_RESERVATIONS];
 
 esp_netif_t* wifiAP;
@@ -139,7 +139,7 @@ esp_netif_t* wifiSTA;
 
 #include "http_server.h"
 
-static const char *TAG = "ESP32 NAT router";
+static const char *TAG = "ESP32 WiFi Repeater";
 
 /* Console command history can be stored to and loaded from a file.
  * The easiest way to do this is to use FATFS filesystem on top of
@@ -518,8 +518,6 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
         esp_timer_stop(sta_reconnect_timer);
         ap_connect = true;
         my_ip = event->ip_info.ip.addr;
-        delete_portmap_tab();
-        apply_portmap_tab();
         if (!(ap_dns && ap_dns[0])) {
             if (esp_netif_get_dns_info(wifiSTA, ESP_NETIF_DNS_MAIN, &dns) == ESP_OK)
             {
@@ -650,7 +648,6 @@ void wifi_init(const uint8_t* mac, const char* ssid, const char* ent_username, c
         ipInfo_sta.netmask.addr = esp_ip4addr_aton(subnet_mask);
         esp_netif_dhcpc_stop(wifiSTA); // Don't run a DHCP client
         esp_netif_set_ip_info(wifiSTA, &ipInfo_sta);
-        apply_portmap_tab();
     }
 
     my_ap_ip = esp_ip4addr_aton(ap_ip);
@@ -664,7 +661,13 @@ void wifi_init(const uint8_t* mac, const char* ssid, const char* ent_username, c
 #if !CONFIG_REPEATER_MODE
     esp_netif_dhcps_start(wifiAP);
 #else
-    ESP_LOGI(TAG, "Repeater mode: AP DHCP server disabled (Option 61 proxy to upstream)");
+    if (strlen(ssid) == 0) {
+        // No upstream configured: run DHCP so clients can reach the config UI at my_ap_ip
+        esp_netif_dhcps_start(wifiAP);
+        ESP_LOGI(TAG, "Repeater mode: no upstream STA configured, AP DHCP enabled for initial setup");
+    } else {
+        ESP_LOGI(TAG, "Repeater mode: AP DHCP disabled, using upstream DHCP proxy");
+    }
 #endif
 
     esp_event_handler_instance_t instance_any_id;
@@ -760,10 +763,8 @@ void wifi_init(const uint8_t* mac, const char* ssid, const char* ent_username, c
 #if !CONFIG_REPEATER_MODE
     // Enable DNS (offer) for dhcp server
     dhcps_offer_t dhcps_dns_value = OFFER_DNS;
-    esp_netif_dhcps_option(wifiAP,ESP_NETIF_OP_SET, ESP_NETIF_DOMAIN_NAME_SERVER, &dhcps_dns_value, sizeof(dhcps_dns_value));
-#endif
+    esp_netif_dhcps_option(wifiAP, ESP_NETIF_OP_SET, ESP_NETIF_DOMAIN_NAME_SERVER, &dhcps_dns_value, sizeof(dhcps_dns_value));
 
-#if !CONFIG_REPEATER_MODE
     // Set DNS server address for DHCP clients.
     // When no STA is configured, point clients at the AP itself so the
     // captive-portal DNS server can intercept all queries.
@@ -776,7 +777,16 @@ void wifi_init(const uint8_t* mac, const char* ssid, const char* ent_username, c
     dnsserver.ip.type = ESP_IPADDR_TYPE_V4;
     esp_netif_set_dns_info(wifiAP, ESP_NETIF_DNS_MAIN, &dnsserver);
 #else
-    (void)dnsserver;
+    if (strlen(ssid) == 0) {
+        // Unconfigured repeater: enable DNS offer and point clients at AP for captive portal
+        dhcps_offer_t dhcps_dns_value = OFFER_DNS;
+        esp_netif_dhcps_option(wifiAP, ESP_NETIF_OP_SET, ESP_NETIF_DOMAIN_NAME_SERVER, &dhcps_dns_value, sizeof(dhcps_dns_value));
+        dnsserver.ip.u_addr.ip4.addr = my_ap_ip;
+        dnsserver.ip.type = ESP_IPADDR_TYPE_V4;
+        esp_netif_set_dns_info(wifiAP, ESP_NETIF_DNS_MAIN, &dnsserver);
+    } else {
+        (void)dnsserver;
+    }
 #endif
 
     // esp_netif_get_dns_info(ESP_IF_WIFI_AP, ESP_NETIF_DNS_MAIN, &dnsinfo);
@@ -884,7 +894,7 @@ void app_main(void)
     get_config_param_blob("ap_mac", &ap_mac, 6);
     get_config_param_str("ap_ssid", &ap_ssid);
     if (ap_ssid == NULL) {
-        ap_ssid = param_set_default("ESP32_NAT_Router");
+        ap_ssid = param_set_default("ESP32_WiFi_Repeater");
     }
     get_config_param_str("ap_passwd", &ap_passwd);
     if (ap_passwd == NULL) {
@@ -904,7 +914,6 @@ void app_main(void)
         hostname = param_set_default(DEFAULT_HOSTNAME);
     }
 
-    get_portmap_tab();
     get_dhcp_reservations();
     load_acl_rules();
 
@@ -1078,6 +1087,14 @@ void app_main(void)
     repeater_forward_init();
 #endif
 
+    if (mdns_init() == ESP_OK) {
+        mdns_hostname_set(hostname);
+        mdns_instance_name_set("ESP32 WiFi Repeater");
+        ESP_LOGI(TAG, "mDNS started: %s.local", hostname);
+    } else {
+        ESP_LOGW(TAG, "mDNS init failed");
+    }
+
     char* web_disabled = NULL;
     get_config_param_str("web_disabled", &web_disabled);
     if (web_disabled == NULL) {
@@ -1123,7 +1140,7 @@ void app_main(void)
     const char* prompt = LOG_COLOR_I "esp32> " LOG_RESET_COLOR;
 
     printf("\n"
-           "ESP32 NAT ROUTER\n"
+           "ESP32 WiFi Repeater\n"
            "Type 'help' to get the list of commands.\n"
            "Use UP/DOWN arrows to navigate through command history.\n"
            "Press TAB when typing command name to auto-complete.\n");

@@ -1,7 +1,7 @@
 /* Index page templates */
 #include "router_config.h"
 
-#define INDEX_TITLE "ESP32 NAT Router"
+#define INDEX_TITLE "ESP32 WiFi Repeater"
 
 /* Index Page - Chunked for streaming */
 #define INDEX_CHUNK_HEAD "<html>\
@@ -182,7 +182,6 @@ font-size: 0.8rem;\
 <a href='/setup' class='nav-button'>🚀 Getting Started</a>\
 <a href='/scan' class='nav-button'>📡 WiFi Scan</a>\
 <a href='/config' class='nav-button'>⚙️ Configuration</a>\
-<a href='/mappings' class='nav-button'>🔀 Mappings</a>\
 <a href='/firewall' class='nav-button'>🛡️ Firewall</a>\
 </div>"
 /* Auth UI streamed here */

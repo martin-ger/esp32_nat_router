@@ -39,7 +39,6 @@ static const char *TAG = "remote_console";
 /* NVS keys */
 #define NVS_KEY_ENABLED     "rc_enabled"
 #define NVS_KEY_PORT        "rc_port"
-#define NVS_KEY_BIND        "rc_bind"
 #define NVS_KEY_TIMEOUT     "rc_timeout"
 
 /* Task configuration */
@@ -56,7 +55,7 @@ static const char *TAG = "remote_console";
 static const char *RC_BANNER =
     "\r\n"
     "============================================\r\n"
-    "  ESP32 NAT Router - Remote Console\r\n"
+    "  ESP32 WiFi Repeater - Remote Console\r\n"
     "  WARNING: Plain TCP (not encrypted)\r\n"
     "============================================\r\n"
     "\r\n";
@@ -72,7 +71,6 @@ static const char *RC_GOODBYE = "\r\nGoodbye.\r\n";
 static remote_console_config_t rc_config = {
     .enabled = false,
     .port = REMOTE_CONSOLE_DEFAULT_PORT,
-    .bind = RC_BIND_AP,
     .idle_timeout_sec = REMOTE_CONSOLE_DEFAULT_TIMEOUT
 };
 
@@ -364,21 +362,6 @@ esp_err_t remote_console_set_port(uint16_t port) {
     return ESP_OK;
 }
 
-esp_err_t remote_console_set_bind(uint8_t bind) {
-    if (bind == 0) {
-        bind = RC_BIND_AP;  /* Must have at least one */
-    }
-
-    rc_config.bind = bind & (RC_BIND_AP | RC_BIND_STA);
-    save_config();
-
-    char bind_str[32] = "";
-    if (rc_config.bind & RC_BIND_AP) strcat(bind_str, "AP ");
-    if (rc_config.bind & RC_BIND_STA) strcat(bind_str, "STA ");
-    ESP_LOGI(TAG, "Bind set to %s(restart required)", bind_str);
-    return ESP_OK;
-}
-
 esp_err_t remote_console_set_timeout(uint32_t timeout_sec) {
     rc_config.idle_timeout_sec = timeout_sec;
     save_config();
@@ -457,16 +440,6 @@ static esp_err_t load_config(void) {
     if (nvs_get_u16(nvs, NVS_KEY_PORT, &u16_val) == ESP_OK) {
         rc_config.port = u16_val;
     }
-    if (nvs_get_u8(nvs, NVS_KEY_BIND, &u8_val) == ESP_OK) {
-        /* Migrate old enum values (0=both, 1=AP, 2=STA) to bitmask */
-        if (u8_val <= 2) {
-            const uint8_t migrate[] = {RC_BIND_AP | RC_BIND_STA, RC_BIND_AP, RC_BIND_STA};
-            rc_config.bind = migrate[u8_val];
-        } else {
-            rc_config.bind = u8_val & (RC_BIND_AP | RC_BIND_STA);
-        }
-        if (rc_config.bind == 0) rc_config.bind = RC_BIND_AP;
-    }
     if (nvs_get_u32(nvs, NVS_KEY_TIMEOUT, &u32_val) == ESP_OK) {
         rc_config.idle_timeout_sec = u32_val;
     }
@@ -484,7 +457,6 @@ static esp_err_t save_config(void) {
 
     nvs_set_u8(nvs, NVS_KEY_ENABLED, rc_config.enabled ? 1 : 0);
     nvs_set_u16(nvs, NVS_KEY_PORT, rc_config.port);
-    nvs_set_u8(nvs, NVS_KEY_BIND, (uint8_t)rc_config.bind);
     nvs_set_u32(nvs, NVS_KEY_TIMEOUT, rc_config.idle_timeout_sec);
 
     nvs_commit(nvs);
@@ -778,25 +750,6 @@ static void remote_console_task(void *arg) {
 
             /* Get client IP */
             inet_ntop(AF_INET, &client_addr.sin_addr, rc_state.client_ip, sizeof(rc_state.client_ip));
-
-            /* Check interface binding - reject connections on disallowed interfaces */
-            {
-                struct sockaddr_in local_addr;
-                socklen_t addr_len = sizeof(local_addr);
-                getsockname(rc_state.client_socket, (struct sockaddr *)&local_addr, &addr_len);
-                uint32_t local_ip = local_addr.sin_addr.s_addr;
-
-                bool allowed = false;
-                if ((rc_config.bind & RC_BIND_AP) && local_ip == my_ap_ip) allowed = true;
-                if ((rc_config.bind & RC_BIND_STA) && local_ip == my_ip) allowed = true;
-
-                if (!allowed) {
-                    ESP_LOGW(TAG, "Connection from %s rejected (interface not allowed)", rc_state.client_ip);
-                    close(rc_state.client_socket);
-                    rc_state.client_socket = -1;
-                    continue;
-                }
-            }
 
             rc_state.total_connections++;
             ESP_LOGI(TAG, "Connection from %s", rc_state.client_ip);

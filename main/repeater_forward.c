@@ -11,6 +11,7 @@
 #include "fdb.h"
 #include "dhcp_xid_map.h"
 #include "dhcp_helpers.h"
+#include "dhcp_lease_map.h"
 #include "repeater_config.h"
 
 static const char *TAG = "repeater_fwd";
@@ -24,6 +25,7 @@ static struct netif *s_sta_netif = NULL;
 void repeater_forward_init(void) {
     fdb_init();
     dhcp_xid_map_init();
+    dhcp_lease_map_init();
     ESP_LOGI(TAG, "Repeater forwarding initialized");
 }
 
@@ -62,7 +64,11 @@ static void snoop_dhcp_client(const uint8_t *eth, size_t len) {
     if (!dhcp_parse(dhcp, dlen, &info)) return;
     if (info.op != DHCP_BOOTP_REQUEST) return;
     dhcp_xid_map_insert(info.xid, info.chaddr);
-    ESP_LOGD(TAG, "DHCP client xid=0x%08" PRIx32 " type=%u", info.xid, info.msg_type);
+    if (info.hostname[0]) {
+        dhcp_lease_map_set_hostname(info.chaddr, info.hostname);
+    }
+    ESP_LOGD(TAG, "DHCP client xid=0x%08" PRIx32 " type=%u host=%s",
+             info.xid, info.msg_type, info.hostname[0] ? info.hostname : "-");
 }
 
 static void snoop_dhcp_server_reply(const uint8_t *eth, size_t len, uint8_t chaddr_out[6]) {
@@ -75,15 +81,11 @@ static void snoop_dhcp_server_reply(const uint8_t *eth, size_t len, uint8_t chad
         return;
     }
     if (chaddr_out) memcpy(chaddr_out, info.chaddr, 6);
-    if (info.msg_type == DHCPACK) {
-        uint32_t yiaddr;
-        memcpy(&yiaddr, dhcp + 16, 4);
-        if (yiaddr != 0) {
-            fdb_learn(yiaddr, info.chaddr, REPEATER_FDB_DEFAULT_TTL_S);
-            ESP_LOGI(TAG, "DHCP lease learned mac=%02x:%02x:%02x:%02x:%02x:%02x",
-                     info.chaddr[0], info.chaddr[1], info.chaddr[2],
-                     info.chaddr[3], info.chaddr[4], info.chaddr[5]);
-        }
+    if (info.msg_type == DHCPACK && info.yiaddr != 0) {
+        fdb_learn(info.yiaddr, info.chaddr, REPEATER_FDB_DEFAULT_TTL_S);
+        dhcp_lease_map_update(info.chaddr, info.yiaddr,
+                              info.hostname[0] ? info.hostname : NULL,
+                              info.lease_time);
     }
 }
 
@@ -118,9 +120,9 @@ static bool bridge_ap_to_sta(struct pbuf *p) {
          *             sha(6) spa(4) tha(6) tpa(4) */
         memcpy(arp + 8, sta_mac, 6);   /* sender HA */
         memcpy(eth + 6, sta_mac, 6);   /* L2 src */
-        bool ok = emit_on(s_sta_netif, p);
+        emit_on(s_sta_netif, p);
         pbuf_free(p);
-        return ok;
+        return true;
     }
 
     if (etype == ETYPE_IP4) {
@@ -142,9 +144,9 @@ static bool bridge_ap_to_sta(struct pbuf *p) {
             return false;
         }
         memcpy(eth + 6, sta_mac, 6);
-        bool ok = emit_on(s_sta_netif, p);
+        emit_on(s_sta_netif, p);
         pbuf_free(p);
-        return ok;
+        return true;
     }
 
     return false;
@@ -174,18 +176,18 @@ static bool bridge_sta_to_ap(struct pbuf *p) {
             /* Broadcast ARP request from upstream — flood to AP unchanged src */
             if (mac_is_broadcast(eth)) {
                 memcpy(eth + 6, ap_mac, 6);
-                bool ok = emit_on(s_ap_netif, p);
+                emit_on(s_ap_netif, p);
                 pbuf_free(p);
-                return ok;
+                return true;
             }
             return false;
         }
         memcpy(arp + 18, client_mac, 6);  /* target HA in ARP body */
         memcpy(eth + 0, client_mac, 6);   /* L2 dst */
         memcpy(eth + 6, ap_mac, 6);       /* L2 src */
-        bool ok = emit_on(s_ap_netif, p);
+        emit_on(s_ap_netif, p);
         pbuf_free(p);
-        return ok;
+        return true;
     }
 
     if (etype == ETYPE_IP4) {
@@ -221,18 +223,18 @@ static bool bridge_sta_to_ap(struct pbuf *p) {
             /* Broadcast IPv4 (e.g. mDNS, NBNS) — flood to AP */
             if (mac_is_broadcast(eth)) {
                 memcpy(eth + 6, ap_mac, 6);
-                bool ok = emit_on(s_ap_netif, p);
+                emit_on(s_ap_netif, p);
                 pbuf_free(p);
-                return ok;
+                return true;
             }
             return false;
         }
 
         memcpy(eth + 0, client_mac, 6);
         memcpy(eth + 6, ap_mac, 6);
-        bool ok = emit_on(s_ap_netif, p);
+        emit_on(s_ap_netif, p);
         pbuf_free(p);
-        return ok;
+        return true;
     }
 
     return false;

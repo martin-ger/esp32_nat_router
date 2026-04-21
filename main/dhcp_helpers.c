@@ -59,6 +59,7 @@ bool dhcp_parse(const uint8_t *buf, size_t len, dhcp_parsed_t *out) {
     out->xid = ((uint32_t)buf[4] << 24) | ((uint32_t)buf[5] << 16) |
                ((uint32_t)buf[6] << 8)  |  (uint32_t)buf[7];
     memcpy(out->chaddr, &buf[28], 6);
+    memcpy(&out->yiaddr, &buf[16], 4);
 
     const uint8_t *v = NULL;
     uint8_t vl = 0;
@@ -66,6 +67,15 @@ bool dhcp_parse(const uint8_t *buf, size_t len, dhcp_parsed_t *out) {
         out->msg_type = v[0];
     }
     out->has_client_id = find_option(buf, len, DHCP_OPT_CLIENT_ID, NULL, NULL);
+    if (find_option(buf, len, DHCP_OPT_LEASE_TIME, &v, &vl) && vl >= 4) {
+        out->lease_time = ((uint32_t)v[0] << 24) | ((uint32_t)v[1] << 16) |
+                          ((uint32_t)v[2] << 8)  |  (uint32_t)v[3];
+    }
+    if (find_option(buf, len, DHCP_OPT_HOSTNAME, &v, &vl) && vl > 0) {
+        uint8_t clen = vl < DHCP_HOSTNAME_MAX - 1 ? vl : DHCP_HOSTNAME_MAX - 1;
+        memcpy(out->hostname, v, clen);
+        out->hostname[clen] = '\0';
+    }
     return true;
 }
 

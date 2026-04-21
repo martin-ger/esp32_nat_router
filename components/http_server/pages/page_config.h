@@ -59,18 +59,15 @@ setTimeout(\"location.href = '/'\", 10000);\
 }\
 </script>"
 
-/* AP Settings section - uses %s for: ap_ssid, ap_ip, ap_dns, ap_mac, ap_en_checked, open_checked, hidden_checked */
+/* AP Settings section - uses %s for: ap_ssid, ap_mac, auth_sel0/1/2, ap_en_checked, open_checked, hidden_checked */
 #define CONFIG_CHUNK_AP "\
 <h2>Access Point Settings</h2>\
 <form action='' method='GET'>\
 <table>\
 <tr><td>SSID</td><td><input type='text' name='ap_ssid' value='%s' placeholder='Network name'/></td></tr>\
 <tr><td>Password</td><td><input type='text' id='ap_pw' name='ap_password' placeholder='unchanged' oninput=\"document.getElementById('ap_op').checked=false;\"/></td></tr>\
-<tr><td>AP IP Address</td><td><input type='text' name='ap_ip_addr' value='%s' placeholder='192.168.4.1'/></td></tr>\
-<tr><td>DNS Server</td><td><input type='text' name='ap_dns' value='%s' placeholder='empty = use upstream DNS'/></td></tr>\
 <tr><td>MAC Address</td><td><input type='text' name='ap_mac' value='%s' placeholder='AA:BB:CC:DD:EE:FF'/></td></tr>\
 <tr><td>Security</td><td><select name='ap_auth'><option value='0' %s>WPA2/WPA3</option><option value='1' %s>WPA2 only</option><option value='2' %s>WPA3 only</option></select></td></tr>\
-<tr><td>NAT</td><td><input type='checkbox' name='ap_nat' value='1' %s> <span style='color:#888;font-size:0.85rem;'>Enabled (uncheck for routed mode)</span></td></tr>\
 <tr><td>Enabled</td><td><input type='checkbox' name='ap_enabled' value='1' %s> <span style='color:#888;font-size:0.85rem;'>AP interface active</span></td></tr>\
 <tr><td>Options</td><td><input type='checkbox' id='ap_op' name='ap_open' value='1' %s onchange=\"if(this.checked)document.getElementById('ap_pw').value='';\"> <span style='color:#888;font-size:0.85rem;'>Open (no password)</span> &nbsp; <input type='checkbox' name='ap_hidden' value='1' %s> <span style='color:#888;font-size:0.85rem;'>Hidden SSID</span></td></tr>\
 <tr><td></td><td><input type='submit' value='Save &amp; Reboot' class='ok-button'/></td></tr>\
@@ -138,7 +135,7 @@ setTimeout(\"location.href = '/'\", 10000);\
 <small>Leave empty for DHCP</small>\
 </form>"
 
-/* Remote Console section - uses: rc_en_chk, rc_dis_chk, rc_color, rc_status, rc_kick, rc_port, rc_ap_chk, rc_sta_chk, rc_timeout */
+/* Remote Console section - uses: rc_en_chk, rc_dis_chk, rc_color, rc_status, rc_kick, rc_port, rc_timeout */
 #define CONFIG_CHUNK_RC "\
 <h2>Remote Console</h2>\
 <form action='' method='GET'>\
@@ -150,10 +147,6 @@ setTimeout(\"location.href = '/'\", 10000);\
 </td></tr>\
 <tr><td>Status</td><td><strong style='color: %s;'>%s</strong>%s</td></tr>\
 <tr><td>Port</td><td><input type='number' name='rc_port' value='%d' min='1' max='65535' style='width: 100px;'/></td></tr>\
-<tr><td>Bind Interfaces</td><td>\
-<label style='margin-right: 0.8rem;'><input type='checkbox' name='rc_bind_ap' value='1' %s> AP</label>\
-<label><input type='checkbox' name='rc_bind_sta' value='1' %s> STA</label>\
-</td></tr>\
 <tr><td>Idle Timeout</td><td><input type='number' name='rc_timeout' value='%lu' min='0' max='86400' style='width: 100px;'/> sec (0 = no)</td></tr>\
 <tr><td></td><td><input type='submit' value='Save' class='ok-button'/></td></tr>\
 </table>\
@@ -313,23 +306,11 @@ r.readAsText(f);\
 </script>\
 "
 
-/* Danger Zone section - uses %s for: web_bind_ap_chk, web_bind_sta_chk. */
+/* Danger Zone section — no format args. */
 #define CONFIG_CHUNK_DANGER "\
 <div style='margin-top: 2rem; padding: 1rem; background: #fff3cd; border: 2px solid #ff9800; border-radius: 8px;'>\
 <h2 style='color: #ff6b00; margin-bottom: 0.5rem;'>&#x26A0; Danger Zone</h2>\
-<h3 style='font-size:1rem;color:#cc6600;margin:0.75rem 0 0.5rem;'>Web UI Access</h3>\
-<p style='margin-bottom:0.75rem;color:#666;font-size:0.9rem;'>Restrict which network interface can reach the web UI. Unchecking the interface you are currently using will lock you out (re-enable via console: <code>web_ui bind all</code>).</p>\
-<form action='' method='GET'>\
-<input type='hidden' name='web_bind_save' value='1'/>\
-<table>\
-<tr><td style='color:#d32f2f;font-weight:bold;'>Interfaces</td><td>\
-<label style='margin-right:0.8rem;color:#666;'><input type='checkbox' name='web_bind_ap' value='1' %s> AP</label>\
-<label style='color:#666;'><input type='checkbox' name='web_bind_sta' value='1' %s> STA</label>\
-</td></tr>\
-<tr><td></td><td><input type='submit' value='Save' class='red-button' onclick='return confirm(\"Restricting access may lock you out. Continue?\");'/></td></tr>\
-</table>\
-</form>\
-<h3 style='font-size:1rem;color:#cc6600;margin:1.5rem 0 0.5rem;'>Disable Web Interface</h3>\
+<h3 style='font-size:1rem;color:#cc6600;margin:0.75rem 0 0.5rem;'>Disable Web Interface</h3>\
 <p style='margin-bottom:1rem;color:#666;font-size:0.9rem;'>Disables the web interface completely. Re-enable via console: <code>web_ui enable</code>.</p>\
 <form action='' method='GET'>\
 <table>\

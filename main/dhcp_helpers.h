@@ -14,9 +14,13 @@
 
 /* DHCP option tags we care about */
 #define DHCP_OPT_PAD         0
+#define DHCP_OPT_HOSTNAME   12
+#define DHCP_OPT_LEASE_TIME 51
 #define DHCP_OPT_MSG_TYPE   53
 #define DHCP_OPT_CLIENT_ID  61
 #define DHCP_OPT_END       255
+
+#define DHCP_HOSTNAME_MAX   32
 
 /* DHCP message types (Option 53) */
 #define DHCPDISCOVER 1
@@ -35,8 +39,11 @@ typedef struct {
     uint8_t  hlen;
     uint32_t xid;           /* host byte order */
     uint8_t  chaddr[6];     /* first 6 bytes of chaddr (Ethernet) */
+    uint32_t yiaddr;        /* offered/assigned IP (network byte order) */
     uint8_t  msg_type;      /* DHCP Option 53, 0 if missing */
     bool     has_client_id; /* Option 61 present */
+    uint32_t lease_time;    /* Option 51, seconds, 0 if missing */
+    char     hostname[DHCP_HOSTNAME_MAX]; /* Option 12, NUL-terminated */
 } dhcp_parsed_t;
 
 /* Parse a UDP DHCP payload (server port 67 or client port 68).

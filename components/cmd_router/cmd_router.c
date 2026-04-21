@@ -41,9 +41,6 @@
 #include "pcap_capture.h"
 #include "acl.h"
 #include "remote_console.h"
-/* web UI bind API */
-extern uint8_t web_ui_get_bind(void);
-extern void    web_ui_set_bind(uint8_t bind);
 #include "syslog_client.h"
 #include "oled_display.h"
 #include "esp_ota_ops.h"
@@ -66,8 +63,6 @@ static void register_set_ap_auth(void);
 static void register_ap(void);
 static void register_set_ap_dns(void);
 static void register_show(void);
-static void register_portmap(void);
-static void register_dhcp_reserve(void);
 static void register_set_router_password(void);
 static void register_web_ui(void);
 static void register_bytes(void);
@@ -275,10 +270,6 @@ void register_router(void)
     register_set_ap();
     register_set_ap_ip();
     register_set_ap_dns();
-#if !CONFIG_REPEATER_MODE
-    register_dhcp_reserve();
-    register_portmap();
-#endif
     register_acl();
     register_bytes();
     register_pcap();
@@ -680,12 +671,6 @@ int set_ap_ip(int argc, char **argv)
         ESP_LOGI(TAG, "AP IP address %s stored.", set_ap_ip_arg.ap_ip_str->sval[0]);
     }
 
-    // Clear DHCP reservations and port mappings if network changed
-    if (clear_config && err == ESP_OK) {
-        clear_all_dhcp_reservations();
-        clear_all_portmaps();
-    }
-
     return err;
 }
 
@@ -822,33 +807,20 @@ static void register_set_hostname(void)
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }
 
-/* Format web UI bind mask as a string, e.g. "AP STA " */
-static void fmt_web_bind(uint8_t bind, char *buf)
-{
-    buf[0] = '\0';
-    if (bind & RC_BIND_AP)  strcat(buf, "AP ");
-    if (bind & RC_BIND_STA) strcat(buf, "STA ");
-    if (buf[0] == '\0') strcpy(buf, "(none)");
-}
-
 /* 'web_ui' command */
 static int web_ui_cmd(int argc, char **argv)
 {
     if (argc < 2) {
-        /* Show current status */
         char* lock = NULL;
         get_config_param_str("web_disabled", &lock);
         bool enabled = (lock == NULL || strcmp(lock, "0") == 0);
         int port = 80;
         get_config_param_int("web_port", &port);
-        char bind_str[20];
-        fmt_web_bind(web_ui_get_bind(), bind_str);
-        printf("Web interface: %s (port %d, bind: %s)\n", enabled ? "enabled" : "disabled", port, bind_str);
+        printf("Web interface: %s (port %d)\n", enabled ? "enabled" : "disabled", port);
         printf("\nUsage:\n");
-        printf("  web_ui enable                     - Enable web interface (after reboot)\n");
-        printf("  web_ui disable                    - Disable web interface (after reboot)\n");
-        printf("  web_ui port <port>                - Set web server port (after reboot)\n");
-        printf("  web_ui bind <ap|sta|all>          - Set allowed interfaces (takes effect immediately)\n");
+        printf("  web_ui enable         - Enable web interface (after reboot)\n");
+        printf("  web_ui disable        - Disable web interface (after reboot)\n");
+        printf("  web_ui port <port>    - Set web server port (after reboot)\n");
         if (lock != NULL) free(lock);
         return 0;
     }
@@ -887,44 +859,9 @@ static int web_ui_cmd(int argc, char **argv)
             ESP_LOGI(TAG, "Web server port set to %d.", port);
             printf("Web server port set to %d (after reboot).\n", port);
         }
-    } else if (strcmp(action, "bind") == 0) {
-        if (argc < 3) {
-            char bind_str[20];
-            fmt_web_bind(web_ui_get_bind(), bind_str);
-            printf("Current web UI bind: %s\n", bind_str);
-            printf("Usage: web_ui bind <ap|sta|all>\n");
-            printf("  Interfaces may be comma-separated: web_ui bind ap,sta\n");
-            return 0;
-        }
-        /* Parse comma-separated interface list or "all" */
-        uint8_t bind = 0;
-        char arg[64];
-        strlcpy(arg, argv[2], sizeof(arg));
-        if (strcmp(arg, "all") == 0) {
-            bind = RC_BIND_AP | RC_BIND_STA;
-        } else {
-            char *tok = strtok(arg, ",");
-            while (tok) {
-                if      (strcmp(tok, "ap") == 0 || strcmp(tok, "AP") == 0)   bind |= RC_BIND_AP;
-                else if (strcmp(tok, "sta") == 0 || strcmp(tok, "STA") == 0) bind |= RC_BIND_STA;
-                else {
-                    printf("Unknown interface '%s' (valid: ap, sta, all)\n", tok);
-                    return 1;
-                }
-                tok = strtok(NULL, ",");
-            }
-        }
-        if (bind == 0) {
-            printf("At least one interface required, defaulting to ap.\n");
-            bind = RC_BIND_AP;
-        }
-        web_ui_set_bind(bind);
-        char bind_str[20];
-        fmt_web_bind(bind, bind_str);
-        printf("Web UI access restricted to: %s(takes effect immediately)\n", bind_str);
     } else {
         printf("Unknown action: %s\n", action);
-        printf("Usage: web_ui <enable|disable|port|bind>\n");
+        printf("Usage: web_ui <enable|disable|port>\n");
         return 1;
     }
 
@@ -939,9 +876,8 @@ static void register_web_ui(void)
                 "  web_ui                         - Show current status\n"
                 "  web_ui enable                  - Enable web interface (after reboot)\n"
                 "  web_ui disable                 - Disable web interface (after reboot)\n"
-                "  web_ui port <port>             - Set web server port (after reboot)\n"
-                "  web_ui bind <ap|sta|all>       - Set allowed interfaces (immediate)",
-        .hint = " <enable|disable|port|bind>",
+                "  web_ui port <port>             - Set web server port (after reboot)",
+        .hint = " <enable|disable|port>",
         .func = &web_ui_cmd,
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
@@ -1095,7 +1031,8 @@ static void register_set_router_password(void)
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }
 
-/** Arguments used by 'portmap' function */
+/* portmap command removed — not used in repeater mode */
+#if 0
 static struct {
     struct arg_str *add_del;
     struct arg_str *TCP_UDP;
@@ -1106,7 +1043,6 @@ static struct {
     struct arg_end *end;
 } portmap_args;
 
-/* 'portmap' command */
 int portmap(int argc, char **argv)
 {
     int nerrors = arg_parse(argc, argv, (void **) &portmap_args);
@@ -1204,6 +1140,7 @@ static void register_portmap(void)
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }
+#endif /* portmap removed */
 
 /* 'show' command arguments */
 static struct {
@@ -1221,10 +1158,9 @@ static int show(int argc, char **argv)
     }
 
     if (show_args.type->count == 0) {
-        printf("Usage: show <status|config|mappings|acl|ota>\n");
+        printf("Usage: show <status|config|acl|ota>\n");
         printf("  status   - Show router status (connection, clients, memory)\n");
         printf("  config   - Show router configuration (AP/STA settings)\n");
-        printf("  mappings - Show DHCP pool, reservations and port mappings\n");
         printf("  acl      - Show firewall ACL rules\n");
         return 1;
     }
@@ -1234,7 +1170,7 @@ static int show(int argc, char **argv)
     if (strcmp(type, "status") == 0) {
         // Show status
 #if CONFIG_REPEATER_MODE
-        printf("Repeater Status (L2 bridge, no NAT/DHCPS):\n");
+        printf("Repeater Status (L2 bridge):\n");
 #else
         printf("Router Status:\n");
 #endif
@@ -1296,11 +1232,11 @@ static int show(int argc, char **argv)
 
                 printf("\nClient Details:\n");
                 if (client_stats_enabled) {
-                    printf("MAC Address       IP Address       Device Name          TX / RX\n");
-                    printf("----------------  ---------------  -------------------  ------------------\n");
+                    printf("MAC Address        IP Address       Device Name          TX / RX\n");
+                    printf("-----------------  ---------------  -------------------  ------------------\n");
                 } else {
-                    printf("MAC Address       IP Address       Device Name\n");
-                    printf("----------------  ---------------  -------------------\n");
+                    printf("MAC Address        IP Address       Device Name\n");
+                    printf("-----------------  ---------------  -------------------\n");
                 }
 
                 for (int i = 0; i < count; i++) {
@@ -1419,9 +1355,7 @@ static int show(int argc, char **argv)
         bool web_enabled = (web_lock == NULL || strcmp(web_lock, "0") == 0);
         int web_port = 80;
         get_config_param_int("web_port", &web_port);
-        char web_bind_buf[20];
-        fmt_web_bind(web_ui_get_bind(), web_bind_buf);
-        printf("\nWeb Interface: %s (port %d, bind: %s)\n", web_enabled ? "enabled" : "disabled", web_port, web_bind_buf);
+        printf("\nWeb Interface: %s (port %d)\n", web_enabled ? "enabled" : "disabled", web_port);
         if (web_lock != NULL) free(web_lock);
 
         int8_t tx_power = 0;
@@ -1436,20 +1370,6 @@ static int show(int argc, char **argv)
         if (ap_ssid != NULL) free(ap_ssid);
         if (ap_passwd != NULL) free(ap_passwd);
         
-    } else if (strcmp(type, "mappings") == 0) {
-        // Show mappings
-        printf("Network Mappings:\n");
-        printf("=================\n");
-
-        printf("\nDHCP Pool:\n");
-        print_dhcp_pool();
-
-        printf("\nDHCP Reservations:\n");
-        print_dhcp_reservations();
-
-        printf("\nPort Mappings:\n");
-        print_portmap_tab();
-
     } else if (strcmp(type, "acl") == 0) {
         // Show ACL rules with device names
         printf("Firewall ACL Rules:\n");
@@ -1498,7 +1418,7 @@ static int show(int argc, char **argv)
         }
 
     } else {
-        printf("Invalid parameter. Use: show <status|config|mappings|acl|ota>\n");
+        printf("Invalid parameter. Use: show <status|config|acl|ota>\n");
         return 1;
     }
 
@@ -1507,12 +1427,12 @@ static int show(int argc, char **argv)
 
 static void register_show(void)
 {
-    show_args.type = arg_str1(NULL, NULL, "[status|config|mappings|acl|ota]", "Type of information");
+    show_args.type = arg_str1(NULL, NULL, "[status|config|acl|ota]", "Type of information");
     show_args.end = arg_end(1);
 
     const esp_console_cmd_t cmd = {
         .command = "show",
-        .help = "Show router status, config, mappings, ACL rules, or OTA info",
+        .help = "Show router status, config, ACL rules, or OTA info",
         .hint = NULL,
         .func = &show,
         .argtable = &show_args
@@ -1520,7 +1440,8 @@ static void register_show(void)
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }
 
-/** Arguments used by 'dhcp_reserve' function */
+/* dhcp_reserve command removed — not used in repeater mode */
+#if 0
 static struct {
     struct arg_str *add_del;
     struct arg_str *mac_addr;
@@ -1647,6 +1568,7 @@ static void register_dhcp_reserve(void)
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }
+#endif /* dhcp_reserve removed */
 
 /* 'bytes' command */
 static struct {
@@ -2562,7 +2484,7 @@ static int acl_cmd(int argc, char **argv)
 {
     if (argc < 2) {
         printf("Usage: acl <list> <action> [params...]\n");
-        printf("Lists: from_esp, to_esp, from_ap, to_ap\n");
+        printf("Lists: uplink (clients->internet), downlink (internet->clients)\n");
         printf("\nActions:\n");
         printf("  acl <list> clear              - Clear all rules from list\n");
         printf("  acl <list> clear_stats        - Clear statistics for list\n");
@@ -2573,13 +2495,12 @@ static int acl_cmd(int argc, char **argv)
         printf("Ports:     Port number or '*' for any (TCP/UDP only)\n");
         printf("Actions:   allow, deny, allow_monitor, deny_monitor\n");
         printf("\nExamples:\n");
-        printf("  acl from_esp clear\n");
-        printf("  acl from_esp IP any 255.255.255.255 allow\n");
-        printf("  acl from_esp UDP any any any 53 allow\n");
-        printf("  acl from_esp TCP any 22 192.168.4.0/24 * deny\n");
-        printf("  acl from_esp IP any MyPhone deny      # Use device name\n");
-        printf("  acl from_esp IP any any deny          # Block all at end\n");
-        printf("  acl from_esp del 0                    # Delete first rule\n");
+        printf("  acl uplink clear\n");
+        printf("  acl uplink UDP any any any 53 allow\n");
+        printf("  acl uplink TCP any 22 192.168.4.0/24 * deny\n");
+        printf("  acl uplink IP any MyPhone deny      # Use device name\n");
+        printf("  acl uplink IP any any deny          # Block all at end\n");
+        printf("  acl uplink del 0                    # Delete first rule\n");
         return 0;
     }
 
@@ -2587,7 +2508,7 @@ static int acl_cmd(int argc, char **argv)
     int list_no = acl_parse_name(argv[1]);
     if (list_no < 0) {
         printf("Invalid ACL list: %s\n", argv[1]);
-        printf("Use: from_esp, to_esp, from_ap, to_ap\n");
+        printf("Use: uplink, downlink\n");
         return 1;
     }
 
@@ -2747,7 +2668,7 @@ static void register_acl(void)
                 "  acl <list> del <index>       - Delete rule at index\n"
                 "  acl <list> clear             - Clear all rules from list\n"
                 "  acl <list> clear_stats       - Clear statistics for list\n"
-                "  Lists: to_esp, from_esp, to_ap, from_ap\n"
+                "  Lists: uplink, downlink\n"
                 "  Protocols: IP, TCP, UDP, ICMP\n"
                 "  Actions: allow, deny, allow_monitor, deny_monitor",
         .hint = " <list> <proto> <src> [<s_port>] <dst> [<d_port>] <action>",
@@ -2765,7 +2686,6 @@ static int remote_console_cmd(int argc, char **argv)
         printf("  enable              - Enable remote console\n");
         printf("  disable             - Disable remote console\n");
         printf("  port <port>         - Set TCP port (requires restart)\n");
-        printf("  bind <both|ap|sta>  - Set interface binding\n");
         printf("  timeout <seconds>   - Set idle timeout (0=none)\n");
         printf("  kick                - Disconnect current session\n");
         return 0;
@@ -2784,7 +2704,6 @@ static int remote_console_cmd(int argc, char **argv)
         printf("Enabled:        %s\n", config.enabled ? "yes" : "no");
         printf("Port:           %d\n", config.port);
 
-        { char _bs[20]; fmt_web_bind(config.bind, _bs); printf("Interface:      %s\n", _bs); }
         printf("Idle timeout:   %lu sec\n", (unsigned long)config.idle_timeout_sec);
 
         const char *state_str[] = {"disabled", "listening", "auth wait", "active"};
@@ -2829,34 +2748,6 @@ static int remote_console_cmd(int argc, char **argv)
         ESP_LOGW(TAG, "Remote console port changed to %d via CLI.", port);
         printf("Port set to %d. Restart or disable/enable to apply.\n", port);
 
-    } else if (strcmp(action, "bind") == 0) {
-        if (argc < 3) {
-            printf("Usage: remote_console bind <ap,sta>\n");
-            printf("  Comma-separated list, e.g.: ap,sta\n");
-            return 1;
-        }
-        uint8_t bind = 0;
-        char arg_copy[64];
-        strncpy(arg_copy, argv[2], sizeof(arg_copy) - 1);
-        arg_copy[sizeof(arg_copy) - 1] = '\0';
-        char *token = strtok(arg_copy, ",");
-        while (token) {
-            if ((strcmp(token, "ap") == 0)||(strcmp(token, "AP")) == 0) bind |= RC_BIND_AP;
-            else if ((strcmp(token, "sta") == 0)||(strcmp(token, "STA") == 0)) bind |= RC_BIND_STA;
-            else {
-                printf("Unknown interface: %s. Use: ap, sta\n", token);
-                return 1;
-            }
-            token = strtok(NULL, ",");
-        }
-        if (bind == 0) {
-            printf("Must specify at least one interface\n");
-            return 1;
-        }
-        remote_console_set_bind(bind);
-        ESP_LOGW(TAG, "Remote console bind changed to %s via CLI.", argv[2]);
-        printf("Bind set. Restart or disable/enable to apply.\n");
-
     } else if (strcmp(action, "timeout") == 0) {
         if (argc < 3) {
             printf("Usage: remote_console timeout <seconds>\n");
@@ -2893,7 +2784,6 @@ static void register_remote_console_cmd(void)
                 "  remote_console enable               - Enable remote console\n"
                 "  remote_console disable              - Disable remote console\n"
                 "  remote_console port <port>          - Set TCP port (default: 2323)\n"
-                "  remote_console bind <ap,sta>        - Set interface binding\n"
                 "  remote_console timeout <seconds>    - Set idle timeout (0=none)\n"
                 "  remote_console kick                 - Disconnect current session",
         .hint = " <action> [<args>]",

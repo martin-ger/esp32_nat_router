@@ -132,36 +132,8 @@ void format_bytes_human(uint64_t bytes, char *buf, size_t len) {
 static IRAM_ATTR err_t netif_input_hook(struct pbuf *p, struct netif *netif) {
     bool is_acl_monitored = false;
 
-#if CONFIG_REPEATER_MODE
-    if (repeater_sta_rx_handle(p, netif)) {
-        return ERR_OK;
-    }
-#endif
-
-    // Check to_esp ACL (packets from Internet to ESP32)
-    if (!acl_is_empty(ACL_TO_ESP)) {
-        uint8_t result = acl_check_packet(ACL_TO_ESP, p);
-
-        // Check if packet has monitor flag
-        is_acl_monitored = (result != ACL_NO_MATCH) && (result & ACL_MONITOR) != 0;
-
-        // Handle deny action (logging done in acl_check_packet)
-        if ((result & 0x01) == ACL_DENY && result != ACL_NO_MATCH) {
-            // Capture denied packet if monitoring is enabled before dropping
-            if (is_acl_monitored && pcap_should_capture(true, false)) {
-                pcap_capture_packet(p);
-            }
-            pbuf_free(p);
-            return ERR_OK;
-        }
-    }
-
-    // Capture packet based on mode and ACL monitor flag (STA interface = false)
-    if (pcap_should_capture(is_acl_monitored, false)) {
-        pcap_capture_packet(p);
-    }
-
-    // Count received bytes and toggle LED
+    // Count received bytes and toggle LED before bridge handler,
+    // otherwise bridged packets exit early and are never counted.
     if (netif == sta_netif && p != NULL) {
         sta_bytes_received += p->tot_len;
         if (led_gpio >= 0 && ap_connect) {
@@ -171,6 +143,17 @@ static IRAM_ATTR err_t netif_input_hook(struct pbuf *p, struct netif *netif) {
         if (led_strip_gpio >= 0) {
             led_strip_notify_traffic();
         }
+    }
+
+#if CONFIG_REPEATER_MODE
+    if (repeater_sta_rx_handle(p, netif)) {
+        return ERR_OK;
+    }
+#endif
+
+    // Capture packet based on mode and ACL monitor flag (STA interface = false)
+    if (pcap_should_capture(is_acl_monitored, false)) {
+        pcap_capture_packet(p);
     }
 
     // Call original input function
@@ -186,9 +169,9 @@ static IRAM_ATTR err_t netif_input_hook(struct pbuf *p, struct netif *netif) {
 static IRAM_ATTR err_t netif_linkoutput_hook(struct netif *netif, struct pbuf *p) {
     bool is_acl_monitored = false;
 
-    // Check from_esp ACL (packets from ESP32 to Internet)
-    if (!acl_is_empty(ACL_FROM_ESP)) {
-        uint8_t result = acl_check_packet(ACL_FROM_ESP, p);
+    // Check uplink ACL (clients -> internet)
+    if (!acl_is_empty(ACL_UPLINK)) {
+        uint8_t result = acl_check_packet(ACL_UPLINK, p);
 
         // Check if packet has monitor flag
         is_acl_monitored = (result != ACL_NO_MATCH) && (result & ACL_MONITOR) != 0;
@@ -494,24 +477,6 @@ static IRAM_ATTR err_t ap_netif_input_hook(struct pbuf *p, struct netif *netif) 
     }
 #endif
 
-    // Check to_ap ACL (packets from Clients to ESP32)
-    if (!acl_is_empty(ACL_TO_AP)) {
-        uint8_t result = acl_check_packet(ACL_TO_AP, p);
-
-        // Check if packet has monitor flag
-        is_acl_monitored = (result != ACL_NO_MATCH) && (result & ACL_MONITOR) != 0;
-
-        // Handle deny action (logging done in acl_check_packet)
-        if ((result & 0x01) == ACL_DENY && result != ACL_NO_MATCH) {
-            // Capture denied packet if monitoring is enabled before dropping
-            if (is_acl_monitored && pcap_should_capture(true, true)) {
-                pcap_capture_packet(p);
-            }
-            pbuf_free(p);
-            return ERR_OK;
-        }
-    }
-
     // PMTU: send ICMP Fragmentation Needed if client sends a DF packet larger than path MTU
     if (ap_pmtu > 0) {
         send_icmp_frag_needed(p, netif, ap_pmtu);
@@ -546,9 +511,9 @@ static IRAM_ATTR err_t ap_netif_input_hook(struct pbuf *p, struct netif *netif) 
 static IRAM_ATTR err_t ap_netif_linkoutput_hook(struct netif *netif, struct pbuf *p) {
     bool is_acl_monitored = false;
 
-    // Check from_ap ACL (packets from ESP32 to Clients)
-    if (!acl_is_empty(ACL_FROM_AP)) {
-        uint8_t result = acl_check_packet(ACL_FROM_AP, p);
+    // Check downlink ACL (internet -> clients)
+    if (!acl_is_empty(ACL_DOWNLINK)) {
+        uint8_t result = acl_check_packet(ACL_DOWNLINK, p);
 
         // Check if packet has monitor flag
         is_acl_monitored = (result != ACL_NO_MATCH) && (result & ACL_MONITOR) != 0;

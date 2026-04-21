@@ -1,15 +1,10 @@
 /* ACL (Access Control List) Firewall Component
  *
- * Provides packet filtering capabilities for the ESP32 NAT Router.
+ * Two filter chains, each applied at the linkoutput (TX) hook where all
+ * bridged transit traffic passes through:
  *
- * Network topology:
- *   Internet <---> [STA] ESP32 [AP] <---> Internal Clients
- *
- * ACL naming convention (from the router's interface perspective):
- * - to_esp:   Internet -> ESP32 (incoming on uplink interface)
- * - from_esp: ESP32 -> Internet (outgoing on uplink interface)
- * - to_ap:    Clients -> ESP32 (incoming on AP interface)
- * - from_ap:  ESP32 -> Clients (outgoing on AP interface)
+ *  uplink   – clients → internet (STA linkoutput)
+ *  downlink – internet → clients (AP linkoutput)
  */
 
 #pragma once
@@ -24,11 +19,9 @@ extern "C" {
 #endif
 
 /* ACL list indices */
-#define ACL_TO_ESP    0   /* Internet -> ESP32 (uplink input) */
-#define ACL_FROM_ESP  1   /* ESP32 -> Internet (uplink output) */
-#define ACL_TO_AP     2   /* Clients -> ESP32 (AP interface input) */
-#define ACL_FROM_AP   3   /* ESP32 -> Clients (AP interface output) */
-#define MAX_ACL_LISTS 4
+#define ACL_UPLINK    0   /* Clients -> Internet (STA linkoutput) */
+#define ACL_DOWNLINK  1   /* Internet -> Clients (AP linkoutput) */
+#define MAX_ACL_LISTS 2
 
 /* Maximum rules per ACL list */
 #define MAX_ACL_ENTRIES 16
@@ -185,8 +178,8 @@ const char* acl_get_desc(uint8_t acl_no);
 
 /**
  * @brief Parse ACL list name to index
- * @param name List name ("from_esp", "to_esp", "from_ap", "to_ap")
- * @return List index (0-3) or -1 if invalid name
+ * @param name List name ("uplink", "downlink")
+ * @return List index (0-1) or -1 if invalid name
  */
 int acl_parse_name(const char* name);
 

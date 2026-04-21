@@ -29,7 +29,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-#include "lwip/lwip_napt.h"
 #include "lwip/sockets.h"
 
 #include "pages.h"
@@ -72,54 +71,6 @@ static const char *get_client_ip(httpd_req_t *req, char *buf, size_t buf_len)
     return buf;
 }
 
-/* Web UI interface access bitmask (RC_BIND_AP, RC_BIND_STA).
- * Loaded from NVS in start_webserver(). Default: all interfaces allowed. */
-static uint8_t s_web_bind = RC_BIND_AP | RC_BIND_STA;
-
-/* Check whether an incoming HTTP connection is allowed based on which
- * network interface it arrived on.  Called by esp_http_server before any
- * data is exchanged; returning ESP_FAIL closes the socket immediately.
- *
- * getsockname() on the accepted socket returns the local IP that was used
- * by the client — i.e. the address of the interface the packet arrived on.
- * esp_http_server uses IPv6 sockets, so IPv4 connections appear as
- * ::ffff:x.x.x.x (IPv4-mapped).  The same extraction used in get_client_ip()
- * is applied here for the local side.
- */
-static esp_err_t http_open_fn(httpd_handle_t hd, int sockfd)
-{
-    struct sockaddr_in6 local_addr6;
-    socklen_t addr_len = sizeof(local_addr6);
-    uint32_t local_ip = 0;  /* network byte order */
-
-    if (getsockname(sockfd, (struct sockaddr *)&local_addr6, &addr_len) == 0) {
-        if (local_addr6.sin6_family == AF_INET6) {
-            /* IPv4-mapped IPv6: last 4 bytes of s6_addr are the IPv4 address */
-            memcpy(&local_ip, local_addr6.sin6_addr.s6_addr + 12, 4);
-        } else {
-            local_ip = ((struct sockaddr_in *)&local_addr6)->sin_addr.s_addr;
-        }
-    }
-
-    /* Identify which interface the connection arrived on */
-    bool on_ap  = (local_ip != 0 && local_ip == my_ap_ip);
-    bool on_sta = (local_ip != 0 && local_ip == my_ip);
-
-    /* Enforce interface access policy */
-    bool allowed = false;
-    if (on_ap  && (s_web_bind & RC_BIND_AP))  allowed = true;
-    if (on_sta && (s_web_bind & RC_BIND_STA)) allowed = true;
-    /* If local_ip could not be determined, allow through (fail open) */
-    if (local_ip == 0) allowed = true;
-
-    if (!allowed) {
-        ESP_LOGW(TAG, "HTTP connection rejected (interface not allowed, local=" IPSTR ")",
-                 IP2STR((ip4_addr_t *)&local_ip));
-        return ESP_FAIL;
-    }
-
-    return ESP_OK;
-}
 
 static void web_server_start_captive_dns(void);
 
@@ -1152,11 +1103,6 @@ static esp_err_t index_get_handler(httpd_req_t *req)
         httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
         free(safe_ap_ssid);
 
-        esp_ip4_addr_t ap_addr;
-        ap_addr.addr = my_ap_ip;
-        snprintf(row, sizeof(row), "<tr><td>AP IP:</td><td>" IPSTR "</td></tr>", IP2STR(&ap_addr));
-        httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
-
         resync_connect_count();
         snprintf(row, sizeof(row), "<tr><td>AP Clients:</td><td>%d</td></tr>", connect_count);
         httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
@@ -1179,9 +1125,9 @@ static esp_err_t index_get_handler(httpd_req_t *req)
     if (ap_connect) {
         esp_ip4_addr_t addr;
         addr.addr = my_ip;
-        snprintf(row, sizeof(row), "<tr><td>STA IP:</td><td>" IPSTR "</td></tr>", IP2STR(&addr));
+        snprintf(row, sizeof(row), "<tr><td>Mgmt IP:</td><td>" IPSTR "</td></tr>", IP2STR(&addr));
     } else {
-        snprintf(row, sizeof(row), "<tr><td>STA IP:</td><td>N/A</td></tr>");
+        snprintf(row, sizeof(row), "<tr><td>Mgmt IP:</td><td>N/A</td></tr>");
     }
     httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
 
@@ -1302,21 +1248,6 @@ static httpd_uri_t indexp = {
     .handler   = index_get_handler,
 };
 
-uint8_t web_ui_get_bind(void)
-{
-    return s_web_bind;
-}
-
-void web_ui_set_bind(uint8_t bind)
-{
-    if (bind == 0) bind = RC_BIND_AP;  /* must keep at least one */
-    s_web_bind = bind & (RC_BIND_AP | RC_BIND_STA);
-    set_config_param_int("web_bind", (int32_t)s_web_bind);
-    char buf[20] = "";
-    if (s_web_bind & RC_BIND_AP)  strcat(buf, "AP ");
-    if (s_web_bind & RC_BIND_STA) strcat(buf, "STA ");
-    ESP_LOGI(TAG, "Web UI bind set to: %s", buf);
-}
 
 /* Router Config page GET handler */
 static esp_err_t config_get_handler(httpd_req_t *req)
@@ -1353,22 +1284,6 @@ static esp_err_t config_get_handler(httpd_req_t *req)
                 esp_timer_start_once(restart_timer, 500000);
             }
 
-            /* Handle Web UI bind interface settings */
-            char param1[64];
-            if (httpd_query_key_value(buf, "web_bind_save", param1, sizeof(param1)) == ESP_OK) {
-                uint8_t bind = 0;
-                if (httpd_query_key_value(buf, "web_bind_ap",  param1, sizeof(param1)) == ESP_OK) bind |= RC_BIND_AP;
-                if (httpd_query_key_value(buf, "web_bind_sta", param1, sizeof(param1)) == ESP_OK) bind |= RC_BIND_STA;
-                if (bind == 0) bind = RC_BIND_AP;
-                web_ui_set_bind(bind);
-                ESP_LOGI(TAG, "Web UI bind interfaces updated via web");
-                free(buf);
-                httpd_resp_set_status(req, "303 See Other");
-                httpd_resp_set_hdr(req, "Location", "/config");
-                httpd_resp_send(req, NULL, 0);
-                return ESP_OK;
-            }
-
             /* Handle disable interface button */
             if (strstr(buf, "disable_interface=") != NULL) {
                 ESP_LOGI(TAG, "Disabling web interface");
@@ -1378,6 +1293,7 @@ static esp_err_t config_get_handler(httpd_req_t *req)
                 esp_timer_start_once(restart_timer, 500000);
             }
 
+            char param1[64];
             char param2[64];
             char param3[64];
             char param4[64];
@@ -1409,28 +1325,6 @@ static esp_err_t config_get_handler(httpd_req_t *req)
                     argv[2] = param2;
                     set_ap(argc, argv);
 
-                    // Check for optional AP IP address
-                    if (httpd_query_key_value(buf, "ap_ip_addr", param3, sizeof(param3)) == ESP_OK && strlen(param3) > 0) {
-                        ESP_LOGI(TAG, "Found URL query parameter => ap_ip_addr=%s", param3);
-                        preprocess_string(param3);
-                        char* ip_argv[2];
-                        ip_argv[0] = "set_ap_ip";
-                        ip_argv[1] = param3;
-                        set_ap_ip(2, ip_argv);
-                    }
-
-                    // Check for optional AP DNS server
-                    {
-                        char dns_param[64];
-                        if (httpd_query_key_value(buf, "ap_dns", dns_param, sizeof(dns_param)) == ESP_OK) {
-                            preprocess_string(dns_param);
-                            ESP_LOGI(TAG, "Found URL query parameter => ap_dns=%s", dns_param);
-                            set_config_param_str("ap_dns", dns_param);
-                            free(ap_dns);
-                            ap_dns = strdup(dns_param);
-                        }
-                    }
-
                     // Check for optional AP MAC address
                     if (httpd_query_key_value(buf, "ap_mac", param4, sizeof(param4)) == ESP_OK && strlen(param4) > 0) {
                         ESP_LOGI(TAG, "Found URL query parameter => ap_mac=%s", param4);
@@ -1459,14 +1353,6 @@ static esp_err_t config_get_handler(httpd_req_t *req)
                         set_config_param_int("ap_disabled", ap_en ? 0 : 1);
                         ap_disabled = !ap_en;
                         ESP_LOGI(TAG, "AP interface %s", ap_en ? "enabled" : "disabled");
-                    }
-
-                    // Handle AP NAT setting (checkbox: present = on, absent = off)
-                    {
-                        int nat_val = (httpd_query_key_value(buf, "ap_nat", param5, sizeof(param5)) == ESP_OK) ? 1 : 0;
-                        set_config_param_int("ap_nat", nat_val);
-                        ap_nat_enabled = (uint8_t)nat_val;
-                        ESP_LOGI(TAG, "AP NAT %s", nat_val ? "enabled" : "disabled");
                     }
 
                     // Handle AP hidden SSID setting
@@ -1652,12 +1538,6 @@ static esp_err_t config_get_handler(httpd_req_t *req)
                         remote_console_set_port((uint16_t)port);
                     }
                 }
-                /* Bind interfaces (checkboxes: absent = unchecked) */
-                uint8_t bind = 0;
-                if (httpd_query_key_value(buf, "rc_bind_ap", param1, sizeof(param1)) == ESP_OK) bind |= RC_BIND_AP;
-                if (httpd_query_key_value(buf, "rc_bind_sta", param1, sizeof(param1)) == ESP_OK) bind |= RC_BIND_STA;
-                if (bind == 0) bind = RC_BIND_AP;
-                remote_console_set_bind(bind);
                 /* Timeout */
                 if (httpd_query_key_value(buf, "rc_timeout", param1, sizeof(param1)) == ESP_OK) {
                     preprocess_string(param1);
@@ -1735,27 +1615,15 @@ static esp_err_t config_get_handler(httpd_req_t *req)
     char* safe_ent_identity = html_escape(ent_identity);
     char* safe_ap_ssid = html_escape(ap_ssid);
 
-    // Get current AP IP address
-    char* ap_ip_str = NULL;
-    get_config_param_str("ap_ip", &ap_ip_str);
-    if (ap_ip_str == NULL) {
-        ap_ip_str = malloc(16);
-        if (ap_ip_str != NULL) {
-            snprintf(ap_ip_str, 16, IPSTR, IP2STR((esp_ip4_addr_t *)&my_ap_ip));
-        }
-    }
-
     // Check if any html_escape failed
     if (safe_ap_ssid == NULL ||
         safe_ssid == NULL ||
-        safe_ent_username == NULL || safe_ent_identity == NULL ||
-        ap_ip_str == NULL) {
+        safe_ent_username == NULL || safe_ent_identity == NULL) {
         ESP_LOGE(TAG, "Failed to escape HTML strings");
         free(safe_ap_ssid);
         free(safe_ssid);
         free(safe_ent_username);
         free(safe_ent_identity);
-        free(ap_ip_str);
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
         return ESP_ERR_NO_MEM;
     }
@@ -1816,9 +1684,6 @@ static esp_err_t config_get_handler(httpd_req_t *req)
             break;
     }
 
-    const char* rc_ap_chk = (rc_config.bind & RC_BIND_AP) ? "checked" : "";
-    const char* rc_sta_chk = (rc_config.bind & RC_BIND_STA) ? "checked" : "";
-
     // PCAP state
     pcap_capture_mode_t pcap_mode = pcap_get_mode();
     const char* pcap_mode_off_sel = (pcap_mode == PCAP_MODE_OFF) ? "selected" : "";
@@ -1854,9 +1719,8 @@ static esp_err_t config_get_handler(httpd_req_t *req)
     const char* auth_sel1 = (ap_authmode == 1) ? "selected" : "";
     const char* auth_sel2 = (ap_authmode == 2) ? "selected" : "";
     snprintf(section, sizeof(section), CONFIG_CHUNK_AP,
-        safe_ap_ssid, ap_ip_str, ap_dns ? ap_dns : "", ap_mac_str,
+        safe_ap_ssid, ap_mac_str,
         auth_sel0, auth_sel1, auth_sel2,
-        ap_nat_enabled ? "checked" : "",
         ap_en_checked, ap_open_checked, ap_hidden_checked);
     httpd_resp_send_chunk(req, section, HTTPD_RESP_USE_STRLEN);
 
@@ -1887,7 +1751,6 @@ static esp_err_t config_get_handler(httpd_req_t *req)
         rc_enabled_checked, rc_disabled_checked,
         rc_status_color, rc_status_text, rc_kick_section,
         rc_config.port,
-        rc_ap_chk, rc_sta_chk,
         (unsigned long)rc_config.idle_timeout_sec);
     httpd_resp_send_chunk(req, section, HTTPD_RESP_USE_STRLEN);
 
@@ -1927,15 +1790,8 @@ static esp_err_t config_get_handler(httpd_req_t *req)
     /* Chunk 9b: OTA upload form, config backup/restore, reboot */
     httpd_resp_send_chunk(req, CONFIG_CHUNK_TAIL2, HTTPD_RESP_USE_STRLEN);
 
-    /* Chunk 9c: Danger Zone (web bind + disable interface).
-     * Uses its own buffer — CONFIG_CHUNK_DANGER exceeds the shared section[2048]. */
-    {
-        char danger[2560];
-        snprintf(danger, sizeof(danger), CONFIG_CHUNK_DANGER,
-            (s_web_bind & RC_BIND_AP)  ? "checked" : "",
-            (s_web_bind & RC_BIND_STA) ? "checked" : "");
-        httpd_resp_send_chunk(req, danger, HTTPD_RESP_USE_STRLEN);
-    }
+    /* Chunk 9c: Danger Zone */
+    httpd_resp_send_chunk(req, CONFIG_CHUNK_DANGER, HTTPD_RESP_USE_STRLEN);
 
     /* End chunked response */
     httpd_resp_send_chunk(req, NULL, 0);
@@ -1945,7 +1801,6 @@ static esp_err_t config_get_handler(httpd_req_t *req)
     free(safe_ssid);
     free(safe_ent_username);
     free(safe_ent_identity);
-    free(ap_ip_str);
 
     return ESP_OK;
 }
@@ -1956,7 +1811,8 @@ static httpd_uri_t configp = {
     .handler   = config_get_handler,
 };
 
-/* Mappings page GET handler (DHCP Reservations + Port Forwarding) - Chunked transfer */
+/* Mappings page removed — not used in repeater mode */
+#if 0
 static esp_err_t mappings_get_handler(httpd_req_t *req)
 {
     resume_sta_if_scan_idle();
@@ -2400,11 +2256,7 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
-static httpd_uri_t mappingsp = {
-    .uri       = "/mappings",
-    .method    = HTTP_GET,
-    .handler   = mappings_get_handler,
-};
+#endif /* mappings page removed */
 
 /* Firewall (ACL) page GET handler */
 static esp_err_t firewall_get_handler(httpd_req_t *req)
@@ -2614,6 +2466,39 @@ static esp_err_t firewall_get_handler(httpd_req_t *req)
 
     /* Chunk 5: Description text */
     httpd_resp_send_chunk(req, FIREWALL_CHUNK_MID2, HTTPD_RESP_USE_STRLEN);
+
+    /* Chunk 5b: Connected clients table */
+    {
+        connected_client_t fw_clients[8];
+        int fw_client_count = get_connected_clients(fw_clients, 8);
+        httpd_resp_send_chunk(req, FIREWALL_CHUNK_CLIENTS_HEAD, HTTPD_RESP_USE_STRLEN);
+        if (fw_client_count == 0) {
+            httpd_resp_send_chunk(req, FIREWALL_CHUNK_CLIENTS_NONE, HTTPD_RESP_USE_STRLEN);
+        } else {
+            for (int i = 0; i < fw_client_count; i++) {
+                char fw_ip[16] = "-";
+                if (fw_clients[i].has_ip) {
+                    esp_ip4_addr_t a; a.addr = fw_clients[i].ip;
+                    snprintf(fw_ip, sizeof(fw_ip), IPSTR, IP2STR(&a));
+                }
+                snprintf(row, sizeof(row),
+                    "<tr>"
+                    "<td>%02X:%02X:%02X:%02X:%02X:%02X</td>"
+                    "<td>%s</td>"
+                    "<td>%s</td>"
+                    "</tr>",
+                    fw_clients[i].mac[0], fw_clients[i].mac[1],
+                    fw_clients[i].mac[2], fw_clients[i].mac[3],
+                    fw_clients[i].mac[4], fw_clients[i].mac[5],
+                    fw_ip,
+                    fw_clients[i].name[0] ? fw_clients[i].name : "-");
+                httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
+            }
+        }
+        httpd_resp_send_chunk(req, FIREWALL_CHUNK_CLIENTS_TAIL, HTTPD_RESP_USE_STRLEN);
+    }
+
+    httpd_resp_send_chunk(req, "<h2>ACLs</h2>", HTTPD_RESP_USE_STRLEN);
 
     /* Chunk 6: Stream ACL sections.
      * Copy data under lock then release before sending HTTP chunks,
@@ -3113,16 +2998,6 @@ httpd_handle_t start_webserver(uint16_t port)
     config.stack_size = 16384;  // Large stack needed for mappings page with 3x 2KB HTML buffers
     config.max_uri_handlers = 13;
     config.max_uri_len = 1024;
-    config.open_fn = http_open_fn;
-
-    /* Load web UI interface bind mask from NVS */
-    {
-        int bind_val = (int)(RC_BIND_AP | RC_BIND_STA);
-        get_config_param_int("web_bind", &bind_val);
-        s_web_bind = (uint8_t)(bind_val & (RC_BIND_AP | RC_BIND_STA));
-        if (s_web_bind == 0) s_web_bind = RC_BIND_AP;
-    }
-
     esp_timer_create(&restart_timer_args, &restart_timer);
 
     // Start the httpd server
@@ -3132,7 +3007,6 @@ httpd_handle_t start_webserver(uint16_t port)
         ESP_LOGI(TAG, "Registering URI handlers");
         httpd_register_uri_handler(server, &indexp);
         httpd_register_uri_handler(server, &configp);
-        httpd_register_uri_handler(server, &mappingsp);
         httpd_register_uri_handler(server, &firewallp);
         httpd_register_uri_handler(server, &scanp);
         httpd_register_uri_handler(server, &setupp);

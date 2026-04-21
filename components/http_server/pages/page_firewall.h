@@ -29,7 +29,7 @@ input:focus, select:focus { outline: none; border-color: #00d9ff; }\
 .ok-button { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #fff; border: none; border-radius: 6px; padding: 0.5rem 1rem; font-size: 0.85rem; font-weight: 600; cursor: pointer; width: 100%; margin-top: 0.25rem; }\
 .red-button { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: #fff; border: none; border-radius: 4px; padding: 0.2rem 0.4rem; font-size: 0.7rem; font-weight: 600; cursor: pointer; text-decoration: none; display: inline-block; }\
 .orange-button { background: linear-gradient(135deg, #ff9a56 0%, #ff6b35 100%); color: #fff; border: none; border-radius: 4px; padding: 0.2rem 0.4rem; font-size: 0.7rem; font-weight: 600; cursor: pointer; text-decoration: none; display: inline-block; }\
-.acl-section { margin-bottom: 1rem; padding: 0.8rem; background: rgba(22, 33, 62, 0.4); border-radius: 10px; border: 1px solid rgba(0, 217, 255, 0.1); }\
+.acl-section { margin-bottom: 0.5rem; padding: 0.4rem 0.6rem; background: rgba(22, 33, 62, 0.4); border-radius: 10px; border: 1px solid rgba(0, 217, 255, 0.1); }\
 .stats { font-size: 0.75rem; color: #888; margin-bottom: 0.3rem; }\
 .stats span { margin-right: 0.8rem; }\
 .stats .allowed { color: #4caf50; }\
@@ -58,16 +58,26 @@ input:focus, select:focus { outline: none; border-color: #00d9ff; }\
 </div>\
 <p style='color: #888; font-size: 0.8rem; margin-bottom: 0.8rem;'>Rules processed top-down. First match wins. No match = allow (permissive).</p>"
 
+/* Connected clients table header (shown above ACL sections) */
+#define FIREWALL_CHUNK_CLIENTS_HEAD "\
+<h2>Connected Clients</h2>\
+<p style='color:#888;font-size:0.75rem;margin-bottom:0.5rem;'>Use the device name in Source/Dest IP when adding rules below.</p>\
+<table class='data-table'>\
+<thead><tr><th>MAC</th><th>IP Address</th><th>Device Name</th></tr></thead><tbody>"
+
+#define FIREWALL_CHUNK_CLIENTS_NONE \
+    "<tr><td colspan='3' style='text-align:center;color:#888;'>No clients connected</td></tr>"
+
+#define FIREWALL_CHUNK_CLIENTS_TAIL "</tbody></table>"
+
 /* After ACL sections (add form and footer) */
 #define FIREWALL_CHUNK_TAIL "\
 <h2>Add ACL Rule</h2>\
 <form action='/firewall' method='GET'>\
 <table class='form-table'>\
 <tr><td>Direction</td><td><select name='acl_list'>\
-<option value='0'>Internet to ESP (to_esp)</option>\
-<option value='1'>ESP to Internet (from_esp)</option>\
-<option value='2'>Clients to ESP (to_ap)</option>\
-<option value='3'>ESP to Clients (from_ap)</option>\
+<option value='0'>Clients to Internet (uplink)</option>\
+<option value='1'>Internet to Clients (downlink)</option>\
 </select></td></tr>\
 <tr><td>Protocol</td><td><select name='proto'>\
 <option value='0'>IP (Any)</option>\

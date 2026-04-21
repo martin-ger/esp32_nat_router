@@ -83,9 +83,11 @@ int dhcp_xid_map_snapshot(dhcp_xid_snapshot_entry_t *out, int max) {
     for (int i = 0; i < REPEATER_XID_MAP_SIZE && n < max; i++) {
         xid_entry_t *e = &s_map[i];
         if (!e->valid) continue;
+        int32_t ttl = (int32_t)((e->expires_us - now) / 1000000);
+        if (ttl < 0) continue;
         out[n].xid = e->xid;
         memcpy(out[n].chaddr, e->chaddr, 6);
-        out[n].ttl_remaining = (int32_t)((e->expires_us - now) / 1000000);
+        out[n].ttl_remaining = ttl;
         n++;
     }
     return n;

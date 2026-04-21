@@ -14,6 +14,10 @@
 #include "router_config.h"
 #include "dhcp_reservations.h"
 #include "wifi_config.h"
+#include "sdkconfig.h"
+#if CONFIG_REPEATER_MODE
+#include "dhcp_lease_map.h"
+#endif
 
 #define DHCP_RES_SIZE (sizeof(struct dhcp_reservation_entry) * MAX_DHCP_RESERVATIONS)
 
@@ -247,6 +251,13 @@ bool resolve_device_name_to_ip(const char *name, uint32_t *ip) {
             return true;
         }
     }
+#if CONFIG_REPEATER_MODE
+    uint32_t lease_ip = 0;
+    if (dhcp_lease_map_lookup_by_hostname(name, &lease_ip) && lease_ip != 0) {
+        *ip = lease_ip;
+        return true;
+    }
+#endif
     return false;
 }
 
@@ -263,42 +274,55 @@ int get_connected_clients(connected_client_t *clients, int max_clients) {
         return 0;
     }
 
-    // Get DHCP lease information (static to avoid stack overflow)
-    #define MAX_DHCP_LEASES 8  // ESP32 AP supports max 8 connections
-    static dhcp_lease_info_t leases[MAX_DHCP_LEASES];
-    int lease_count = dhcps_get_active_leases(leases, MAX_DHCP_LEASES);
-
     int count = 0;
     for (int i = 0; i < sta_list.num && count < max_clients; i++) {
         wifi_sta_info_t *sta = &sta_list.sta[i];
 
-        // Copy MAC address
         memcpy(clients[count].mac, sta->mac, 6);
         clients[count].ip = 0;
         clients[count].has_ip = false;
         clients[count].name[0] = '\0';
 
-        // Look up IP address and hostname in DHCP leases
-        for (int j = 0; j < lease_count; j++) {
-            if (memcmp(leases[j].mac, sta->mac, 6) == 0) {
-                clients[count].ip = leases[j].ip;
-                clients[count].has_ip = true;
-                // Use DHCP hostname if provided by client
-                if (leases[j].hostname[0] != '\0') {
-                    strncpy(clients[count].name, leases[j].hostname,
-                            DHCP_RESERVATION_NAME_LEN - 1);
-                    clients[count].name[DHCP_RESERVATION_NAME_LEN - 1] = '\0';
+#if CONFIG_REPEATER_MODE
+        /* In repeater/bridge mode, learn IPs from snooped DHCP ACKs */
+        {
+            uint32_t ip = 0;
+            char hostname[DHCP_HOSTNAME_MAX];
+            hostname[0] = '\0';
+            if (dhcp_lease_map_lookup(sta->mac, &ip, hostname, sizeof(hostname))) {
+                clients[count].ip = ip;
+                clients[count].has_ip = (ip != 0);
+                if (hostname[0]) {
+                    snprintf(clients[count].name, DHCP_RESERVATION_NAME_LEN, "%s", hostname);
                 }
-                break;
             }
         }
+#else
+        /* In NAT/AP mode, query the local DHCP server leases */
+        {
+            #define MAX_DHCP_LEASES 8
+            static dhcp_lease_info_t leases[MAX_DHCP_LEASES];
+            int lease_count = dhcps_get_active_leases(leases, MAX_DHCP_LEASES);
+            for (int j = 0; j < lease_count; j++) {
+                if (memcmp(leases[j].mac, sta->mac, 6) == 0) {
+                    clients[count].ip = leases[j].ip;
+                    clients[count].has_ip = true;
+                    if (leases[j].hostname[0]) {
+                        strncpy(clients[count].name, leases[j].hostname,
+                                DHCP_RESERVATION_NAME_LEN - 1);
+                        clients[count].name[DHCP_RESERVATION_NAME_LEN - 1] = '\0';
+                    }
+                    break;
+                }
+            }
+        }
+#endif
 
-        // Look up device name in DHCP reservations (overrides DHCP hostname)
+        /* Reservation name overrides DHCP hostname */
         for (int j = 0; j < MAX_DHCP_RESERVATIONS; j++) {
             if (dhcp_reservations[j].valid &&
                 memcmp(dhcp_reservations[j].mac, sta->mac, 6) == 0) {
-                // Reservation name takes priority over DHCP hostname
-                if (dhcp_reservations[j].name[0] != '\0') {
+                if (dhcp_reservations[j].name[0]) {
                     strncpy(clients[count].name, dhcp_reservations[j].name,
                             DHCP_RESERVATION_NAME_LEN - 1);
                     clients[count].name[DHCP_RESERVATION_NAME_LEN - 1] = '\0';

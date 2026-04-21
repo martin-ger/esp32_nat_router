@@ -33,7 +33,7 @@ esp_err_t save_acl_rules(void) {
         return err;
     }
 
-    const char* acl_keys[MAX_ACL_LISTS] = {"acl_0", "acl_1", "acl_2", "acl_3"};
+    const char* acl_keys[MAX_ACL_LISTS] = {"acl_0", "acl_1"};
     for (int i = 0; i < MAX_ACL_LISTS; i++) {
         err = nvs_set_blob(nvs, acl_keys[i], snapshot[i], sizeof(acl_entry_t) * MAX_ACL_ENTRIES);
         if (err != ESP_OK) {
@@ -63,7 +63,7 @@ esp_err_t load_acl_rules(void) {
     }
 
     /* Load each ACL list */
-    const char* acl_keys[MAX_ACL_LISTS] = {"acl_0", "acl_1", "acl_2", "acl_3"};
+    const char* acl_keys[MAX_ACL_LISTS] = {"acl_0", "acl_1"};
     acl_lock();
     for (int i = 0; i < MAX_ACL_LISTS; i++) {
         acl_entry_t* rules = acl_get_rules(i);
