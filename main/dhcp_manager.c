@@ -287,7 +287,7 @@ int get_connected_clients(connected_client_t *clients, int max_clients) {
         /* In repeater/bridge mode, learn IPs from snooped DHCP ACKs */
         {
             uint32_t ip = 0;
-            char hostname[DHCP_HOSTNAME_MAX];
+            char hostname[DHCP_LEASE_HOSTNAME_MAX];
             hostname[0] = '\0';
             if (dhcp_lease_map_lookup(sta->mac, &ip, hostname, sizeof(hostname))) {
                 clients[count].ip = ip;

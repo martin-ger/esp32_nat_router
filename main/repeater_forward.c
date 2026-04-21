@@ -118,6 +118,36 @@ static bool bridge_ap_to_sta(struct pbuf *p) {
         uint8_t *arp = eth + 14;
         /* ARP layout: htype(2) ptype(2) hlen(1) plen(1) oper(2)
          *             sha(6) spa(4) tha(6) tpa(4) */
+        uint16_t oper = ((uint16_t)arp[6] << 8) | arp[7];
+        uint32_t tpa;
+        memcpy(&tpa, arp + 24, 4);
+        uint32_t sta_ip = s_sta_netif->ip_addr.u_addr.ip4.addr;
+
+        /* Proxy ARP: if an AP client asks "who has <STA IP>?", reply
+         * directly with the AP MAC so packets to the management IP
+         * arrive on the AP netif and can be routed to the STA stack. */
+        if (oper == 1 && sta_ip && tpa == sta_ip && s_ap_netif) {
+            const uint8_t *ap_mac = s_ap_netif->hwaddr;
+            uint8_t req_sha[6];
+            uint32_t req_spa;
+            memcpy(req_sha, arp + 8,  6);   /* sender MAC */
+            memcpy(&req_spa, arp + 14, 4);  /* sender IP  */
+
+            /* Build ARP reply in-place */
+            memcpy(eth + 0, req_sha, 6);    /* Ethernet dst = requester */
+            memcpy(eth + 6, ap_mac,  6);    /* Ethernet src = AP MAC    */
+            arp[6] = 0; arp[7] = 2;         /* oper = reply             */
+            memcpy(arp + 8,  ap_mac,  6);   /* sha  = AP MAC            */
+            memcpy(arp + 14, &tpa,    4);   /* spa  = requested IP      */
+            memcpy(arp + 18, req_sha, 6);   /* tha  = requester MAC     */
+            memcpy(arp + 24, &req_spa, 4);  /* tpa  = requester IP      */
+
+            emit_on(s_ap_netif, p);
+            pbuf_free(p);
+            return true;
+        }
+
+        /* All other ARP: forward upstream with STA MAC */
         memcpy(arp + 8, sta_mac, 6);   /* sender HA */
         memcpy(eth + 6, sta_mac, 6);   /* L2 src */
         emit_on(s_sta_netif, p);
@@ -135,14 +165,23 @@ static bool bridge_ap_to_sta(struct pbuf *p) {
         if (iphdr->src.addr != 0) {
             fdb_learn(iphdr->src.addr, eth + 6, REPEATER_FDB_DEFAULT_TTL_S);
         }
-        /* If destined to ESP32 itself (AP or STA IP), let the local stack
-         * handle it — don't bridge upstream. */
         uint32_t ap_ip  = s_ap_netif  ? s_ap_netif->ip_addr.u_addr.ip4.addr  : 0;
         uint32_t sta_ip = s_sta_netif ? s_sta_netif->ip_addr.u_addr.ip4.addr : 0;
-        if ((ap_ip  && iphdr->dest.addr == ap_ip) ||
-            (sta_ip && iphdr->dest.addr == sta_ip)) {
+
+        /* Packets destined for the AP IP are handled by the AP netif's own stack. */
+        if (ap_ip && iphdr->dest.addr == ap_ip) {
             return false;
         }
+
+        /* Packets destined for the STA (management) IP: the AP netif's lwIP
+         * stack doesn't know this address, so inject directly into the STA
+         * netif's input with the dst MAC rewritten to the STA MAC. */
+        if (sta_ip && iphdr->dest.addr == sta_ip && s_sta_netif->input) {
+            memcpy(eth + 0, sta_mac, 6);
+            s_sta_netif->input(p, s_sta_netif);
+            return true;
+        }
+
         memcpy(eth + 6, sta_mac, 6);
         emit_on(s_sta_netif, p);
         pbuf_free(p);

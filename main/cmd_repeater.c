@@ -22,7 +22,7 @@ static void print_fdb(void) {
     fdb_snapshot_entry_t ents[REPEATER_FDB_SIZE];
     int n = fdb_snapshot(ents, REPEATER_FDB_SIZE);
     printf("FDB (%d entries):\n", n);
-    printf("  %-16s  %-17s  %s\n", "IP", "MAC", "TTL(s)");
+    printf("  %-15s  %-17s  %s\n", "IP", "MAC", "TTL(s)");
     for (int i = 0; i < n; i++) {
         uint8_t *ipb = (uint8_t *)&ents[i].ip;
         printf("  %3u.%3u.%3u.%3u  %02x:%02x:%02x:%02x:%02x:%02x  %" PRId32 "\n",

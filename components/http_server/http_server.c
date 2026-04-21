@@ -1195,11 +1195,11 @@ static esp_err_t index_get_handler(httpd_req_t *req)
     /* Show login form if password is set and not authenticated */
     if (password_protection_enabled && !authenticated) {
         httpd_resp_send_chunk(req,
-            "<div style='margin-top: 1.5rem; padding: 1.5rem; background: rgba(22, 33, 62, 0.6); border: 1px solid rgba(0, 217, 255, 0.2); border-radius: 12px;'>"
-            "<h2 style='margin-top: 0; margin-bottom: 1rem; color: #00d9ff; font-size: 1.1rem;'>🔒 Login Required</h2>"
+            "<div style='margin-top: 1.5rem; padding: 1.5rem; background: rgba(28, 8, 44, 0.6); border: 1px solid rgba(167, 139, 250, 0.2); border-radius: 12px;'>"
+            "<h2 style='margin-top: 0; margin-bottom: 1rem; color: #a78bfa; font-size: 1.1rem;'>🔒 Login Required</h2>"
             "<form action='' method='GET'>"
-            "<input type='password' name='login_password' placeholder='Enter password' style='width: 100%; padding: 0.75rem; margin-bottom: 0.75rem; background: rgba(255,255,255,0.1); border: 1px solid rgba(0,217,255,0.3); border-radius: 8px; color: #e0e0e0; font-size: 1rem;'/>"
-            "<input type='submit' value='Login' style='width: 100%; padding: 0.75rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #fff; border: none; border-radius: 8px; font-size: 1rem; font-weight: 600; cursor: pointer;'/>"
+            "<input type='password' name='login_password' placeholder='Enter password' style='width: 100%; padding: 0.75rem; margin-bottom: 0.75rem; background: rgba(255,255,255,0.1); border: 1px solid rgba(167,139,250,0.3); border-radius: 8px; color: #cacad8; font-size: 1rem;'/>"
+            "<input type='submit' value='Login' style='width: 100%; padding: 0.75rem; background: linear-gradient(135deg, #7c3aed 0%, #764ba2 100%); color: #fff; border: none; border-radius: 8px; font-size: 1rem; font-weight: 600; cursor: pointer;'/>"
             "</form>"
             "</div>", HTTPD_RESP_USE_STRLEN);
     }
@@ -1208,14 +1208,14 @@ static esp_err_t index_get_handler(httpd_req_t *req)
     if (authenticated || !password_protection_enabled) {
         const char* form_title = password_protection_enabled ? "Change Password" : "Set Password";
         httpd_resp_send_chunk(req,
-            "<div style='margin-top: 1.5rem; padding: 1.5rem; background: rgba(22, 33, 62, 0.6); border: 1px solid rgba(0, 217, 255, 0.2); border-radius: 12px;'>"
-            "<h2 style='margin-top: 0; margin-bottom: 1rem; color: #00d9ff; font-size: 1.1rem;'>🔑 ", HTTPD_RESP_USE_STRLEN);
+            "<div style='margin-top: 1.5rem; padding: 1.5rem; background: rgba(28, 8, 44, 0.6); border: 1px solid rgba(167, 139, 250, 0.2); border-radius: 12px;'>"
+            "<h2 style='margin-top: 0; margin-bottom: 1rem; color: #a78bfa; font-size: 1.1rem;'>🔑 ", HTTPD_RESP_USE_STRLEN);
         httpd_resp_send_chunk(req, form_title, HTTPD_RESP_USE_STRLEN);
         httpd_resp_send_chunk(req,
             "</h2>"
             "<form action='' method='GET'>"
-            "<input type='password' name='new_password' placeholder='New password (empty to disable)' style='width: 100%; padding: 0.75rem; margin-bottom: 0.75rem; background: rgba(255,255,255,0.1); border: 1px solid rgba(0,217,255,0.3); border-radius: 8px; color: #e0e0e0; font-size: 1rem;'/>"
-            "<input type='password' name='confirm_password' placeholder='Confirm password' style='width: 100%; padding: 0.75rem; margin-bottom: 0.75rem; background: rgba(255,255,255,0.1); border: 1px solid rgba(0,217,255,0.3); border-radius: 8px; color: #e0e0e0; font-size: 1rem;'/>"
+            "<input type='password' name='new_password' placeholder='New password (empty to disable)' style='width: 100%; padding: 0.75rem; margin-bottom: 0.75rem; background: rgba(255,255,255,0.1); border: 1px solid rgba(167,139,250,0.3); border-radius: 8px; color: #cacad8; font-size: 1rem;'/>"
+            "<input type='password' name='confirm_password' placeholder='Confirm password' style='width: 100%; padding: 0.75rem; margin-bottom: 0.75rem; background: rgba(255,255,255,0.1); border: 1px solid rgba(167,139,250,0.3); border-radius: 8px; color: #cacad8; font-size: 1rem;'/>"
             "<input type='submit' value='", HTTPD_RESP_USE_STRLEN);
         httpd_resp_send_chunk(req, form_title, HTTPD_RESP_USE_STRLEN);
         httpd_resp_send_chunk(req,
@@ -1672,7 +1672,7 @@ static esp_err_t config_get_handler(httpd_req_t *req)
             rc_status_text = "Authenticating...";
             break;
         case RC_STATE_ACTIVE:
-            rc_status_color = "#00d9ff";
+            rc_status_color = "#a78bfa";
             rc_status_text = rc_status.client_ip;
             snprintf(rc_kick_buf, sizeof(rc_kick_buf),
                 " <a href='/config?rc_kick=1' style='margin-left: 0.5rem; padding: 0.2rem 0.6rem; background: #f44336; color: #fff; border-radius: 4px; text-decoration: none; font-size: 0.8rem;'>Kick</a>");
@@ -2740,7 +2740,7 @@ static esp_err_t scan_get_handler(httpd_req_t *req)
     if (ap_count == 0) {
         if (scan_in_progress) {
             snprintf(scan_html, sizeof(scan_html),
-                "<tr><td colspan='%d' style='text-align:center; color:#00d9ff;'>"
+                "<tr><td colspan='%d' style='text-align:center; color:#a78bfa;'>"
                 "<span style='display:inline-block; animation: pulse 1s infinite;'>📡 Scanning...</span>"
                 "</td></tr>",
                 can_connect ? 5 : 4);

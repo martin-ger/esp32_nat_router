@@ -33,8 +33,8 @@ void dhcp_lease_map_update(const uint8_t mac[6], uint32_t ip,
             e->ip = ip;
             e->expires_us = expires;
             if (hostname && hostname[0]) {
-                strncpy(e->hostname, hostname, DHCP_HOSTNAME_MAX - 1);
-                e->hostname[DHCP_HOSTNAME_MAX - 1] = '\0';
+                strncpy(e->hostname, hostname, DHCP_LEASE_HOSTNAME_MAX - 1);
+                e->hostname[DHCP_LEASE_HOSTNAME_MAX - 1] = '\0';
             }
             return;
         }
@@ -62,8 +62,8 @@ void dhcp_lease_map_update(const uint8_t mac[6], uint32_t ip,
     e->expires_us = expires;
     e->hostname[0] = '\0';
     if (hostname && hostname[0]) {
-        strncpy(e->hostname, hostname, DHCP_HOSTNAME_MAX - 1);
-        e->hostname[DHCP_HOSTNAME_MAX - 1] = '\0';
+        strncpy(e->hostname, hostname, DHCP_LEASE_HOSTNAME_MAX - 1);
+        e->hostname[DHCP_LEASE_HOSTNAME_MAX - 1] = '\0';
     }
     e->valid = true;
     ESP_LOGI(TAG, "learned mac=%02x:%02x:%02x:%02x:%02x:%02x ip=%08" PRIx32 " host=%s",
@@ -111,8 +111,8 @@ void dhcp_lease_map_set_hostname(const uint8_t mac[6], const char *hostname) {
     for (int i = 0; i < DHCP_LEASE_MAP_SIZE; i++) {
         dhcp_lease_entry_t *e = &s_map[i];
         if (e->valid && memcmp(e->mac, mac, 6) == 0) {
-            strncpy(e->hostname, hostname, DHCP_HOSTNAME_MAX - 1);
-            e->hostname[DHCP_HOSTNAME_MAX - 1] = '\0';
+            strncpy(e->hostname, hostname, DHCP_LEASE_HOSTNAME_MAX - 1);
+            e->hostname[DHCP_LEASE_HOSTNAME_MAX - 1] = '\0';
             return;
         }
     }
@@ -138,8 +138,8 @@ void dhcp_lease_map_set_hostname(const uint8_t mac[6], const char *hostname) {
     memcpy(e->mac, mac, 6);
     e->ip = 0;
     e->expires_us = now + 120LL * 1000000LL; /* 2 min placeholder TTL */
-    strncpy(e->hostname, hostname, DHCP_HOSTNAME_MAX - 1);
-    e->hostname[DHCP_HOSTNAME_MAX - 1] = '\0';
+    strncpy(e->hostname, hostname, DHCP_LEASE_HOSTNAME_MAX - 1);
+    e->hostname[DHCP_LEASE_HOSTNAME_MAX - 1] = '\0';
     e->valid = true;
 }
 

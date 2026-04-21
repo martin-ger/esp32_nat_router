@@ -20,8 +20,8 @@ padding: 0;\
 \
 body {\
 font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;\
-background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);\
-color: #e0e0e0;\
+background: linear-gradient(135deg, #0d000f 0%, #120020 100%);\
+color: #cacad8;\
 padding: 1rem;\
 min-height: 100vh;\
 line-height: 1.6;\
@@ -30,16 +30,16 @@ line-height: 1.6;\
 h1 {\
 font-size: 1.75rem;\
 font-weight: 600;\
-color: #00d9ff;\
+color: #a78bfa;\
 margin-bottom: 0.5rem;\
 text-align: center;\
-text-shadow: 0 0 20px rgba(0, 217, 255, 0.3);\
+text-shadow: 0 0 20px rgba(167, 139, 250, 0.3);\
 }\
 \
 h2 {\
 font-size: 1.25rem;\
 font-weight: 500;\
-color: #00d9ff;\
+color: #a78bfa;\
 margin: 1.5rem 0 1rem 0;\
 }\
 \
@@ -47,18 +47,18 @@ margin: 1.5rem 0 1rem 0;\
 max-width: 600px;\
 margin: 0 auto;\
 padding: 1.5rem;\
-background: rgba(30, 30, 46, 0.9);\
+background: rgba(15, 5, 24, 0.96);\
 border-radius: 16px;\
 box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);\
 backdrop-filter: blur(10px);\
 }\
 \
 .status-table {\
-background: rgba(22, 33, 62, 0.6);\
+background: rgba(28, 8, 44, 0.6);\
 border-radius: 12px;\
 padding: 1rem;\
 margin: 1rem 0;\
-border: 1px solid rgba(0, 217, 255, 0.1);\
+border: 1px solid rgba(167, 139, 250, 0.15);\
 }\
 \
 .status-table table {\
@@ -85,7 +85,7 @@ font-size: 0.9rem;\
 }\
 \
 .status-table td:last-child {\
-color: #e0e0e0;\
+color: #cacad8;\
 font-weight: 500;\
 }\
 \
@@ -97,7 +97,7 @@ margin: 2rem 0 1rem 0;\
 }\
 \
 .nav-button {\
-background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);\
+background: linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%);\
 color: #fff;\
 border: none;\
 border-radius: 12px;\
@@ -110,13 +110,13 @@ align-items: center;\
 justify-content: center;\
 cursor: pointer;\
 transition: all 0.3s ease;\
-box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);\
+box-shadow: 0 4px 15px rgba(124, 58, 237, 0.4);\
 text-align: center;\
 }\
 \
 .nav-button:hover {\
 transform: translateY(-2px);\
-box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);\
+box-shadow: 0 6px 20px rgba(124, 58, 237, 0.6);\
 }\
 \
 .nav-button:active {\
@@ -190,7 +190,7 @@ font-size: 0.8rem;\
 <div style='margin-top: 2rem; padding-top: 1rem; border-top: 1px solid rgba(255, 255, 255, 0.1); text-align: center;'>\
 <span style='color: #666; font-size: 0.75rem; font-family: monospace;'>v%s | Build: %s %s | ESP-IDF: "\
 IDF_VER\
-" | <a href='https://github.com/martin-ger/esp32_nat_router' target='_blank' rel='noopener' style='color: #00d9ff; text-decoration: none;'>Source</a></span>\
+" | <a href='https://github.com/martin-ger/esp32_nat_router' target='_blank' rel='noopener' style='color: #a78bfa; text-decoration: none;'>Source</a></span>\
 </div>\
 </div>\
 </body>\

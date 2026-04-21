@@ -7,14 +7,14 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
-#include "dhcp_helpers.h"
 
-#define DHCP_LEASE_MAP_SIZE 16
+#define DHCP_LEASE_MAP_SIZE    16
+#define DHCP_LEASE_HOSTNAME_MAX 32
 
 typedef struct {
     uint8_t  mac[6];
     uint32_t ip;                        /* network byte order */
-    char     hostname[DHCP_HOSTNAME_MAX];
+    char     hostname[DHCP_LEASE_HOSTNAME_MAX];
     int64_t  expires_us;
     bool     valid;
 } dhcp_lease_entry_t;

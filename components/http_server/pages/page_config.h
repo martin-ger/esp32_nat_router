@@ -13,28 +13,28 @@
 </head>\
 <style>\
 * { box-sizing: border-box; margin: 0; padding: 0; }\
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); color: #e0e0e0; padding: 1rem; min-height: 100vh; line-height: 1.6; }\
-h1 { font-size: 1.5rem; font-weight: 600; color: #00d9ff; margin-bottom: 1rem; text-shadow: 0 0 20px rgba(0, 217, 255, 0.3); }\
-h2 { font-size: 1.15rem; font-weight: 500; color: #00d9ff; margin: 1.5rem 0 0.75rem 0; padding-bottom: 0.5rem; border-bottom: 1px solid rgba(0, 217, 255, 0.2); }\
-#container { max-width: 500px; margin: 0 auto; padding: 1.5rem; background: rgba(30, 30, 46, 0.9); border-radius: 16px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4); backdrop-filter: blur(10px); }\
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background: linear-gradient(135deg, #0d000f 0%, #120020 100%); color: #cacad8; padding: 1rem; min-height: 100vh; line-height: 1.6; }\
+h1 { font-size: 1.5rem; font-weight: 600; color: #a78bfa; margin-bottom: 1rem; text-shadow: 0 0 20px rgba(167, 139, 250, 0.3); }\
+h2 { font-size: 1.15rem; font-weight: 500; color: #a78bfa; margin: 1.5rem 0 0.75rem 0; padding-bottom: 0.5rem; border-bottom: 1px solid rgba(167, 139, 250, 0.2); }\
+#container { max-width: 500px; margin: 0 auto; padding: 1.5rem; background: rgba(15, 5, 24, 0.96); border-radius: 16px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4); backdrop-filter: blur(10px); }\
 form { margin-bottom: 1.5rem; }\
 table { width: 100%; border-collapse: collapse; }\
 td { padding: 0.5rem 0; vertical-align: top; }\
 td:first-child { color: #888; font-size: 0.9rem; padding-right: 0.75rem; width: 35%; text-align: right; }\
-input[type='text'], input[type='password'], input[type='number'] { width: 100%; background: rgba(22, 33, 62, 0.6); border: 1px solid rgba(0, 217, 255, 0.2); border-radius: 8px; color: #e0e0e0; padding: 0.75rem; font-size: 0.95rem; }\
-input[type='text']:focus, input[type='password']:focus, input[type='number']:focus, select:focus { outline: none; border-color: #00d9ff; box-shadow: 0 0 0 3px rgba(0, 217, 255, 0.1); background: rgba(22, 33, 62, 0.8); }\
+input[type='text'], input[type='password'], input[type='number'] { width: 100%; background: rgba(28, 8, 44, 0.6); border: 1px solid rgba(167, 139, 250, 0.2); border-radius: 8px; color: #cacad8; padding: 0.75rem; font-size: 0.95rem; }\
+input[type='text']:focus, input[type='password']:focus, input[type='number']:focus, select:focus { outline: none; border-color: #a78bfa; box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.15); background: rgba(28, 8, 44, 0.8); }\
 input::placeholder { color: #666; }\
-select { width: 100%; background: rgba(22, 33, 62, 0.6); border: 1px solid rgba(0, 217, 255, 0.2); border-radius: 8px; color: #e0e0e0; padding: 0.75rem; font-size: 0.95rem; cursor: pointer; -webkit-appearance: none; -moz-appearance: none; appearance: none; background-image: url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2300d9ff' stroke-width='1.5' fill='none'/%3E%3C/svg%3E\"); background-repeat: no-repeat; background-position: right 0.75rem center; padding-right: 2rem; }\
-select option { background: #16213e; color: #e0e0e0; }\
-input[type='checkbox'], input[type='radio'] { -webkit-appearance: none; -moz-appearance: none; appearance: none; width: 18px; height: 18px; border: 2px solid rgba(0, 217, 255, 0.3); border-radius: 4px; background: rgba(22, 33, 62, 0.6); cursor: pointer; vertical-align: middle; position: relative; flex-shrink: 0; }\
+select { width: 100%; background: rgba(28, 8, 44, 0.6); border: 1px solid rgba(167, 139, 250, 0.2); border-radius: 8px; color: #cacad8; padding: 0.75rem; font-size: 0.95rem; cursor: pointer; -webkit-appearance: none; -moz-appearance: none; appearance: none; background-image: url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2300d9ff' stroke-width='1.5' fill='none'/%3E%3C/svg%3E\"); background-repeat: no-repeat; background-position: right 0.75rem center; padding-right: 2rem; }\
+select option { background: #120020; color: #cacad8; }\
+input[type='checkbox'], input[type='radio'] { -webkit-appearance: none; -moz-appearance: none; appearance: none; width: 18px; height: 18px; border: 2px solid rgba(167, 139, 250, 0.3); border-radius: 4px; background: rgba(28, 8, 44, 0.6); cursor: pointer; vertical-align: middle; position: relative; flex-shrink: 0; }\
 input[type='radio'] { border-radius: 50%; }\
-input[type='checkbox']:checked, input[type='radio']:checked { background: #00d9ff; border-color: #00d9ff; }\
-input[type='checkbox']:checked::after { content: ''; position: absolute; left: 4px; top: 1px; width: 6px; height: 10px; border: solid #1a1a2e; border-width: 0 2px 2px 0; transform: rotate(45deg); }\
-input[type='radio']:checked::after { content: ''; position: absolute; left: 3px; top: 3px; width: 8px; height: 8px; border-radius: 50%; background: #1a1a2e; }\
-input[type='checkbox']:focus, input[type='radio']:focus { outline: none; border-color: #00d9ff; box-shadow: 0 0 0 3px rgba(0, 217, 255, 0.1); }\
+input[type='checkbox']:checked, input[type='radio']:checked { background: #a78bfa; border-color: #a78bfa; }\
+input[type='checkbox']:checked::after { content: ''; position: absolute; left: 4px; top: 1px; width: 6px; height: 10px; border: solid #0d000f; border-width: 0 2px 2px 0; transform: rotate(45deg); }\
+input[type='radio']:checked::after { content: ''; position: absolute; left: 3px; top: 3px; width: 8px; height: 8px; border-radius: 50%; background: #0d000f; }\
+input[type='checkbox']:focus, input[type='radio']:focus { outline: none; border-color: #a78bfa; box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.15); }\
 .ok-button, .red-button { border: none; border-radius: 8px; padding: 0.75rem 1.5rem; font-size: 0.95rem; font-weight: 600; cursor: pointer; width: 100%; margin-top: 0.5rem; }\
-.ok-button { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #fff; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4); }\
-.red-button { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: #fff; box-shadow: 0 4px 15px rgba(245, 87, 108, 0.4); }\
+.ok-button { background: linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%); color: #fff; box-shadow: 0 4px 15px rgba(124, 58, 237, 0.4); }\
+.red-button { background: linear-gradient(135deg, #a855f7 0%, #f5576c 100%); color: #fff; box-shadow: 0 4px 15px rgba(245, 87, 108, 0.4); }\
 small { display: block; color: #888; font-size: 0.85rem; margin-top: 0.5rem; line-height: 1.4; }\
 @media (max-width: 600px) { body { padding: 0.5rem; } #container { padding: 1rem; } h1 { font-size: 1.25rem; } h2 { font-size: 1rem; } td:first-child { font-size: 0.8rem; width: 40%; } input[type='text'], input[type='password'], input[type='number'], select { font-size: 0.9rem; padding: 0.65rem; } select { padding-right: 1.75rem; } .ok-button, .red-button { font-size: 0.9rem; padding: 0.65rem 1.25rem; } }\
 </style>\
@@ -54,7 +54,7 @@ var qs = window.location.search.substr(1);\
 var formSubmitted = qs.indexOf('ap_ssid=') !== -1 || (qs.indexOf('ssid=') !== -1 && qs.indexOf('password=') !== -1) || qs.indexOf('staticip=') !== -1 || qs.indexOf('reset=') !== -1 || qs.indexOf('disable_interface=') !== -1;\
 if (formSubmitted) {\
 document.getElementById('container').style.display = 'none';\
-document.body.innerHTML ='<div id=\"container\"><h1>Configuration</h1><p style=\"text-align:center; margin: 2rem 0; color: #00d9ff;\">Settings saved! Rebooting...</p></div>';\
+document.body.innerHTML ='<div id=\"container\"><h1>Configuration</h1><p style=\"text-align:center; margin: 2rem 0; color: #a78bfa;\">Settings saved! Rebooting...</p></div>';\
 setTimeout(\"location.href = '/'\", 10000);\
 }\
 </script>"
@@ -183,14 +183,14 @@ setTimeout(\"location.href = '/'\", 10000);\
 #define CONFIG_CHUNK_TAIL2 "\
 <table>\
 <tr><td>Upload</td><td>\
-<label style='display:inline-block;padding:0.6rem 1rem;background:rgba(22,33,62,0.6);border:1px solid rgba(0,217,255,0.2);border-radius:8px;color:#e0e0e0;font-size:0.9rem;cursor:pointer;transition:all 0.3s;margin-bottom:0.5rem;'>\
+<label style='display:inline-block;padding:0.6rem 1rem;background:rgba(28,8,44,0.6);border:1px solid rgba(167,139,250,0.2);border-radius:8px;color:#cacad8;font-size:0.9rem;cursor:pointer;transition:all 0.3s;margin-bottom:0.5rem;'>\
 <input type='file' id='otaFile' accept='.bin' style='display:none;'/>\
 <span id='otaFileName'>Choose .bin file...</span>\
 </label><br/>\
 <button type='button' onclick='uploadOTA()' class='ok-button'>Upload Firmware</button>\
 <div id='otaProgress' style='margin-top:0.5rem;'>\
-<div id='otaBar' style='display:none;height:6px;background:rgba(0,217,255,0.2);border-radius:3px;overflow:hidden;'>\
-<div id='otaBarFill' style='height:100%;width:0;background:#00d9ff;transition:width 0.3s;'></div>\
+<div id='otaBar' style='display:none;height:6px;background:rgba(167,139,250,0.2);border-radius:3px;overflow:hidden;'>\
+<div id='otaBarFill' style='height:100%;width:0;background:#a78bfa;transition:width 0.3s;'></div>\
 </div>\
 </div>\
 <div id='otaStatus' style='margin-top:0.5rem;font-size:0.9rem;'></div>\
@@ -199,13 +199,13 @@ setTimeout(\"location.href = '/'\", 10000);\
 <h3 style='font-size:1rem;color:#aaa;margin:1.5rem 0 0.5rem;'>Config Backup / Restore</h3>\
 <table>\
 <tr><td>Export</td><td>\
-<input type='password' id='expPass' placeholder='Passphrase (leave empty for plain)' style='width:100%;margin-bottom:0.4rem;background:rgba(22,33,62,0.6);border:1px solid rgba(0,217,255,0.2);border-radius:8px;color:#e0e0e0;padding:0.6rem;font-size:0.9rem;box-sizing:border-box;'/><br/>\
+<input type='password' id='expPass' placeholder='Passphrase (leave empty for plain)' style='width:100%;margin-bottom:0.4rem;background:rgba(28,8,44,0.6);border:1px solid rgba(167,139,250,0.2);border-radius:8px;color:#cacad8;padding:0.6rem;font-size:0.9rem;box-sizing:border-box;'/><br/>\
 <button type='button' onclick='downloadConfig()' class='ok-button'>Write Config</button>\
 <div id='exportStatus' style='margin-top:0.5rem;font-size:0.9rem;'></div>\
 </td></tr>\
 <tr><td>Import</td><td>\
-<input type='password' id='impPass' placeholder='Passphrase (if encrypted)' style='width:100%;margin-bottom:0.4rem;background:rgba(22,33,62,0.6);border:1px solid rgba(0,217,255,0.2);border-radius:8px;color:#e0e0e0;padding:0.6rem;font-size:0.9rem;box-sizing:border-box;'/><br/>\
-<label style='display:inline-block;padding:0.6rem 1rem;background:rgba(22,33,62,0.6);border:1px solid rgba(0,217,255,0.2);border-radius:8px;color:#e0e0e0;font-size:0.9rem;cursor:pointer;transition:all 0.3s;margin-bottom:0.5rem;'>\
+<input type='password' id='impPass' placeholder='Passphrase (if encrypted)' style='width:100%;margin-bottom:0.4rem;background:rgba(28,8,44,0.6);border:1px solid rgba(167,139,250,0.2);border-radius:8px;color:#cacad8;padding:0.6rem;font-size:0.9rem;box-sizing:border-box;'/><br/>\
+<label style='display:inline-block;padding:0.6rem 1rem;background:rgba(28,8,44,0.6);border:1px solid rgba(167,139,250,0.2);border-radius:8px;color:#cacad8;font-size:0.9rem;cursor:pointer;transition:all 0.3s;margin-bottom:0.5rem;'>\
 <input type='file' id='cfgFile' accept='.json' style='display:none;'/>\
 <span id='cfgFileName'>Choose file...</span>\
 </label><br/>\
@@ -223,7 +223,7 @@ setTimeout(\"location.href = '/'\", 10000);\
 <div id='rebootScreen' style='display:none;text-align:center;padding:2rem 0;'>\
 <h2 style='color:#4caf50;margin-bottom:1rem;' id='rebootTitle'>Success</h2>\
 <p style='font-size:1.1rem;margin-bottom:0.5rem;' id='rebootMsg'>The device is rebooting...</p>\
-<p style='font-size:1.5rem;font-weight:bold;color:#00d9ff;' id='countdown'></p>\
+<p style='font-size:1.5rem;font-weight:bold;color:#a78bfa;' id='countdown'></p>\
 <p style='color:#888;font-size:0.9rem;'>Redirecting to home page...</p>\
 </div>\
 <script>\
@@ -320,7 +320,7 @@ r.readAsText(f);\
 </form>\
 </div>\
 <div style='margin-top: 2rem; text-align: center;'>\
-<a href='/' style='padding: 0.75rem 2rem; background: linear-gradient(135deg, #667eea 0%%, #764ba2 100%%); color: #fff; border: none; border-radius: 8px; text-decoration: none; font-size: 0.95rem; font-weight: 600;'>&#127968; Home</a>\
+<a href='/' style='padding: 0.75rem 2rem; background: linear-gradient(135deg, #7c3aed 0%%, #5b21b6 100%%); color: #fff; border: none; border-radius: 8px; text-decoration: none; font-size: 0.95rem; font-weight: 600;'>&#127968; Home</a>\
 </div>\
 </div>\
 </body>\

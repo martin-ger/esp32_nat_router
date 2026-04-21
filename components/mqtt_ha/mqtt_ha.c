@@ -31,6 +31,9 @@
 #include "dhcp_reservations.h"
 #include "wifi_config.h"
 #include "remote_console.h"
+#if CONFIG_REPEATER_MODE
+#include "dhcp_lease_map.h"
+#endif
 
 static const char *TAG = "mqtt_ha";
 
@@ -42,7 +45,7 @@ static const char *TAG = "mqtt_ha";
 #define NVS_KEY_MQTT_INTV  "mqtt_intv"
 
 /* ---------- MQTT topics ---------- */
-#define TOPIC_PREFIX       "esp32_nat_router"
+#define TOPIC_PREFIX       "esp32_wifi_repeater"
 #define TOPIC_STATE        TOPIC_PREFIX "/state"
 #define TOPIC_AVAILABILITY TOPIC_PREFIX "/availability"
 #define TOPIC_CMD_RESTART  TOPIC_PREFIX "/command/restart"
@@ -73,7 +76,6 @@ static char s_mac_str[13];     /* "AABBCCDDEEFF" */
 /* ---------- extern globals from main firmware ---------- */
 extern uint16_t connect_count;
 extern bool     ap_connect;
-extern struct dhcp_reservation_entry dhcp_reservations[];
 
 /* ================================================================
  *  Helpers
@@ -334,23 +336,31 @@ static void publish_discovery(void)
         "%s}", s_device_id, dev);
     esp_mqtt_client_publish(s_client, topic, payload, 0, 1, 1);
 
-    /* --- Per-client entities (DHCP reservations only) --- */
+    /* --- Per-client entities --- */
+#if CONFIG_REPEATER_MODE
+    static dhcp_lease_entry_t leases[DHCP_LEASE_MAP_SIZE];
+    int nlease = dhcp_lease_map_snapshot(leases, DHCP_LEASE_MAP_SIZE);
+    for (int i = 0; i < nlease; i++) {
+        if (leases[i].ip == 0) continue;
+        char cmac[13];
+        snprintf(cmac, sizeof(cmac), "%02X%02X%02X%02X%02X%02X",
+                 leases[i].mac[0], leases[i].mac[1], leases[i].mac[2],
+                 leases[i].mac[3], leases[i].mac[4], leases[i].mac[5]);
+        const char *name = leases[i].hostname[0] ? leases[i].hostname : cmac;
+#else
     for (int i = 0; i < MAX_DHCP_RESERVATIONS; i++) {
         if (!dhcp_reservations[i].valid) continue;
-
         const struct dhcp_reservation_entry *r = &dhcp_reservations[i];
         char cmac[13];
         snprintf(cmac, sizeof(cmac), "%02X%02X%02X%02X%02X%02X",
                  r->mac[0], r->mac[1], r->mac[2],
                  r->mac[3], r->mac[4], r->mac[5]);
-
-        /* Use reservation name if set, otherwise MAC */
         const char *name = (r->name[0] != '\0') ? r->name : cmac;
+#endif
         char client_state_topic[64];
         snprintf(client_state_topic, sizeof(client_state_topic),
                  TOPIC_CLIENTS "%s", cmac);
 
-        /* binary_sensor: Presence */
         snprintf(topic, sizeof(topic),
             "homeassistant/binary_sensor/%s/%s_presence/config",
             s_device_id, cmac);
@@ -365,7 +375,6 @@ static void publish_discovery(void)
             "%s}", name, s_device_id, cmac, client_state_topic, dev);
         esp_mqtt_client_publish(s_client, topic, payload, 0, 1, 1);
 
-        /* sensor: TX */
         snprintf(topic, sizeof(topic),
             "homeassistant/sensor/%s/%s_tx/config", s_device_id, cmac);
         snprintf(payload, sizeof(payload),
@@ -380,7 +389,6 @@ static void publish_discovery(void)
             "%s}", name, s_device_id, cmac, client_state_topic, dev);
         esp_mqtt_client_publish(s_client, topic, payload, 0, 1, 1);
 
-        /* sensor: RX */
         snprintf(topic, sizeof(topic),
             "homeassistant/sensor/%s/%s_rx/config", s_device_id, cmac);
         snprintf(payload, sizeof(payload),
@@ -395,7 +403,6 @@ static void publish_discovery(void)
             "%s}", name, s_device_id, cmac, client_state_topic, dev);
         esp_mqtt_client_publish(s_client, topic, payload, 0, 1, 1);
 
-        /* sensor: RSSI */
         snprintf(topic, sizeof(topic),
             "homeassistant/sensor/%s/%s_rssi/config", s_device_id, cmac);
         snprintf(payload, sizeof(payload),
@@ -465,24 +472,29 @@ static void publish_state(void *arg)
     wifi_sta_list_t sta_list;
     esp_wifi_ap_get_sta_list(&sta_list);
 
-    /* Per-client state (DHCP reservations only) */
+    /* Per-client state */
     client_stats_entry_t stats[CLIENT_STATS_MAX];
     int nstats = client_stats_get_all(stats, CLIENT_STATS_MAX);
 
+#if CONFIG_REPEATER_MODE
+    static dhcp_lease_entry_t pub_leases[DHCP_LEASE_MAP_SIZE];
+    int npub = dhcp_lease_map_snapshot(pub_leases, DHCP_LEASE_MAP_SIZE);
+    for (int i = 0; i < npub; i++) {
+        if (pub_leases[i].ip == 0) continue;
+        const uint8_t *mac = pub_leases[i].mac;
+#else
     for (int i = 0; i < MAX_DHCP_RESERVATIONS; i++) {
         if (!dhcp_reservations[i].valid) continue;
-
-        const struct dhcp_reservation_entry *r = &dhcp_reservations[i];
+        const uint8_t *mac = dhcp_reservations[i].mac;
+#endif
         char cmac[13];
         snprintf(cmac, sizeof(cmac), "%02X%02X%02X%02X%02X%02X",
-                 r->mac[0], r->mac[1], r->mac[2],
-                 r->mac[3], r->mac[4], r->mac[5]);
+                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 
-        /* Find matching stats entry */
         uint64_t tx = 0, rx = 0;
         bool present = false;
         for (int j = 0; j < nstats; j++) {
-            if (memcmp(stats[j].mac, r->mac, 6) == 0) {
+            if (memcmp(stats[j].mac, mac, 6) == 0) {
                 tx = stats[j].bytes_sent;
                 rx = stats[j].bytes_received;
                 present = (stats[j].connected != 0);
@@ -490,10 +502,9 @@ static void publish_state(void *arg)
             }
         }
 
-        /* Find RSSI from AP station list */
         int8_t client_rssi = 0;
         for (int j = 0; j < sta_list.num; j++) {
-            if (memcmp(sta_list.sta[j].mac, r->mac, 6) == 0) {
+            if (memcmp(sta_list.sta[j].mac, mac, 6) == 0) {
                 client_rssi = sta_list.sta[j].rssi;
                 break;
             }

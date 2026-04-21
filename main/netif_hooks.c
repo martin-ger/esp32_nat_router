@@ -26,6 +26,7 @@
 #include "led_strip_status.h"
 #if CONFIG_REPEATER_MODE
 #include "repeater_forward.h"
+#include "fdb.h"
 #endif
 
 extern esp_netif_t* wifiSTA;
@@ -42,6 +43,10 @@ static struct netif *sta_netif = NULL;
 static netif_input_fn original_ap_netif_input = NULL;
 static netif_linkoutput_fn original_ap_netif_linkoutput = NULL;
 static struct netif *ap_netif = NULL;
+
+#if CONFIG_REPEATER_MODE
+static netif_output_fn original_sta_netif_output = NULL;
+#endif
 
 // Per-client traffic statistics for AP clients
 static client_stats_entry_t client_stats[CLIENT_STATS_MAX];
@@ -241,6 +246,31 @@ static IRAM_ATTR err_t netif_linkoutput_hook(struct netif *netif, struct pbuf *p
     return ERR_IF;
 }
 
+#if CONFIG_REPEATER_MODE
+/* Hook on STA netif->output: intercept IP packets that lwIP wants to send out
+ * the STA interface. If the destination is an AP-side client (FDB hit), bypass
+ * normal ARP resolution and emit the frame directly on the AP netif. */
+static IRAM_ATTR err_t sta_netif_output_redirect(struct netif *netif,
+                                                  struct pbuf *p,
+                                                  const ip4_addr_t *ipaddr) {
+    if (ap_netif && ipaddr) {
+        uint8_t client_mac[6];
+        if (fdb_lookup_by_ip(ipaddr->addr, client_mac)) {
+            if (pbuf_add_header(p, 14) == ERR_OK) {
+                uint8_t *eth = (uint8_t *)p->payload;
+                memcpy(eth,     client_mac,        6);
+                memcpy(eth + 6, ap_netif->hwaddr,  6);
+                eth[12] = 0x08; eth[13] = 0x00;
+                err_t r = ap_netif->linkoutput(ap_netif, p);
+                pbuf_remove_header(p, 14);
+                return r;
+            }
+        }
+    }
+    return original_sta_netif_output(netif, p, ipaddr);
+}
+#endif
+
 void init_byte_counter(void) {
     if (wifiSTA != NULL && original_netif_input == NULL) {
         // Get the underlying lwIP netif structure
@@ -261,6 +291,8 @@ void init_byte_counter(void) {
 
                 ESP_LOGI(TAG, "Byte counter initialized for STA interface (input & output)");
 #if CONFIG_REPEATER_MODE
+                original_sta_netif_output = sta_netif->output;
+                sta_netif->output = sta_netif_output_redirect;
                 repeater_forward_set_netifs(NULL, sta_netif);
 #endif
             }
