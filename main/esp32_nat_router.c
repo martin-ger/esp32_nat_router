@@ -65,6 +65,10 @@
 #include "led_strip_status.h"
 #if CONFIG_MQTT_HOMEASSISTANT
 #include "mqtt_ha.h"
+#if CONFIG_REPEATER_MODE
+#include "repeater_forward.h"
+#include "cmd_repeater.h"
+#endif
 #endif
 
 // Byte counting variables
@@ -602,7 +606,9 @@ void ap_set_enabled(bool enabled)
 {
     if (enabled) {
         esp_wifi_set_mode(WIFI_MODE_APSTA);
+#if !CONFIG_REPEATER_MODE
         if (ap_nat_enabled) ip_napt_enable(my_ap_ip, 1);
+#endif
     } else {
         connect_count = 0;
         esp_wifi_set_mode(WIFI_MODE_STA);
@@ -655,7 +661,11 @@ void wifi_init(const uint8_t* mac, const char* ssid, const char* ent_username, c
     esp_netif_set_ip4_addr(&ipInfo_ap.netmask, 255,255,255,0);
     esp_netif_dhcps_stop(wifiAP); // stop before setting ip WifiAP
     esp_netif_set_ip_info(wifiAP, &ipInfo_ap);
+#if !CONFIG_REPEATER_MODE
     esp_netif_dhcps_start(wifiAP);
+#else
+    ESP_LOGI(TAG, "Repeater mode: AP DHCP server disabled (Option 61 proxy to upstream)");
+#endif
 
     esp_event_handler_instance_t instance_any_id;
     esp_event_handler_instance_t instance_got_ip;
@@ -747,10 +757,13 @@ void wifi_init(const uint8_t* mac, const char* ssid, const char* ent_username, c
     }
 
 
+#if !CONFIG_REPEATER_MODE
     // Enable DNS (offer) for dhcp server
     dhcps_offer_t dhcps_dns_value = OFFER_DNS;
     esp_netif_dhcps_option(wifiAP,ESP_NETIF_OP_SET, ESP_NETIF_DOMAIN_NAME_SERVER, &dhcps_dns_value, sizeof(dhcps_dns_value));
+#endif
 
+#if !CONFIG_REPEATER_MODE
     // Set DNS server address for DHCP clients.
     // When no STA is configured, point clients at the AP itself so the
     // captive-portal DNS server can intercept all queries.
@@ -762,6 +775,9 @@ void wifi_init(const uint8_t* mac, const char* ssid, const char* ent_username, c
     }
     dnsserver.ip.type = ESP_IPADDR_TYPE_V4;
     esp_netif_set_dns_info(wifiAP, ESP_NETIF_DNS_MAIN, &dnsserver);
+#else
+    (void)dnsserver;
+#endif
 
     // esp_netif_get_dns_info(ESP_IF_WIFI_AP, ESP_NETIF_DNS_MAIN, &dnsinfo);
     // ESP_LOGI(TAG, "DNS IP:" IPSTR, IP2STR(&dnsinfo.ip.u_addr.ip4));
@@ -1048,6 +1064,7 @@ void app_main(void)
     pthread_t t1;
     pthread_create(&t1, NULL, led_status_thread, NULL);
 
+#if !CONFIG_REPEATER_MODE
     if (!ap_disabled) {
         if (ap_nat_enabled) {
             ip_napt_enable(my_ap_ip, 1);
@@ -1056,6 +1073,10 @@ void app_main(void)
             ESP_LOGI(TAG, "NAT is disabled (routed mode)");
         }
     }
+#else
+    ESP_LOGI(TAG, "Repeater mode: L2 bridge (no NAPT)");
+    repeater_forward_init();
+#endif
 
     char* web_disabled = NULL;
     get_config_param_str("web_disabled", &web_disabled);
@@ -1088,6 +1109,9 @@ void app_main(void)
     esp_console_register_help_command();
     register_system();
     register_router();
+#if CONFIG_REPEATER_MODE
+    register_repeater_cli();
+#endif
 
 #if CONFIG_MQTT_HOMEASSISTANT
     mqtt_ha_init();

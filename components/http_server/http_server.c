@@ -2330,7 +2330,16 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
     httpd_resp_send_chunk(req, MAPPINGS_CHUNK_MID4, HTTPD_RESP_USE_STRLEN);
 
     /* Chunk 10: Port forwarding section (hidden when NAT is disabled) */
+#if CONFIG_REPEATER_MODE
+    httpd_resp_send_chunk(req,
+        "<div class='section'><p style='color:#888; padding: 0.5rem 0;'>"
+        "Port forwarding and DHCP reservations are not applicable in L2 repeater mode."
+        "</p></div>",
+        HTTPD_RESP_USE_STRLEN);
+    if (0) {
+#else
     if (ap_nat_enabled) {
+#endif
         httpd_resp_send_chunk(req, MAPPINGS_CHUNK_PORTFWD_HEAD, HTTPD_RESP_USE_STRLEN);
 
         bool has_mappings = false;

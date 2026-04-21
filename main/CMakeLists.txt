@@ -20,7 +20,9 @@ if(CONFIG_REPEATER_MODE)
     list(APPEND main_srcs
         fdb.c
         dhcp_xid_map.c
-        repeater_forward.c)
+        dhcp_helpers.c
+        repeater_forward.c
+        cmd_repeater.c)
 endif()
 
 idf_component_register(SRCS ${main_srcs}

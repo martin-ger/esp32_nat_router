@@ -24,6 +24,9 @@
 #include "router_config.h"
 #include "wifi_config.h"
 #include "led_strip_status.h"
+#if CONFIG_REPEATER_MODE
+#include "repeater_forward.h"
+#endif
 
 extern esp_netif_t* wifiSTA;
 extern esp_netif_t* wifiAP;
@@ -128,6 +131,12 @@ void format_bytes_human(uint64_t bytes, char *buf, size_t len) {
 // Hook function to count received bytes via netif input and ACL check
 static IRAM_ATTR err_t netif_input_hook(struct pbuf *p, struct netif *netif) {
     bool is_acl_monitored = false;
+
+#if CONFIG_REPEATER_MODE
+    if (repeater_sta_rx_handle(p, netif)) {
+        return ERR_OK;
+    }
+#endif
 
     // Check to_esp ACL (packets from Internet to ESP32)
     if (!acl_is_empty(ACL_TO_ESP)) {
@@ -268,6 +277,9 @@ void init_byte_counter(void) {
                 sta_netif->linkoutput = netif_linkoutput_hook;
 
                 ESP_LOGI(TAG, "Byte counter initialized for STA interface (input & output)");
+#if CONFIG_REPEATER_MODE
+                repeater_forward_set_netifs(NULL, sta_netif);
+#endif
             }
         }
     }
@@ -476,6 +488,12 @@ static void send_icmp_frag_needed(struct pbuf *p, struct netif *netif, uint16_t 
 static IRAM_ATTR err_t ap_netif_input_hook(struct pbuf *p, struct netif *netif) {
     bool is_acl_monitored = false;
 
+#if CONFIG_REPEATER_MODE
+    if (repeater_ap_rx_handle(p, netif)) {
+        return ERR_OK;
+    }
+#endif
+
     // Check to_ap ACL (packets from Clients to ESP32)
     if (!acl_is_empty(ACL_TO_AP)) {
         uint8_t result = acl_check_packet(ACL_TO_AP, p);
@@ -590,6 +608,9 @@ void init_ap_netif_hooks(void) {
                 ap_netif->linkoutput = ap_netif_linkoutput_hook;
 
                 ESP_LOGI(TAG, "AP netif hooks initialized (input & output)");
+#if CONFIG_REPEATER_MODE
+                repeater_forward_set_netifs(ap_netif, NULL);
+#endif
             }
         }
     }

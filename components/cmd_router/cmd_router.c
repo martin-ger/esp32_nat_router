@@ -275,8 +275,10 @@ void register_router(void)
     register_set_ap();
     register_set_ap_ip();
     register_set_ap_dns();
+#if !CONFIG_REPEATER_MODE
     register_dhcp_reserve();
     register_portmap();
+#endif
     register_acl();
     register_bytes();
     register_pcap();
@@ -287,7 +289,9 @@ void register_router(void)
     register_set_led_strip();
     register_set_ttl();
     register_client_stats_cmd();
+#if !CONFIG_REPEATER_MODE
     register_set_ap_nat();
+#endif
     register_set_tx_power();
     register_set_ap_hidden();
     register_set_ap_auth();
@@ -1229,7 +1233,11 @@ static int show(int argc, char **argv)
 
     if (strcmp(type, "status") == 0) {
         // Show status
+#if CONFIG_REPEATER_MODE
+        printf("Repeater Status (L2 bridge, no NAT/DHCPS):\n");
+#else
         printf("Router Status:\n");
+#endif
         printf("==============\n");
 
         // Uptime
