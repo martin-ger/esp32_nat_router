@@ -13,6 +13,7 @@
 #include "esp_log.h"
 #include "esp_console.h"
 #include "esp_system.h"
+#include "esp_wifi.h"
 #include "nvs.h"
 #include "router_config.h"
 #include "esp_sleep.h"
@@ -164,6 +165,7 @@ static int factory_reset(int argc, char **argv)
         return 1;
     }
     ESP_LOGW(TAG, "Factory reset: NVS namespace '%s' erased, restarting...", PARAM_NAMESPACE);
+    esp_wifi_restore();
     esp_restart();
     return 0; // Never reached
 }

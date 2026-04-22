@@ -45,7 +45,6 @@
 #include "dhcpserver/dhcpserver.h"
 #include "dhcpserver/dhcpserver_options.h"
 
-#include "mdns.h"
 #include "cmd_system.h"
 #include "cmd_router.h"
 #include <esp_http_server.h>
@@ -324,6 +323,7 @@ void * led_status_thread(void * p)
                         nvs_commit(nvs);
                         nvs_close(nvs);
                     }
+                    esp_wifi_restore();
                     esp_restart();
                 }
             } else {
@@ -1087,13 +1087,6 @@ void app_main(void)
     repeater_forward_init();
 #endif
 
-    if (mdns_init() == ESP_OK) {
-        mdns_hostname_set(hostname);
-        mdns_instance_name_set("ESP32 WiFi Repeater");
-        ESP_LOGI(TAG, "mDNS started: %s.local", hostname);
-    } else {
-        ESP_LOGW(TAG, "mDNS init failed");
-    }
 
     char* web_disabled = NULL;
     get_config_param_str("web_disabled", &web_disabled);
