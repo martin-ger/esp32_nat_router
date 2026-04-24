@@ -106,6 +106,18 @@ The solution is two-stage snooping:
 
 The **lease map** (`dhcp_lease_map.c`) is a separate store tracking `{ chaddr → ip, hostname, lease_time }` for display and diagnostics purposes, not for forwarding.
 
+### 6.1 DHCP Option 61 (Client Identifier)
+
+DHCP Option 61 allows a client to supply an arbitrary identifier — typically a UUID or a type-prefixed byte string — as a substitute for, or supplement to, the `chaddr` MAC address field for lease identity purposes. Modern operating systems with MAC address randomization frequently include Option 61 to give the DHCP server a stable lease anchor even when the hardware MAC varies.
+
+The bridge detects Option 61 presence during `dhcp_parse()` and records it as the `has_client_id` boolean in `dhcp_parsed_t` (`dhcp_helpers.h:44`). A standalone predicate `dhcp_has_client_id()` (`dhcp_helpers.h:58`) is also exposed for callers that need a quick check without a full parse.
+
+Critically, the bridge does **not rewrite Option 61** — the DHCP payload is forwarded byte-for-byte. Only the Ethernet frame's source MAC and the ARP sender hardware address are modified; all DHCP option fields, including Option 61, pass through intact to the upstream DHCP server.
+
+For the bridge's own client-tracking purposes, `chaddr` (BOOTP header offset 28) remains the primary key, not Option 61. The XID map is populated with `{ xid → chaddr }` in `snoop_dhcp_client()`, and FDB entries are keyed by the IP-to-`chaddr` mapping learned from DHCP ACK snooping and IPv4 traffic. This is correct because RFC 2131 requires clients to set `chaddr` even when Option 61 is present, and because the bridge needs a MAC address — not an opaque identifier — to rewrite Ethernet destination headers.
+
+The `has_client_id` flag is currently parsed but not acted upon by the forwarding path. It is available for future use cases, such as logging which clients rely on Option 61, or applying differentiated handling for randomized-MAC clients.
+
 ---
 
 ## 7. Proxy ARP for the Bridge's Own Management IP
