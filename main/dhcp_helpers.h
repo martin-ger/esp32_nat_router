@@ -57,4 +57,31 @@ uint8_t dhcp_get_msg_type(const uint8_t *buf, size_t len);
 /* Check whether Option 61 (Client Identifier) is present. */
 bool dhcp_has_client_id(const uint8_t *buf, size_t len);
 
+/* Forward declarations to avoid pulling lwIP headers into helpers' header. */
+struct pbuf;
+
+/* Mangle an outbound DHCP client → server frame in-flight on the bridge:
+ *   - Rewrite BOOTP chaddr to sta_mac (so the server sees STA as the sender).
+ *   - Set the BOOTP broadcast flag so the reply is broadcast.
+ *   - Append Option 61 (Client-Identifier = real_mac) if not already present;
+ *     patches IP total length, IP checksum, and UDP length accordingly.
+ *   - Zeroes the UDP checksum (legal for IPv4).
+ *
+ * The input pbuf 'p' is modified in place when possible. If Option 61 has to
+ * be appended and 'p' has insufficient tailroom, a freshly allocated pbuf is
+ * returned with the modifications applied; the caller then frees 'p' and
+ * forwards the returned pbuf instead. Returns 'p' when unchanged or when the
+ * frame is not a parseable client→server DHCP packet. */
+struct pbuf *dhcp_mangle_request_egress(struct pbuf *p,
+                                        const uint8_t real_mac[6],
+                                        const uint8_t sta_mac[6]);
+
+/* Mangle an inbound DHCP server → client frame on the bridge:
+ *   - Look up the original client MAC in the XID map by xid.
+ *   - Rewrite BOOTP chaddr back to the real client MAC.
+ *   - Zero the UDP checksum.
+ * Returns true and populates *chaddr_out with the resolved client MAC on
+ * success; false otherwise. */
+bool dhcp_mangle_reply_ingress(struct pbuf *p, uint8_t chaddr_out[6]);
+
 #endif

@@ -12,6 +12,7 @@
 #include "dhcp_xid_map.h"
 #include "dhcp_helpers.h"
 #include "dhcp_lease_map.h"
+#include "mdns_responder.h"
 #include "repeater_config.h"
 
 static const char *TAG = "repeater_fwd";
@@ -56,6 +57,20 @@ static const uint8_t *locate_dhcp(const uint8_t *eth, size_t len,
     return dhcp;
 }
 
+/* Self-IP guard: refuse to learn the bridge's own STA/AP IPs into the FDB.
+ * Without this, a misbehaving client can poison the FDB by gratuitously
+ * announcing the management IP for itself, breaking local reachability. */
+static bool is_own_ip(uint32_t ip) {
+    if (s_sta_netif && ip == s_sta_netif->ip_addr.u_addr.ip4.addr) return true;
+    if (s_ap_netif  && ip == s_ap_netif->ip_addr.u_addr.ip4.addr)  return true;
+    return false;
+}
+
+static void learn_fdb_guarded(uint32_t ip, const uint8_t mac[6], uint32_t ttl_s) {
+    if (is_own_ip(ip)) return;
+    fdb_learn(ip, mac, ttl_s);
+}
+
 static void snoop_dhcp_client(const uint8_t *eth, size_t len) {
     size_t dlen = 0;
     const uint8_t *dhcp = locate_dhcp(eth, len, 68, 67, &dlen);
@@ -82,7 +97,7 @@ static void snoop_dhcp_server_reply(const uint8_t *eth, size_t len, uint8_t chad
     }
     if (chaddr_out) memcpy(chaddr_out, info.chaddr, 6);
     if (info.msg_type == DHCPACK && info.yiaddr != 0) {
-        fdb_learn(info.yiaddr, info.chaddr, REPEATER_FDB_DEFAULT_TTL_S);
+        learn_fdb_guarded(info.yiaddr, info.chaddr, REPEATER_FDB_DEFAULT_TTL_S);
         dhcp_lease_map_update(info.chaddr, info.yiaddr,
                               info.hostname[0] ? info.hostname : NULL,
                               info.lease_time);
@@ -157,13 +172,14 @@ static bool bridge_ap_to_sta(struct pbuf *p) {
 
     if (etype == ETYPE_IP4) {
         if (p->len < 14 + 20) return false;
-        /* Snoop DHCP client requests before rewriting */
+        /* Snoop DHCP client requests before rewriting (records xid → chaddr). */
         snoop_dhcp_client(eth, p->len);
-        /* Learn src IP ↔ client MAC so we can route replies back */
+        /* Learn src IP ↔ client MAC so we can route replies back. Guarded
+         * against the bridge's own STA/AP IPs to prevent FDB poisoning. */
         const struct ip_hdr *iphdr = (const struct ip_hdr *)(eth + 14);
         if (IPH_V(iphdr) != 4) return false;
         if (iphdr->src.addr != 0) {
-            fdb_learn(iphdr->src.addr, eth + 6, REPEATER_FDB_DEFAULT_TTL_S);
+            learn_fdb_guarded(iphdr->src.addr, eth + 6, REPEATER_FDB_DEFAULT_TTL_S);
         }
         uint32_t ap_ip  = s_ap_netif  ? s_ap_netif->ip_addr.u_addr.ip4.addr  : 0;
         uint32_t sta_ip = s_sta_netif ? s_sta_netif->ip_addr.u_addr.ip4.addr : 0;
@@ -180,6 +196,35 @@ static bool bridge_ap_to_sta(struct pbuf *p) {
             memcpy(eth + 0, sta_mac, 6);
             s_sta_netif->input(p, s_sta_netif);
             return true;
+        }
+
+        /* AP-side mDNS (UDP 5353): IDF mdns won't reliably bind to the AP
+         * netif on this SDK, so we answer A queries for our hostname.local
+         * locally with our small custom responder. The query is still
+         * forwarded upstream below so other responders can also reply. */
+        if (IPH_PROTO(iphdr) == 17) {
+            uint16_t udp_dport_peek = ((uint16_t)*(eth + 14 + IPH_HL(iphdr) * 4 + 2) << 8) |
+                                                   *(eth + 14 + IPH_HL(iphdr) * 4 + 3);
+            if (udp_dport_peek == 5353) {
+                mdns_responder_handle_ap_query(p, s_ap_netif, s_sta_netif);
+            }
+        }
+
+        /* DHCP client→server: rewrite chaddr to STA MAC, set bcast flag,
+         * append option-61 with the real client MAC, patch lengths/cksums.
+         * The mangler may return a freshly-allocated pbuf (option-61 case);
+         * if so, swap p for the new pbuf and free the original. */
+        if (IPH_PROTO(iphdr) == 17) {
+            uint16_t udp_dport = ((uint16_t)*(eth + 14 + IPH_HL(iphdr) * 4 + 2) << 8) |
+                                              *(eth + 14 + IPH_HL(iphdr) * 4 + 3);
+            if (udp_dport == 67) {
+                struct pbuf *q = dhcp_mangle_request_egress(p, eth + 6, sta_mac);
+                if (q && q != p) {
+                    pbuf_free(p);
+                    p = q;
+                    eth = (uint8_t *)p->payload;
+                }
+            }
         }
 
         memcpy(eth + 6, sta_mac, 6);
@@ -208,9 +253,36 @@ static bool bridge_sta_to_ap(struct pbuf *p) {
     if (etype == ETYPE_ARP) {
         if (p->len < 14 + 28) return false;
         uint8_t *arp = eth + 14;
+        uint16_t oper = ((uint16_t)arp[6] << 8) | arp[7];
         uint32_t tpa;
         memcpy(&tpa, arp + 24, 4); /* target protocol address */
         uint8_t client_mac[6];
+
+        /* Upstream proxy ARP: when an upstream device asks "who has <client>?"
+         * for a known FDB IP, answer with the STA MAC so the upstream router
+         * directs unicast frames to us. We then translate them on the way
+         * down using the FDB. Without this, upstream may never learn how to
+         * reach AP-side clients before they originate traffic. */
+        if (oper == 1 && s_sta_netif && fdb_lookup_by_ip(tpa, client_mac)) {
+            const uint8_t *sta_mac = s_sta_netif->hwaddr;
+            uint8_t req_sha[6];
+            uint32_t req_spa;
+            memcpy(req_sha, arp + 8,  6);
+            memcpy(&req_spa, arp + 14, 4);
+
+            memcpy(eth + 0, req_sha, 6);   /* dst = requester */
+            memcpy(eth + 6, sta_mac, 6);   /* src = STA MAC   */
+            arp[6] = 0; arp[7] = 2;        /* oper = reply    */
+            memcpy(arp + 8,  sta_mac, 6);  /* sha = STA MAC   */
+            memcpy(arp + 14, &tpa,    4);  /* spa = client IP */
+            memcpy(arp + 18, req_sha, 6);  /* tha = requester */
+            memcpy(arp + 24, &req_spa, 4); /* tpa = req IP    */
+
+            emit_on(s_sta_netif, p);
+            pbuf_free(p);
+            return true;
+        }
+
         if (!fdb_lookup_by_ip(tpa, client_mac)) {
             /* Broadcast ARP request from upstream — flood to AP unchanged src */
             if (mac_is_broadcast(eth)) {
@@ -242,13 +314,40 @@ static bool bridge_sta_to_ap(struct pbuf *p) {
             return false;
         }
 
+        /* Upstream mDNS (UDP 5353) is multicast. Mirror a copy down to the
+         * AP so AP-side clients see upstream queries/responses, then return
+         * false so the original is also delivered to the local STA lwIP
+         * stack (where IDF mdns answers). */
+        if (IPH_PROTO(iphdr) == 17 && (eth[0] & 0x01)) {
+            uint8_t ihl_b = IPH_HL(iphdr) * 4;
+            uint16_t udp_dport_peek = ((uint16_t)*(eth + 14 + ihl_b + 2) << 8) |
+                                                  *(eth + 14 + ihl_b + 3);
+            uint16_t udp_sport_peek = ((uint16_t)*(eth + 14 + ihl_b + 0) << 8) |
+                                                  *(eth + 14 + ihl_b + 1);
+            if (udp_dport_peek == 5353 || udp_sport_peek == 5353) {
+                struct pbuf *copy = pbuf_clone(PBUF_RAW, PBUF_RAM, p);
+                if (copy) {
+                    uint8_t *ceth = (uint8_t *)copy->payload;
+                    memcpy(ceth + 6, ap_mac, 6);
+                    emit_on(s_ap_netif, copy);
+                    pbuf_free(copy);
+                }
+                return false;
+            }
+        }
+
         uint8_t client_mac[6] = {0};
         bool have_client = false;
 
-        /* DHCP reply: derive client MAC from packet (chaddr) and learn FDB */
+        /* DHCP reply: rewrite chaddr back to the real client MAC using the
+         * XID map (the upstream server saw the STA MAC after egress mangling),
+         * then learn the assigned IP into the FDB. */
+        if (dhcp_mangle_reply_ingress(p, client_mac)) {
+            have_client = true;
+        }
         snoop_dhcp_server_reply(eth, p->len, client_mac);
-        if (client_mac[0] | client_mac[1] | client_mac[2] |
-            client_mac[3] | client_mac[4] | client_mac[5]) {
+        if (!have_client && (client_mac[0] | client_mac[1] | client_mac[2] |
+                             client_mac[3] | client_mac[4] | client_mac[5])) {
             have_client = true;
         }
 

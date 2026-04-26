@@ -29,6 +29,7 @@ For the full NAT-router variant (VPN, port forwarding, DHCP reservations, separa
 - **L2 Bridging**: Software MAC-translation bridge at the lwIP netif layer — AP clients live on the upstream subnet
 - **Transparent DHCP**: Upstream DHCP server serves clients directly via DHCP snooping and XID proxying
 - **Proxy ARP**: ESP32's own management IP is answered locally so clients can reach the web UI
+- **mDNS / Bonjour**: Device is reachable as `<hostname>.local` from both STA and AP sides; AP-side mDNS queries are answered by a built-in responder and also forwarded upstream
 - **WPA2-Enterprise Support**: Connect to corporate networks (PEAP, TTLS, TLS) and re-broadcast as WPA2-PSK
 - **5 GHz WiFi**: Dual-band on ESP32-C5 with configurable band preference
 - **Channel Lock**: AP channel auto-follows the upstream AP channel (single-radio constraint)
@@ -311,7 +312,7 @@ ap [enable|disable]               Enable/disable AP interface immediately
 ### Network Settings
 
 ```
-set_hostname <name>               DHCP hostname for the upstream network (Option 12)
+set_hostname <name>               DHCP hostname for the upstream network (Option 12); also sets the mDNS name (<name>.local)
 set_ttl [<n>|0]                   TTL override for STA-bound packets (0 = disabled)
 set_tx_power <dBm>                WiFi TX power (2-20, 0 = max/default)
 set_tz <TZ string>                POSIX timezone string (e.g. CET-1CEST,M3.5.0/2,M10.5.0/3)
@@ -660,7 +661,7 @@ For a detailed description of the bridging architecture, MAC translation logic, 
 - **Non-IP/ARP frames are not forwarded.** Only EtherType `0x0800` (IPv4) and `0x0806` (ARP) are bridged; 802.1Q, IPv6, and others are passed to the local stack only.
 - **Upstream ARP table shows only the STA MAC** for all clients — tools that use MAC for client identity (e.g., some DHCP servers, RADIUS) will see one MAC for all bridge clients.
 - **True MAC transparency** (WDS / 4-address mode) is not supported without upstream AP cooperation.
-- **Multicast is not explicitly tracked.** Upstream multicast is flooded to the AP as broadcast; AP-side multicast is not forwarded upstream.
+- **mDNS is handled but not fully transparent.** The bridge answers A-record queries for `<hostname>.local` from AP clients directly. Other mDNS service queries (e.g. `_http._tcp.local`) are forwarded upstream so upstream responders can reply; upstream mDNS traffic is mirrored to AP-side clients. Full peer-to-peer mDNS between an AP client and an upstream device works as long as both sides generate traffic first.
 
 ---
 

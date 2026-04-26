@@ -1,7 +1,7 @@
 set(main_priv_requires
     pcap_capture esp_wifi esp_netif console nvs_flash driver esp_http_server
     fatfs cmd_router dhcpserver wpa_supplicant cmd_system acl remote_console
-    syslog oled_display json http_server mqtt_ha app_update)
+    syslog oled_display json http_server mqtt_ha app_update espressif__mdns)
 
 # ESP32-C5 uses a bit-bang WS2812 driver; all other targets use the RMT-backed
 # espressif/led_strip managed component.
@@ -22,6 +22,7 @@ if(CONFIG_REPEATER_MODE)
         dhcp_helpers.c
         dhcp_lease_map.c
         repeater_forward.c
+        mdns_responder.c
         cmd_repeater.c)
 endif()
 

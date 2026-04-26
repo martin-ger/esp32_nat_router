@@ -63,6 +63,7 @@
 #include "syslog_client.h"
 #include "oled_display.h"
 #include "led_strip_status.h"
+#include "mdns.h"
 #if CONFIG_MQTT_HOMEASSISTANT
 #include "mqtt_ha.h"
 #if CONFIG_REPEATER_MODE
@@ -529,6 +530,19 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
         // Initialize byte counter after getting IP (interface is ready)
         init_byte_counter();
 
+#if CONFIG_REPEATER_MODE
+        /* Pin the AP to the STA's current channel. With APSTA the driver
+         * usually aligns them, but make it explicit so the bridge can never
+         * end up with the two interfaces on different channels. */
+        {
+            uint8_t prim = 0;
+            wifi_second_chan_t sec = WIFI_SECOND_CHAN_NONE;
+            if (esp_wifi_get_channel(&prim, &sec) == ESP_OK && prim != 0) {
+                esp_wifi_set_channel(prim, sec);
+            }
+        }
+#endif
+
         // Start SNTP time synchronization
         init_sntp_if_needed();
 
@@ -796,6 +810,13 @@ void wifi_init(const uint8_t* mac, const char* ssid, const char* ent_username, c
         pdFALSE, pdTRUE, pdMS_TO_TICKS(JOIN_TIMEOUT_MS));
     ESP_ERROR_CHECK(esp_wifi_start());
 
+#if CONFIG_REPEATER_MODE
+    /* In bridge mode the AP must always be on-channel and continuously
+     * available. Disable WiFi modem sleep so the radio stays awake while
+     * the bridge forwards frames between STA and AP. */
+    esp_wifi_set_ps(WIFI_PS_NONE);
+#endif
+
     if (strlen(ssid) > 0) {
         ESP_LOGI(TAG, "wifi_init_apsta finished.");
         ESP_LOGI(TAG, "connect to ap SSID: %s ", ssid);
@@ -1052,6 +1073,16 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_timer_create(&reconnect_timer_args, &sta_reconnect_timer));
 
     wifi_init(mac, ssid, ent_username, ent_identity, passwd, static_ip, subnet_mask, gateway_addr, ap_mac, ap_ssid, ap_passwd, ap_ip);
+
+    // Start IDF mDNS responder so the device is reachable as <hostname>.local
+    // on both STA and AP interfaces. Active for all build variants.
+    if (mdns_init() == ESP_OK) {
+        mdns_hostname_set(hostname);
+        mdns_service_add(NULL, "_http", "_tcp", 80, NULL, 0);
+        ESP_LOGI(TAG, "mDNS started: %s.local", hostname);
+    } else {
+        ESP_LOGW(TAG, "mDNS init failed");
+    }
 
     // Initialise addressable LED strip (if configured)
     led_strip_status_init();

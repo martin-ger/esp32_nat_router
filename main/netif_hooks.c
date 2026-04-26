@@ -249,7 +249,9 @@ static IRAM_ATTR err_t netif_linkoutput_hook(struct netif *netif, struct pbuf *p
 #if CONFIG_REPEATER_MODE
 /* Hook on STA netif->output: intercept IP packets that lwIP wants to send out
  * the STA interface. If the destination is an AP-side client (FDB hit), bypass
- * normal ARP resolution and emit the frame directly on the AP netif. */
+ * normal ARP resolution and emit the frame directly on the AP netif.
+ * For IPv4 multicast (224.0.0.0/4), mirror a copy to the AP side too so that
+ * locally-generated mDNS responses reach AP-side listeners. */
 static IRAM_ATTR err_t sta_netif_output_redirect(struct netif *netif,
                                                   struct pbuf *p,
                                                   const ip4_addr_t *ipaddr) {
@@ -264,6 +266,28 @@ static IRAM_ATTR err_t sta_netif_output_redirect(struct netif *netif,
                 err_t r = ap_netif->linkoutput(ap_netif, p);
                 pbuf_remove_header(p, 14);
                 return r;
+            }
+        }
+
+        /* Mirror IPv4 multicast (224.0.0.0/4) to the AP side, then continue
+         * with normal upstream delivery. */
+        uint32_t addr_n = ipaddr->addr;
+        uint8_t high = (uint8_t)(addr_n & 0xFF);
+        if ((high & 0xF0) == 0xE0) {
+            struct pbuf *q = pbuf_alloc(PBUF_RAW, p->tot_len + 14, PBUF_RAM);
+            if (q) {
+                /* Copy the IP payload after a 14-byte Ethernet header. */
+                if (pbuf_take_at(q, p->payload, p->tot_len, 14) == ERR_OK) {
+                    uint8_t *eth = (uint8_t *)q->payload;
+                    eth[0] = 0x01; eth[1] = 0x00; eth[2] = 0x5e;
+                    eth[3] = (uint8_t)((addr_n >> 8)  & 0x7F);
+                    eth[4] = (uint8_t)((addr_n >> 16) & 0xFF);
+                    eth[5] = (uint8_t)((addr_n >> 24) & 0xFF);
+                    memcpy(eth + 6, ap_netif->hwaddr, 6);
+                    eth[12] = 0x08; eth[13] = 0x00;
+                    ap_netif->linkoutput(ap_netif, q);
+                }
+                pbuf_free(q);
             }
         }
     }
