@@ -36,6 +36,10 @@
 #include "esp_random.h"
 
 #include "driver/gpio.h"
+#include "soc/soc_caps.h"
+#if SOC_TEMP_SENSOR_SUPPORTED
+#include "driver/temperature_sensor.h"
+#endif
 #include "router_globals.h"
 #include "cmd_router.h"
 #include "pcap_capture.h"
@@ -1360,18 +1364,39 @@ static int show(int argc, char **argv)
             printf("Uplink IP: none\n");
         }
 
-        // Byte counts
-        printf("Bytes sent/received: %" PRIu64 " / %" PRIu64 " bytes\n", get_sta_bytes_sent(), get_sta_bytes_received());
-
-        // Free heap
-        printf("Free heap: %lu bytes\n", (unsigned long)esp_get_free_heap_size());
-
         // AP interface state
         printf("AP interface: %s\n", ap_disabled ? "disabled" : "enabled");
 
         // Connected clients
         resync_connect_count();
         printf("Connected clients: %u\n", connect_count);
+
+        // Byte counts
+        char _sent_buf[16], _recv_buf[16];
+        format_bytes_human(get_sta_bytes_sent(), _sent_buf, sizeof(_sent_buf));
+        format_bytes_human(get_sta_bytes_received(), _recv_buf, sizeof(_recv_buf));
+        printf("Bytes sent/received: %s / %s\n", _sent_buf, _recv_buf);
+
+
+#if SOC_TEMP_SENSOR_SUPPORTED
+        // CPU temperature
+        {
+            temperature_sensor_handle_t tsens;
+            temperature_sensor_config_t tsens_cfg = TEMPERATURE_SENSOR_CONFIG_DEFAULT(-10, 80);
+            if (temperature_sensor_install(&tsens_cfg, &tsens) == ESP_OK) {
+                float celsius = 0.0f;
+                temperature_sensor_enable(tsens);
+                if (temperature_sensor_get_celsius(tsens, &celsius) == ESP_OK) {
+                    printf("CPU temperature: %.1f °C\n", celsius);
+                }
+                temperature_sensor_disable(tsens);
+                temperature_sensor_uninstall(tsens);
+            }
+        }
+#endif
+        // Free heap
+        printf("Free heap: %lu bytes\n", (unsigned long)esp_get_free_heap_size());
+
         if (connect_count > 0) {
             connected_client_t clients[8];
             int count = get_connected_clients(clients, 8);

@@ -3,6 +3,7 @@ idf_component_register(
     INCLUDE_DIRS "include"
     REQUIRES esp_timer nvs_flash console lwip esp_netif esp_event log cmd_router
 )
+target_compile_options(${COMPONENT_LIB} PRIVATE -Os)
 
 # Wrap output functions to intercept console output
 # Note: Do NOT wrap vprintf - it's used by ESP_LOG internally

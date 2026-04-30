@@ -9,11 +9,7 @@ if(NOT IDF_TARGET STREQUAL "esp32c5")
     list(APPEND main_priv_requires led_strip)
 endif()
 
-# mDNS is omitted on ESP32-C5 because the resulting binary no longer fits in
-# the app partition for that target.
-if(NOT IDF_TARGET STREQUAL "esp32c5")
-    list(APPEND main_priv_requires espressif__mdns)
-endif()
+list(APPEND main_priv_requires espressif__mdns)
 
 idf_component_register(SRCS "esp32_nat_router.c"
                             "portmap.c"
@@ -23,3 +19,4 @@ idf_component_register(SRCS "esp32_nat_router.c"
                             "led_strip_status.c"
                     INCLUDE_DIRS "."
                     PRIV_REQUIRES ${main_priv_requires})
+target_compile_options(__idf_main PRIVATE -O2)

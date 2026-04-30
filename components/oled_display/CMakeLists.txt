@@ -11,3 +11,6 @@ idf_component_register(
     INCLUDE_DIRS "include"
     REQUIRES ${OLED_REQUIRES}
 )
+if(OLED_SRCS)
+    target_compile_options(${COMPONENT_LIB} PRIVATE -Os)
+endif()

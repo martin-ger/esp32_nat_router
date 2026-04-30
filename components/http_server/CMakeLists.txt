@@ -6,4 +6,4 @@ idf_component_register(
                   remote_console dhcpserver wpa_supplicant
                   app_update esp_app_format mbedtls
 )
-target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-unused-function)
+target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-unused-function -Os)

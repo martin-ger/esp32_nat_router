@@ -17,7 +17,7 @@ idf_component_register(
 
 # Suppress address comparison warnings (same as upstream lwip component)
 # Suppress unused-but-set-variable for ESP_LOG macros that may be compiled out
-target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-address -Wno-unused-but-set-variable)
+target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-address -Wno-unused-but-set-variable -O2)
 
 # List of all public dhcpserver functions to wrap
 set(DHCPS_WRAP_FUNCTIONS
