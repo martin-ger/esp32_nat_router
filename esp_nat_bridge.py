@@ -227,7 +227,7 @@ def _require(value: Optional[str], name: str):
 
 @mcp.tool()
 async def show_status() -> str:
-    """Show router status: whether it is connected to WiFi, its IP addresses, how many clients are connected, traffic statistics, and free memory."""
+    """Show router status: whether it is connected to WiFi, its IP addresses, how many clients are connected, traffic (shown as B/KB/MB/GB), and free memory."""
     return await _cmd("show status")
 
 

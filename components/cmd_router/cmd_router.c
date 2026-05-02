@@ -1342,7 +1342,7 @@ static int show(int argc, char **argv)
             wifi_ap_record_t ap_info;
             if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
 #if WIFI_HAS_5GHZ
-                printf("Uplink AP: connected (ch %d, %s, %d dBm)\n",
+                printf("Uplink STA: connected (ch %d, %s, %d dBm)\n",
                        ap_info.primary,
                        ap_info.primary > 14 ? "5 GHz" : "2.4 GHz",
                        ap_info.rssi);
@@ -1382,7 +1382,8 @@ static int show(int argc, char **argv)
         // CPU temperature
         {
             temperature_sensor_handle_t tsens;
-            temperature_sensor_config_t tsens_cfg = TEMPERATURE_SENSOR_CONFIG_DEFAULT(-10, 80);
+            temperature_sensor_config_t tsens_cfg = TEMPERATURE_SENSOR_CONFIG_DEFAULT(20, 100);
+            //temperature_sensor_config_t tsens_cfg = TEMPERATURE_SENSOR_CONFIG_DEFAULT(-10, 80);
             if (temperature_sensor_install(&tsens_cfg, &tsens) == ESP_OK) {
                 float celsius = 0.0f;
                 temperature_sensor_enable(tsens);
