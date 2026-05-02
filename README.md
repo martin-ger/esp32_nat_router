@@ -41,7 +41,6 @@ For the full NAT-router variant (VPN, port forwarding, DHCP reservations, separa
 - **LED Status Indicator**: Plain GPIO or addressable RGB (WS2812/SK6812) with color-coded status
 - **OLED Display**: 72x40 SSD1306 I2C display (ESP32-C3 and ESP32-S3)
 - **MQTT Home Assistant**: Telemetry and connected-client presence via MQTT with HA auto-discovery
-- **MCP Bridge**: BETA — control the bridge from AI assistants via the Model Context Protocol
 - **OTA Updates**: Flash new firmware directly from the Web UI
 
 The maximum number of simultaneously connected WiFi clients is 8 (5 on ESP32-C3) due to RAM constraints.
@@ -50,14 +49,14 @@ The maximum number of simultaneously connected WiFi clients is 8 (5 on ESP32-C3)
 
 ## First Boot
 
-After first boot, the repeater offers an open WiFi network with the SSID **ESP32_NAT_Router**. During this unconfigured phase, the AP runs a DHCP server so you can reach the setup page.
+After first boot, the repeater offers an open WiFi network with the SSID **ESP32_WiFi_Repeater**. During this unconfigured phase, the AP runs a DHCP server so you can reach the setup page.
 
-1. Connect to **ESP32_NAT_Router**
-2. Open **http://192.168.4.1** in your browser
+1. Connect to **ESP32_WiFi_Repeater**
+2. Open **http://esp32-wifi-repeater.local** (or http://192.168.4.1) in your browser
 3. On the Getting Started page, enter your upstream WiFi SSID and password, and set a name and password for the new AP
 4. Click **Save & Reboot**
 
-After reboot the AP DHCP server is disabled and the upstream DHCP server takes over. AP clients will receive IPs from upstream within a few seconds of connecting.
+After reboot the AP DHCP server is disabled and the upstream DHCP server takes over. AP clients will receive IPs from upstream within a few seconds of connecting. You can then still reach the ESP via "esp32-wifi-repeater.local".
 
 ---
 
