@@ -5,7 +5,7 @@ This is a firmware to use the ESP32 as WiFi NAT router. It routes between the ne
 ## Other WiFi Router/Repeater Projects
 Starting from this code base I started several spin-off projects with slightly differrent scope. These are all (ab)using the ESP as a minimal network device. 
 
-- **Layer 2 WiFi Repeater**: Finally we have it - the **WiFi Repeater**, a layer 2 network bridge between STA and AP (no NAT, no DHCP, just plain frame forwarding in one broadcast domain, i.e. one IP network segment). You currently find it's sources in the [esp32_wifi_repeater](https://github.com/martin-ger/esp32_nat_router/tree/esp32_wifi_repeater) branch of this repo. It is ESP-IDF source-only and still under development, but it works generally with good performance on an ESP32c3 and makes it the world's first >2$ WiFi extender. Feel free to test it - docs are not updated, but usage is basically the same as for the router.
+- **Layer 2 WiFi Repeater**: Finally we have it - the **WiFi Repeater**, a layer 2 network bridge between STA and AP (no NAT, no DHCP, just plain frame forwarding in one broadcast domain, i.e. one IP network segment). You currently find it's sources in the [esp32_wifi_repeater](https://github.com/martin-ger/esp32_nat_router/tree/esp32_wifi_repeater) branch of this repo, that is still under development, but it works generally with good performance and makes it a >2$ WiFi extender.
 - **WiFi Access Point**: If you have a **W32-ET01 board** and you are looking for a plain ESP32 **Ethernet AP**, or correctly for an **Ethernet to WiFi Layer 2 Bridge**, check out [esp32_eth_wifi_bridge](https://github.com/martin-ger/esp32_eth_wifi_bridge). 
 - **Ethernet Router**: If you are looking for an ESP32 NAT router with reverse direction, i.e. **WiFi STA as uplink** (Internet) and **Ethernet as downlink** (LAN), check out [esp32_ethernet_router](https://github.com/martin-ger/esp32_ethernet_router). Here I also experiment with support for the common WIZnet W5500 SPI Ethernet NIC.
 - **PPPoE Router**: If you ever consider using the ESP32 as an open-source ISP router, have a look at the [esp32_PPPoE_router](https://github.com/martin-ger/esp32_PPPoE_router). It adds PPPoE as additional Ethernet uplink option. So it could be used directly on an ISP modem.
@@ -49,7 +49,7 @@ The maximum number of simultaniously connected WiFi clients is 8 (5 on the ESP32
 After first boot the ESP32 NAT Router will offer a WiFi network with an open AP and the ssid "ESP32_NAT_Router". Configuration can either be done via a web interface or via the serial console.
 
 1. Connect to the **ESP32_NAT_Router** WiFi network
-2. Open **http://192.168.4.1** in your browser
+2. Open **http://esp32-nat-router.local** (or http://192.168.4.1) in your browser
 3. Configure your upstream WiFi and AP settings on the Getting Started page
 4. Click **Save & Reboot**
 
