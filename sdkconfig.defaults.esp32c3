@@ -6,6 +6,3 @@ CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_160=y
 # Use built-in USB_SERIAL_JTAG for console output
 CONFIG_ESP_CONSOLE_UART_DEFAULT=n
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
-
-# L2 bridge mode (no NAPT, no AP DHCPS — clients get leases from upstream)
-CONFIG_REPEATER_MODE=y
