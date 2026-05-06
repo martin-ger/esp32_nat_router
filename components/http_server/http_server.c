@@ -44,6 +44,7 @@
 #include "esp_ota_ops.h"
 #include "esp_app_format.h"
 #include "esp_app_desc.h"
+#include "esp_chip_info.h"
 #include "mbedtls/pkcs5.h"
 #include "mbedtls/md.h"
 #include "mbedtls/base64.h"
@@ -1990,17 +1991,33 @@ static esp_err_t config_get_handler(httpd_req_t *req)
     /* Chunk 9: Device management heading */
     httpd_resp_send_chunk(req, CONFIG_CHUNK_TAIL, HTTPD_RESP_USE_STRLEN);
 
-    /* Chunk 9a: Dynamic OTA info (running partition, version) */
+    /* Chunk 9a: Dynamic OTA info (running partition, version, chip) */
     {
+        esp_chip_info_t chip_info;
+        esp_chip_info(&chip_info);
+        const char *chip_model;
+        switch (chip_info.model) {
+            case CHIP_ESP32:   chip_model = "ESP32"; break;
+            case CHIP_ESP32S2: chip_model = "ESP32-S2"; break;
+            case CHIP_ESP32S3: chip_model = "ESP32-S3"; break;
+            case CHIP_ESP32C3: chip_model = "ESP32-C3"; break;
+            case CHIP_ESP32C2: chip_model = "ESP32-C2"; break;
+            case CHIP_ESP32C5: chip_model = "ESP32-C5"; break;
+            case CHIP_ESP32C6: chip_model = "ESP32-C6"; break;
+            case CHIP_ESP32H2: chip_model = "ESP32-H2"; break;
+            default:           chip_model = "Unknown"; break;
+        }
         const esp_partition_t *running = esp_ota_get_running_partition();
         const esp_app_desc_t *app_desc = esp_app_get_description();
         snprintf(section, sizeof(section),
             "<table>"
             "<tr><td>Running</td><td>%s</td></tr>"
+            "<tr><td>Chip</td><td>%s</td></tr>"
             "<tr><td>Version</td><td>%s</td></tr>"
             "<tr><td>Built</td><td>%s %s</td></tr>"
             "</table>",
             running ? running->label : "unknown",
+            chip_model,
             app_desc ? app_desc->version : "unknown",
             app_desc ? app_desc->date : "", app_desc ? app_desc->time : "");
         httpd_resp_send_chunk(req, section, HTTPD_RESP_USE_STRLEN);

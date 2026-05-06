@@ -91,6 +91,7 @@ static const char* get_chip_model_name(esp_chip_model_t model)
         case CHIP_ESP32S3: return "ESP32-S3";
         case CHIP_ESP32C3: return "ESP32-C3";
         case CHIP_ESP32C2: return "ESP32-C2";
+        case CHIP_ESP32C5: return "ESP32-C5";
         case CHIP_ESP32C6: return "ESP32-C6";
         case CHIP_ESP32H2: return "ESP32-H2";
         default:           return "Unknown";
