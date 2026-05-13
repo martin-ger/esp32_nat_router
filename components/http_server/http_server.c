@@ -3263,7 +3263,8 @@ static esp_err_t vpn_get_handler(httpd_req_t *req)
 
                     if (httpd_query_key_value(buf, "vpn_privkey", param, sizeof(param)) == ESP_OK) {
                         preprocess_string(param);
-                        nvs_set_str(nvs, "vpn_privkey", param);
+                        if (param[0] != '\0')
+                            nvs_set_str(nvs, "vpn_privkey", param);
                     }
                     if (httpd_query_key_value(buf, "vpn_pubkey", param, sizeof(param)) == ESP_OK) {
                         preprocess_string(param);
@@ -3271,7 +3272,8 @@ static esp_err_t vpn_get_handler(httpd_req_t *req)
                     }
                     if (httpd_query_key_value(buf, "vpn_psk", param, sizeof(param)) == ESP_OK) {
                         preprocess_string(param);
-                        nvs_set_str(nvs, "vpn_psk", param);
+                        if (param[0] != '\0')
+                            nvs_set_str(nvs, "vpn_psk", param);
                     }
                     if (httpd_query_key_value(buf, "vpn_endpoint", param, sizeof(param)) == ESP_OK) {
                         preprocess_string(param);
@@ -3381,8 +3383,8 @@ static esp_err_t vpn_get_handler(httpd_req_t *req)
     httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
 
     snprintf(row, VPN_BUF_SIZE,
-        "<tr><td>Private Key</td><td><input type='password' name='vpn_privkey' value='%s' placeholder='Base64 private key'/></td></tr>",
-        vpn_private_key ? vpn_private_key : "");
+        "<tr><td>Private Key</td><td><input type='password' name='vpn_privkey' placeholder='%s'/></td></tr>",
+        (vpn_private_key && vpn_private_key[0]) ? "unchanged" : "Base64 private key");
     httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
 
     snprintf(row, VPN_BUF_SIZE,
@@ -3391,8 +3393,8 @@ static esp_err_t vpn_get_handler(httpd_req_t *req)
     httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
 
     snprintf(row, VPN_BUF_SIZE,
-        "<tr><td>Preshared Key</td><td><input type='password' name='vpn_psk' value='%s' placeholder='Optional'/></td></tr>",
-        vpn_preshared_key ? vpn_preshared_key : "");
+        "<tr><td>Preshared Key</td><td><input type='password' name='vpn_psk' placeholder='%s'/></td></tr>",
+        (vpn_preshared_key && vpn_preshared_key[0]) ? "unchanged" : "Optional");
     httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
 
     snprintf(row, VPN_BUF_SIZE,

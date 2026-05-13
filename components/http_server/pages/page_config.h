@@ -72,7 +72,7 @@ setTimeout(\"location.href = '/'\", 10000);\
 <form action='' method='GET'>\
 <table>\
 <tr><td>SSID</td><td><input type='text' name='ap_ssid' value='%s' placeholder='Network name'/></td></tr>\
-<tr><td>Password</td><td><input type='text' id='ap_pw' name='ap_password' placeholder='unchanged' oninput=\"document.getElementById('ap_op').checked=false;\"/></td></tr>\
+<tr><td>Password</td><td><input type='password' id='ap_pw' name='ap_password' placeholder='unchanged' oninput=\"document.getElementById('ap_op').checked=false;\"/></td></tr>\
 <tr><td>AP IP Address</td><td><input type='text' name='ap_ip_addr' value='%s' placeholder='192.168.4.1'/></td></tr>\
 <tr><td>DNS Server</td><td><input type='text' name='ap_dns' value='%s' placeholder='empty = use upstream DNS'/></td></tr>\
 <tr><td>MAC Address</td><td><input type='text' name='ap_mac' value='%s' placeholder='AA:BB:CC:DD:EE:FF'/></td></tr>\
@@ -108,7 +108,7 @@ setTimeout(\"location.href = '/'\", 10000);\
 <form action='' method='GET'>\
 <table>\
 <tr><td>SSID</td><td><input type='text' name='ssid' value='%s' placeholder='Uplink network'/></td></tr>\
-<tr><td>Password</td><td><input type='text' name='password' placeholder='unchanged'/></td></tr>\
+<tr><td>Password</td><td><input type='password' name='password' placeholder='unchanged'/></td></tr>\
 " CONFIG_CHUNK_STA_BAND_ROW "\
 <tr><td colspan='2' style='padding-top: 1rem; color: #888; font-size: 0.85rem;'>WPA2 Enterprise (optional)</td></tr>\
 <tr><td>Username</td><td><input type='text' name='ent_username' value='%s' placeholder='Enterprise username'/></td></tr>\
