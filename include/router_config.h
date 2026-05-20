@@ -46,6 +46,9 @@ extern int led_strip_gpio;
 // TTL override for STA upstream (0 = disabled/no change, 1-255 = fixed TTL)
 extern uint8_t sta_ttl_override;
 
+// Reconnect watchdog timeout in seconds (0 = disabled)
+extern uint16_t reconnect_watchdog_s;
+
 // MSS clamp for AP interface (0 = disabled, otherwise max MSS in bytes)
 extern uint16_t ap_mss_clamp;
 

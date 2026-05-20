@@ -82,6 +82,9 @@ uint64_t sta_bytes_received = 0;
 // TTL override for STA upstream (0 = disabled/no change)
 uint8_t sta_ttl_override = 0;
 
+// Reconnect watchdog timeout in seconds (0 = disabled)
+uint16_t reconnect_watchdog_s = 0;
+
 // MSS clamp for AP interface (0 = disabled, otherwise max MSS in bytes)
 uint16_t ap_mss_clamp = 0;
 
@@ -323,6 +326,7 @@ void * led_status_thread(void * p)
     }
 
     int held_ms = 0;
+    uint32_t wd_disconnected_s = 0;
 
     bool strip_active = led_strip_is_active();
 
@@ -370,6 +374,20 @@ void * led_status_thread(void * p)
                 held_ms = 0;
             }
 #endif
+        }
+
+        /* Reconnect watchdog: restart if uplink has been down too long */
+        if (reconnect_watchdog_s > 0
+#if !CONFIG_ETH_UPLINK
+            && ssid != NULL && ssid[0] != '\0'
+#endif
+        ) {
+            if (ap_connect) {
+                wd_disconnected_s = 0;
+            } else if (++wd_disconnected_s >= reconnect_watchdog_s) {
+                ESP_LOGW(TAG, "Watchdog: no uplink for %"PRIu32" s, restarting", wd_disconnected_s);
+                esp_restart();
+            }
         }
     }
 }
@@ -829,6 +847,13 @@ void eth_init(const char* static_ip, const char* subnet_mask, const char* gatewa
         esp_netif_dhcpc_stop(ethNetif);
         esp_netif_set_ip_info(ethNetif, &ipInfo);
         apply_portmap_tab();
+        // No DHCP to supply DNS — set it explicitly
+        esp_netif_dns_info_t static_dns = {};
+        const char *dns_src = (ap_dns && ap_dns[0]) ? ap_dns : DEFAULT_DNS;
+        static_dns.ip.u_addr.ip4.addr = esp_ip4addr_aton(dns_src);
+        static_dns.ip.type = ESP_IPADDR_TYPE_V4;
+        esp_netif_set_dns_info(ethNetif, ESP_NETIF_DNS_MAIN, &static_dns);
+        ESP_LOGI(TAG, "Static IP: DNS set to %s", dns_src);
     }
 
     // Register ETH events
@@ -919,6 +944,13 @@ void wifi_init(const uint8_t* mac, const char* ssid, const char* ent_username, c
         esp_netif_dhcpc_stop(wifiSTA); // Don't run a DHCP client
         esp_netif_set_ip_info(wifiSTA, &ipInfo_sta);
         apply_portmap_tab();
+        // No DHCP to supply DNS — set it explicitly
+        esp_netif_dns_info_t static_dns = {};
+        const char *dns_src = (ap_dns && ap_dns[0]) ? ap_dns : DEFAULT_DNS;
+        static_dns.ip.u_addr.ip4.addr = esp_ip4addr_aton(dns_src);
+        static_dns.ip.type = ESP_IPADDR_TYPE_V4;
+        esp_netif_set_dns_info(wifiSTA, ESP_NETIF_DNS_MAIN, &static_dns);
+        ESP_LOGI(TAG, "Static IP: DNS set to %s", dns_src);
     }
 
     my_ap_ip = esp_ip4addr_aton(ap_ip);
@@ -1227,6 +1259,15 @@ void app_main(void)
     }
     if (sta_ttl_override > 0) {
         ESP_LOGI(TAG, "TTL override enabled: %d", sta_ttl_override);
+    }
+
+    // Load reconnect watchdog timeout from NVS (default 0 = disabled)
+    int wd_setting = 0;
+    if (get_config_param_int("wd_s", &wd_setting) == ESP_OK && wd_setting >= 0 && wd_setting <= 65535) {
+        reconnect_watchdog_s = (uint16_t)wd_setting;
+    }
+    if (reconnect_watchdog_s > 0) {
+        ESP_LOGI(TAG, "Reconnect watchdog: %d s", reconnect_watchdog_s);
     }
 
     // Load AP disabled setting from NVS (default 0 = enabled)
