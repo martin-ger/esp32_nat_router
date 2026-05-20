@@ -75,6 +75,7 @@ static void register_set_led_gpio(void);
 static void register_set_led_lowactive(void);
 static void register_set_led_strip(void);
 static void register_set_ttl(void);
+static void register_set_watchdog(void);
 static void register_client_stats_cmd(void);
 static void register_set_ap_nat(void);
 static void register_set_tx_power(void);
@@ -283,6 +284,7 @@ void register_router(void)
     register_set_led_lowactive();
     register_set_led_strip();
     register_set_ttl();
+    register_set_watchdog();
     register_client_stats_cmd();
 #if !CONFIG_REPEATER_MODE
     register_set_ap_nat();
@@ -1984,6 +1986,49 @@ static void register_set_ttl(void)
         .help = "Set TTL override for upstream STA packets (0 = disabled)",
         .hint = NULL,
         .func = &set_ttl_cmd,
+    };
+    ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
+}
+
+/* 'set_watchdog' command - set reconnect watchdog timeout */
+static int set_watchdog_cmd(int argc, char **argv)
+{
+    if (argc < 2) {
+        printf("Usage: set_watchdog <seconds>\n");
+        printf("  seconds: 0-65535 (0 = disabled, default)\n");
+        printf("\nCurrent setting: %d s", reconnect_watchdog_s);
+        printf(reconnect_watchdog_s == 0 ? " (disabled)\n" : "\n");
+        return 0;
+    }
+
+    char *endptr;
+    long val = strtol(argv[1], &endptr, 10);
+    if (*endptr != '\0' || val < 0 || val > 65535) {
+        printf("Invalid value. Use 0-65535 (0 = disabled).\n");
+        return 1;
+    }
+
+    esp_err_t err = set_config_param_int("wd_s", (int32_t)val);
+    if (err == ESP_OK) {
+        reconnect_watchdog_s = (uint16_t)val;
+        if (val == 0) {
+            printf("Reconnect watchdog disabled.\n");
+        } else {
+            printf("Reconnect watchdog set to %ld s.\n", val);
+        }
+    } else {
+        printf("Failed to save setting\n");
+    }
+    return err;
+}
+
+static void register_set_watchdog(void)
+{
+    const esp_console_cmd_t cmd = {
+        .command = "set_watchdog",
+        .help = "Set reconnect watchdog timeout in seconds (0 = disabled, default)",
+        .hint = NULL,
+        .func = &set_watchdog_cmd,
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }

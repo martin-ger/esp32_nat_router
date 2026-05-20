@@ -79,6 +79,9 @@ uint64_t sta_bytes_received = 0;
 // TTL override for STA upstream (0 = disabled/no change)
 uint8_t sta_ttl_override = 0;
 
+// Reconnect watchdog timeout in seconds (0 = disabled)
+uint16_t reconnect_watchdog_s = 0;
+
 // MSS clamp for AP interface (0 = disabled, otherwise max MSS in bytes)
 uint16_t ap_mss_clamp = 0;
 
@@ -288,6 +291,7 @@ void * led_status_thread(void * p)
     }
 
     int held_ms = 0;
+    uint32_t wd_disconnected_s = 0;
 
     bool strip_active = led_strip_is_active();
 
@@ -332,6 +336,16 @@ void * led_status_thread(void * p)
                     led_strip_set_factory_reset(false);
                 }
                 held_ms = 0;
+            }
+        }
+
+        /* Reconnect watchdog: restart if uplink has been down too long */
+        if (reconnect_watchdog_s > 0 && ssid != NULL && ssid[0] != '\0') {
+            if (ap_connect) {
+                wd_disconnected_s = 0;
+            } else if (++wd_disconnected_s >= reconnect_watchdog_s) {
+                ESP_LOGW(TAG, "Watchdog: no uplink for %"PRIu32" s, restarting", wd_disconnected_s);
+                esp_restart();
             }
         }
     }
@@ -803,6 +817,13 @@ void wifi_init(const uint8_t* mac, const char* ssid, const char* ent_username, c
     }
 #endif
 
+    if (has_static_ip && ap_dns && ap_dns[0]) {
+        esp_netif_dns_info_t sta_dns;
+        sta_dns.ip.u_addr.ip4.addr = esp_ip4addr_aton(ap_dns);
+        sta_dns.ip.type = ESP_IPADDR_TYPE_V4;
+        esp_netif_set_dns_info(wifiSTA, ESP_NETIF_DNS_MAIN, &sta_dns);
+    }
+
     // esp_netif_get_dns_info(ESP_IF_WIFI_AP, ESP_NETIF_DNS_MAIN, &dnsinfo);
     // ESP_LOGI(TAG, "DNS IP:" IPSTR, IP2STR(&dnsinfo.ip.u_addr.ip4));
 
@@ -994,6 +1015,17 @@ void app_main(void)
     }
     if (sta_ttl_override > 0) {
         ESP_LOGI(TAG, "TTL override enabled: %d", sta_ttl_override);
+    }
+
+    // Load reconnect watchdog timeout from NVS (default 0 = disabled)
+    int wd_setting = 0;
+    if (get_config_param_int("wd_s", &wd_setting) == ESP_OK && wd_setting >= 0 && wd_setting <= 65535) {
+        reconnect_watchdog_s = (uint16_t)wd_setting;
+    }
+    ESP_LOGI(TAG, "Reconnect watchdog: %s",
+             reconnect_watchdog_s ? "enabled" : "disabled");
+    if (reconnect_watchdog_s) {
+        ESP_LOGI(TAG, "Watchdog timeout: %d s", reconnect_watchdog_s);
     }
 
     // Load AP disabled setting from NVS (default 0 = enabled)

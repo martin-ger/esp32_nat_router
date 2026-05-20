@@ -218,12 +218,7 @@ static bool bridge_ap_to_sta(struct pbuf *p) {
             uint16_t udp_dport = ((uint16_t)*(eth + 14 + IPH_HL(iphdr) * 4 + 2) << 8) |
                                               *(eth + 14 + IPH_HL(iphdr) * 4 + 3);
             if (udp_dport == 67) {
-                struct pbuf *q = dhcp_mangle_request_egress(p, eth + 6, sta_mac);
-                if (q && q != p) {
-                    pbuf_free(p);
-                    p = q;
-                    eth = (uint8_t *)p->payload;
-                }
+                dhcp_mangle_request_egress(p);
             }
         }
 
