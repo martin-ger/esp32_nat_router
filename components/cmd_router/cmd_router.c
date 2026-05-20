@@ -65,7 +65,7 @@ static void register_set_ap_ip(void);
 static void register_set_ap_hidden(void);
 static void register_set_ap_auth(void);
 static void register_ap(void);
-static void register_set_ap_dns(void);
+static void register_set_dns(void);
 static void register_show(void);
 static void register_set_router_password(void);
 static void register_web_ui(void);
@@ -274,7 +274,7 @@ void register_router(void)
     register_set_sta_static();
     register_set_ap();
     register_set_ap_ip();
-    register_set_ap_dns();
+    register_set_dns();
     register_acl();
     register_bytes();
     register_pcap();
@@ -695,30 +695,30 @@ static void register_set_ap_ip(void)
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }
 
-/** Arguments used by 'set_ap_dns' function */
+/** Arguments used by 'set_dns' function */
 static struct {
     struct arg_str *dns_str;
     struct arg_end *end;
-} set_ap_dns_arg;
+} set_dns_arg;
 
-/* 'set_ap_dns' command */
-static int set_ap_dns(int argc, char **argv)
+/* 'set_dns' command */
+static int set_dns(int argc, char **argv)
 {
     esp_err_t err;
 
-    int nerrors = arg_parse(argc, argv, (void **) &set_ap_dns_arg);
+    int nerrors = arg_parse(argc, argv, (void **) &set_dns_arg);
     if (nerrors != 0) {
-        arg_print_errors(stderr, set_ap_dns_arg.end, argv[0]);
+        arg_print_errors(stderr, set_dns_arg.end, argv[0]);
         return 1;
     }
 
-    preprocess_string((char*)set_ap_dns_arg.dns_str->sval[0]);
+    preprocess_string((char*)set_dns_arg.dns_str->sval[0]);
 
-    err = set_config_param_str("ap_dns", set_ap_dns_arg.dns_str->sval[0]);
+    err = set_config_param_str("ap_dns", set_dns_arg.dns_str->sval[0]);
     if (err == ESP_OK) {
-        ESP_LOGI(TAG, "AP DNS server '%s' stored.", set_ap_dns_arg.dns_str->sval[0]);
-        printf("AP DNS set to: %s\n", set_ap_dns_arg.dns_str->sval[0]);
-        if (strlen(set_ap_dns_arg.dns_str->sval[0]) == 0) {
+        ESP_LOGI(TAG, "DNS server '%s' stored.", set_dns_arg.dns_str->sval[0]);
+        printf("DNS set to: %s\n", set_dns_arg.dns_str->sval[0]);
+        if (strlen(set_dns_arg.dns_str->sval[0]) == 0) {
             printf("DNS will be learned from upstream (default behavior).\n");
         }
         printf("Restart to apply.\n");
@@ -726,22 +726,22 @@ static int set_ap_dns(int argc, char **argv)
 
     // Update global
     free(ap_dns);
-    ap_dns = strdup(set_ap_dns_arg.dns_str->sval[0]);
+    ap_dns = strdup(set_dns_arg.dns_str->sval[0]);
 
     return err;
 }
 
-static void register_set_ap_dns(void)
+static void register_set_dns(void)
 {
-    set_ap_dns_arg.dns_str = arg_str1(NULL, NULL, "<dns>", "DNS server IP (empty string to clear)");
-    set_ap_dns_arg.end = arg_end(1);
+    set_dns_arg.dns_str = arg_str1(NULL, NULL, "<dns>", "DNS server IP (empty string to clear)");
+    set_dns_arg.end = arg_end(1);
 
     const esp_console_cmd_t cmd = {
-        .command = "set_ap_dns",
-        .help = "Set DNS server for AP clients (empty to use upstream)",
+        .command = "set_dns",
+        .help = "Set DNS server (required when STA uses static IP; empty to use upstream)",
         .hint = NULL,
-        .func = &set_ap_dns,
-        .argtable = &set_ap_dns_arg
+        .func = &set_dns,
+        .argtable = &set_dns_arg
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }

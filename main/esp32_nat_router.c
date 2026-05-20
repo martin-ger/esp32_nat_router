@@ -539,6 +539,13 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
                 esp_netif_set_dns_info(wifiAP, ESP_NETIF_DNS_MAIN, &dns);
                 ESP_LOGI(TAG, "set dns to:" IPSTR, IP2STR(&(dns.ip.u_addr.ip4)));
             }
+        } else {
+            /* Override DHCP-assigned DNS on wifiSTA so the router's own
+             * resolver (SNTP, VPN endpoint, syslog) uses the configured DNS. */
+            dns.ip.u_addr.ip4.addr = esp_ip4addr_aton(ap_dns);
+            dns.ip.type = ESP_IPADDR_TYPE_V4;
+            esp_netif_set_dns_info(wifiSTA, ESP_NETIF_DNS_MAIN, &dns);
+            ESP_LOGI(TAG, "override sta dns with configured: %s", ap_dns);
         }
 
         // Initialize byte counter after getting IP (interface is ready)

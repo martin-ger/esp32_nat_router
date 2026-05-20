@@ -280,6 +280,7 @@ set_sta <ssid> <pass> [-u user] [-a identity] [-e 0-3] [-p 0-3] [-c 0|1] [-t 0|1
                                   Set upstream SSID, password, and optional WPA2-Enterprise params
 set_sta_static <ip> <mask> <gw>   Set static IP for the STA interface
 set_sta_static dhcp               Revert to DHCP
+set_dns <ip>                      DNS server (required with static IP; empty = learn from upstream DHCP)
 set_sta_mac <o1> <o2> <o3> <o4> <o5> <o6>   Set STA MAC address
 set_sta_band [auto|2.4|5]         Band preference (ESP32-C5 only)
 ```
