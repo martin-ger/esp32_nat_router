@@ -95,6 +95,9 @@ uint16_t ap_pmtu = 0;
 // AP SSID hidden (0 = visible, 1 = hidden)
 uint8_t ap_ssid_hidden = 0;
 
+// WiFi regulatory country code ("01" = world-safe default)
+char wifi_country_code[3] = "01";
+
 // AP auth mode (0 = WPA2/WPA3, 1 = WPA2 only, 2 = WPA3 only)
 uint8_t ap_authmode = 0;
 
@@ -1319,6 +1322,18 @@ void app_main(void)
     }
 #endif
 
+    // Load WiFi country code from NVS (default "01" = world-safe)
+    char *saved_cc = NULL;
+    if (get_config_param_str("wifi_cc", &saved_cc) == ESP_OK && saved_cc != NULL) {
+        if (strlen(saved_cc) == 2) {
+            wifi_country_code[0] = saved_cc[0];
+            wifi_country_code[1] = saved_cc[1];
+            wifi_country_code[2] = '\0';
+        }
+        free(saved_cc);
+    }
+    ESP_LOGI(TAG, "WiFi country code: %s", wifi_country_code);
+
 #if WIFI_HAS_5GHZ
     // Load STA band preference from NVS (default 0 = auto)
     int sta_band_setting = STA_BAND_AUTO;
@@ -1430,6 +1445,16 @@ void app_main(void)
             ESP_LOGI(TAG, "TX power set to %.1f dBm", actual * 0.25);
         } else {
             ESP_LOGW(TAG, "Failed to set TX power: %s", esp_err_to_name(ret));
+        }
+    }
+
+    // Apply WiFi country code (must be after esp_wifi_init, works after esp_wifi_start too)
+    {
+        esp_err_t ret = esp_wifi_set_country_code(wifi_country_code, true);
+        if (ret == ESP_OK) {
+            ESP_LOGI(TAG, "WiFi country code applied: %s", wifi_country_code);
+        } else {
+            ESP_LOGW(TAG, "Failed to apply WiFi country code %s: %s", wifi_country_code, esp_err_to_name(ret));
         }
     }
 
