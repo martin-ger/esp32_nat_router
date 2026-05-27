@@ -79,6 +79,7 @@ static void register_set_watchdog(void);
 static void register_client_stats_cmd(void);
 static void register_set_ap_nat(void);
 static void register_set_tx_power(void);
+static void register_set_wifi_country(void);
 #if defined(CONFIG_IDF_TARGET_ESP32C6)
 static void register_set_rf_switch(void);
 #endif
@@ -290,6 +291,7 @@ void register_router(void)
     register_set_ap_nat();
 #endif
     register_set_tx_power();
+    register_set_wifi_country();
     register_set_ap_hidden();
     register_set_ap_auth();
     register_ap();
@@ -1389,6 +1391,7 @@ static int show(int argc, char **argv)
         if (esp_wifi_get_max_tx_power(&tx_power) == ESP_OK) {
             printf("TX Power: %.1f dBm\n", tx_power * 0.25);
         }
+        printf("Country Code: %s\n", wifi_country_code);
 
         // Cleanup
         if (static_ip != NULL) free(static_ip);
@@ -2167,6 +2170,59 @@ static void register_set_tx_power(void)
         .help = "Set WiFi TX power in dBm (2-20, 0 = max/default)",
         .hint = NULL,
         .func = &set_tx_power_cmd,
+    };
+    ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
+}
+
+/* 'set_wifi_country' command - set WiFi regulatory country code */
+static int set_wifi_country_cmd(int argc, char **argv)
+{
+    if (argc < 2) {
+        printf("Current country code: %s\n", wifi_country_code);
+        printf("Usage: set_wifi_country <CC>\n");
+        printf("  CC: 2-char ISO 3166 code (e.g. US, DE, GB) or 01 for world-safe\n");
+        printf("  Default: 01 (world-safe, all standard channels allowed)\n");
+        return 0;
+    }
+
+    const char *cc = argv[1];
+    if (strlen(cc) != 2) {
+        printf("Country code must be exactly 2 characters (e.g. US, DE, 01).\n");
+        return 1;
+    }
+
+    char upper[3];
+    upper[0] = toupper((unsigned char)cc[0]);
+    upper[1] = toupper((unsigned char)cc[1]);
+    upper[2] = '\0';
+
+    esp_err_t err = set_config_param_str("wifi_cc", upper);
+    if (err != ESP_OK) {
+        printf("Failed to save country code: %s\n", esp_err_to_name(err));
+        return err;
+    }
+
+    wifi_country_code[0] = upper[0];
+    wifi_country_code[1] = upper[1];
+    wifi_country_code[2] = '\0';
+
+    esp_err_t ret = esp_wifi_set_country_code(wifi_country_code, true);
+    if (ret == ESP_OK) {
+        printf("Country code set to %s (applied immediately, saved for reboot).\n", wifi_country_code);
+    } else {
+        printf("Country code %s saved. Could not apply now: %s\n", wifi_country_code, esp_err_to_name(ret));
+    }
+
+    return 0;
+}
+
+static void register_set_wifi_country(void)
+{
+    const esp_console_cmd_t cmd = {
+        .command = "set_wifi_country",
+        .help = "Set WiFi regulatory country code (2-char ISO 3166, e.g. US, DE; or 01 for world-safe)",
+        .hint = NULL,
+        .func = &set_wifi_country_cmd,
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }

@@ -75,6 +75,9 @@ extern bool ap_disabled;
 // AP NAT mode (1 = NAT enabled (default), 0 = routed/no NAT; persisted in NVS as "ap_nat")
 extern uint8_t ap_nat_enabled;
 
+// WiFi regulatory country code (2-char + NUL, e.g. "US", "DE", "01" = world-safe)
+extern char wifi_country_code[3];
+
 // Dynamically enable or disable the AP interface (persists to NVS)
 void ap_set_enabled(bool enabled);
 
