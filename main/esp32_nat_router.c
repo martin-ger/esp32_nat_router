@@ -573,6 +573,13 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
         // Re-resolve syslog server now that network is up
         syslog_notify_connected();
 
+#if !CONFIG_REPEATER_MODE
+        /* Re-enable NAPT here in case the AP cycled (channel change from
+         * band-aware scan) after the initial ip_napt_enable in app_main. */
+        if (ap_nat_enabled)
+            ip_napt_enable(my_ap_ip, 1);
+#endif
+
         xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);
     }
     else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_AP_START)
@@ -580,6 +587,12 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
         ESP_LOGI(TAG, "AP started");
         // Initialize AP netif hooks now that interface is ready
         init_ap_netif_hooks();
+#if !CONFIG_REPEATER_MODE
+        /* Re-enable NAPT on every AP start: covers the initial start and any
+         * restart caused by the band-aware scan forcing a channel change. */
+        if (ap_nat_enabled && my_ap_ip != 0)
+            ip_napt_enable(my_ap_ip, 1);
+#endif
     }
     else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_AP_STACONNECTED)
     {
