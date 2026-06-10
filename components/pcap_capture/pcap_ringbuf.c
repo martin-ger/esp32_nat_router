@@ -107,6 +107,10 @@ void ringbuf_free(void)
     }
 
     xSemaphoreGive(ringbuf_mutex);
+    vSemaphoreDelete(ringbuf_mutex);
+    ringbuf_mutex = NULL;
+    vSemaphoreDelete(data_ready_sem);
+    data_ready_sem = NULL;
 }
 
 void ringbuf_reset(void)
