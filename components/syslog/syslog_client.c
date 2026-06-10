@@ -335,6 +335,10 @@ static void stop_sender(void)
     }
     free(s_rawbuf); s_rawbuf = NULL;
     free(s_pktbuf); s_pktbuf = NULL;
+    if (s_fmt_mutex) {
+        vSemaphoreDelete(s_fmt_mutex);
+        s_fmt_mutex = NULL;
+    }
 }
 
 /* Resolve DNS and open socket. Call from a normal task context. */
