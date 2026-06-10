@@ -936,13 +936,15 @@ esp_err_t http_404_error_handler(httpd_req_t *req, httpd_err_code_t err)
 }
 
 char* html_escape(const char* src) {
-    //Primitive html attribue escape, should handle most common issues.
+    //HTML escape for both attribute and element-content contexts.
+    //Encodes < > & " ' \ # ; as numeric entities (&#NN;), so attacker-controlled
+    //strings (e.g. scanned SSIDs) cannot inject markup or break out of attributes.
     int len = strlen(src);
     //Every char in the string + a null
     int esc_len = len + 1;
 
     for (int i = 0; i < len; i++) {
-        if (src[i] == '\\' || src[i] == '\'' || src[i] == '\"' || src[i] == '&' || src[i] == '#' || src[i] == ';') {
+        if (src[i] == '\\' || src[i] == '\'' || src[i] == '\"' || src[i] == '&' || src[i] == '#' || src[i] == ';' || src[i] == '<' || src[i] == '>') {
             //Will be replaced with a 5 char sequence
             esc_len += 4;
         }
@@ -956,7 +958,7 @@ char* html_escape(const char* src) {
 
     int j = 0;
     for (int i = 0; i < len; i++) {
-        if (src[i] == '\\' || src[i] == '\'' || src[i] == '\"' || src[i] == '&' || src[i] == '#' || src[i] == ';') {
+        if (src[i] == '\\' || src[i] == '\'' || src[i] == '\"' || src[i] == '&' || src[i] == '#' || src[i] == ';' || src[i] == '<' || src[i] == '>') {
             res[j++] = '&';
             res[j++] = '#';
             res[j++] = '0' + (src[i] / 10);
@@ -3064,12 +3066,24 @@ static void dns_server_task(void *pvParameters)
     ESP_LOGI(TAG, "Captive portal DNS server started");
     uint8_t buf[512];
 
+    /* Bytes appended after the received query to form the A-record answer:
+     * name pointer (2) + type (2) + class (2) + TTL (4) + RDLENGTH (2) + IPv4 (4) */
+    #define DNS_ANSWER_LEN 16
+
     while (1) {
         struct sockaddr_in client;
         socklen_t client_len = sizeof(client);
         int len = recvfrom(sock, buf, sizeof(buf), 0,
                            (struct sockaddr *)&client, &client_len);
         if (len < 12) continue;
+
+        /* Drop oversized queries: the appended answer must fit in buf.
+         * Without this, a >=496-byte packet overflows the stack buffer. */
+        if (len > (int)sizeof(buf) - DNS_ANSWER_LEN) continue;
+
+        /* Only respond to standard queries: QR=0 (query) and exactly one question. */
+        if (buf[2] & 0x80) continue;                  // QR bit set => not a query
+        if (buf[4] != 0x00 || buf[5] != 0x01) continue; // QDCOUNT != 1
 
         // Turn query into response
         buf[2] = 0x81;  // QR=1, AA=1, RD=1
