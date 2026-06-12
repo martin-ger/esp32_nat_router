@@ -98,6 +98,15 @@ bool acl_is_empty(uint8_t acl_no);
 int acl_get_count(uint8_t acl_no);
 
 /**
+ * @brief Recompute the cached rule count from the valid flags
+ *
+ * Rebuilds the lock-free counter read by acl_is_empty()/acl_get_count()
+ * after the rules array has been populated directly (e.g. loaded from NVS).
+ * @param acl_no ACL list index (0-1)
+ */
+void acl_recount(uint8_t acl_no);
+
+/**
  * @brief Clear all rules from an ACL list
  * @param acl_no ACL list index (0-3)
  */
