@@ -104,6 +104,23 @@ int acl_get_count(uint8_t acl_no)
     return acl_rule_count[acl_no];
 }
 
+void acl_recount(uint8_t acl_no)
+{
+    if (acl_no >= MAX_ACL_LISTS) {
+        return;
+    }
+
+    acl_lock();
+    uint8_t count = 0;
+    for (int i = 0; i < MAX_ACL_ENTRIES; i++) {
+        if (acl_lists[acl_no][i].valid) {
+            count++;
+        }
+    }
+    acl_rule_count[acl_no] = count;
+    acl_unlock();
+}
+
 void acl_clear(uint8_t acl_no)
 {
     if (acl_no >= MAX_ACL_LISTS) {

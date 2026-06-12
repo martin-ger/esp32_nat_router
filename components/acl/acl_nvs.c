@@ -89,6 +89,13 @@ esp_err_t load_acl_rules(void) {
     }
     acl_unlock();
 
+    /* Rebuild the lock-free rule counts so acl_is_empty() (the gate in the
+     * netif hot path) sees the rules we just loaded. Done after unlock since
+     * acl_recount() takes the lock itself. */
+    for (int i = 0; i < MAX_ACL_LISTS; i++) {
+        acl_recount(i);
+    }
+
     nvs_close(nvs);
     return ESP_OK;
 }
