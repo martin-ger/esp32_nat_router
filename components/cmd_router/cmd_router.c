@@ -513,7 +513,7 @@ int set_sta(int argc, char **argv)
 
                     err = nvs_commit(nvs);
                     if (err == ESP_OK) {
-                        ESP_LOGI(TAG, "STA settings %s/%s stored.", set_sta_arg.ssid->sval[0], set_sta_arg.password->sval[0]);
+                        ESP_LOGI(TAG, "STA settings stored (ssid=%s).", set_sta_arg.ssid->sval[0]);
                     }
                 }
             }
@@ -763,7 +763,7 @@ int set_ap(int argc, char **argv)
         if (err == ESP_OK) {
             err = nvs_commit(nvs);
             if (err == ESP_OK) {
-                ESP_LOGI(TAG, "AP settings %s/%s stored.", set_ap_args.ssid->sval[0], set_ap_args.password->sval[0]);
+                ESP_LOGI(TAG, "AP settings stored (ssid=%s).", set_ap_args.ssid->sval[0]);
             }
         }
     }

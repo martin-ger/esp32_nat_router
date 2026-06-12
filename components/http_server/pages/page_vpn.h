@@ -82,7 +82,10 @@ else{m.style.color='#ff5252';m.textContent=d.msg||'Import failed';}\
 #define VPN_CHUNK_FORM_CLOSE "\
 <tr><td></td><td><input type='submit' value='Save &amp; Reboot' class='ok-button'/></td></tr>\
 </table>\
-</form>\
+</form>"
+
+/* Page footer - emitted after the import section */
+#define VPN_CHUNK_PAGE_END "\
 <div style='margin-top: 1.5rem; text-align: center;'>\
 <a href='/' style='padding: 0.6rem 1.5rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #fff; border: none; border-radius: 8px; text-decoration: none; font-size: 0.9rem; font-weight: 600;'>Home</a>\
 </div>\

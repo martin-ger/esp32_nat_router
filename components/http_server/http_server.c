@@ -3436,9 +3436,6 @@ static esp_err_t vpn_get_handler(httpd_req_t *req)
 
     httpd_resp_send_chunk(req, "</table></div>", HTTPD_RESP_USE_STRLEN);
 
-    /* Import section (paste a standard WireGuard .conf) */
-    httpd_resp_send_chunk(req, VPN_CHUNK_IMPORT, HTTPD_RESP_USE_STRLEN);
-
     /* Form - streamed field by field to avoid large snprintf */
     httpd_resp_send_chunk(req, VPN_CHUNK_FORM_OPEN, HTTPD_RESP_USE_STRLEN);
 
@@ -3468,18 +3465,21 @@ static esp_err_t vpn_get_handler(httpd_req_t *req)
         "<tr><td>Endpoint</td><td><input type='text' name='vpn_endpoint' value='%s' placeholder='Host or IP'/></td></tr>"
         "<tr><td>Port</td><td><input type='number' name='vpn_port' value='%d' min='1' max='65535'/></td></tr>"
         "<tr><td>Tunnel IP</td><td><input type='text' name='vpn_ip' value='%s' placeholder='e.g. 10.0.0.2'/></td></tr>"
-        "<tr><td>Netmask</td><td><input type='text' name='vpn_mask' value='%s' placeholder='255.255.255.0'/></td></tr>"
-        "<tr><td>Keepalive (sec)</td><td><input type='number' name='vpn_ka' value='%d' min='0' max='65535'/></td></tr>",
+        "<tr><td>Netmask</td><td><input type='text' name='vpn_mask' value='%s' placeholder='255.255.255.0'/></td></tr>",
         vpn_endpoint ? vpn_endpoint : "",
         (int)vpn_port,
         vpn_address ? vpn_address : "",
-        vpn_netmask ? vpn_netmask : "255.255.255.0",
-        (int)vpn_keepalive);
+        vpn_netmask ? vpn_netmask : "255.255.255.0");
     httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
 
     snprintf(row, VPN_BUF_SIZE,
         "<tr><td>DNS</td><td><input type='text' name='vpn_dns' value='%s' placeholder='Optional, e.g. 10.2.0.1'/></td></tr>",
         vpn_dns ? vpn_dns : "");
+    httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
+
+    snprintf(row, VPN_BUF_SIZE,
+        "<tr><td>Keepalive (sec)</td><td><input type='number' name='vpn_ka' value='%d' min='0' max='65535'/></td></tr>",
+        (int)vpn_keepalive);
     httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
 
     snprintf(row, VPN_BUF_SIZE,
@@ -3497,6 +3497,12 @@ static esp_err_t vpn_get_handler(httpd_req_t *req)
     httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
 
     httpd_resp_send_chunk(req, VPN_CHUNK_FORM_CLOSE, HTTPD_RESP_USE_STRLEN);
+
+    /* Import section (paste a standard WireGuard .conf) - after the config fields */
+    httpd_resp_send_chunk(req, VPN_CHUNK_IMPORT, HTTPD_RESP_USE_STRLEN);
+
+    /* Page footer (Home button + close tags) */
+    httpd_resp_send_chunk(req, VPN_CHUNK_PAGE_END, HTTPD_RESP_USE_STRLEN);
 
     /* End chunked response */
     httpd_resp_send_chunk(req, NULL, 0);
