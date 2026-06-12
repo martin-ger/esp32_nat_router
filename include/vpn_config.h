@@ -22,6 +22,7 @@ extern char* vpn_preshared_key;     // Preshared key (optional, base64)
 extern char* vpn_endpoint;          // Peer endpoint host/IP
 extern char* vpn_address;           // Tunnel IP (e.g. "10.0.0.2")
 extern char* vpn_netmask;           // Tunnel netmask (e.g. "255.255.255.0")
+extern char* vpn_dns;               // DNS server handed to AP clients while VPN is enabled (optional)
 extern bool vpn_connected;          // Runtime state: tunnel is up
 extern uint32_t vpn_tunnel_ip;      // Cached VPN tunnel IP (network byte order, 0 if not connected)
 extern int32_t vpn_killswitch;      // Kill switch: block AP client internet when VPN is down (default on)
@@ -37,6 +38,11 @@ void init_sntp_if_needed(void);
 // VPN subnet helpers (for kill switch packet filtering)
 void vpn_set_subnet(uint32_t ip, uint32_t mask);
 bool vpn_in_subnet(uint32_t ip);
+
+// Parse a standard WireGuard .conf file and persist the mapped vpn_* settings
+// to NVS (sets vpn_enabled=1 on success). Returns ESP_ERR_INVALID_ARG if a
+// required field (PrivateKey, PublicKey, Endpoint, Address) is missing.
+esp_err_t vpn_import_conf(const char *text);
 
 #ifdef __cplusplus
 }

@@ -281,6 +281,109 @@ esp_err_t set_config_param_blob(const char* name, const void* data, size_t len)
     return err;
 }
 
+/* Convert a CIDR prefix length (0-32) into a dotted-decimal netmask string. */
+static void prefix_to_netmask(int prefix, char *out, size_t out_len)
+{
+    if (prefix < 0) prefix = 0;
+    if (prefix > 32) prefix = 32;
+    uint32_t mask = prefix ? (0xFFFFFFFFu << (32 - prefix)) : 0;
+    snprintf(out, out_len, "%u.%u.%u.%u",
+             (unsigned)((mask >> 24) & 0xFF), (unsigned)((mask >> 16) & 0xFF),
+             (unsigned)((mask >> 8) & 0xFF),  (unsigned)(mask & 0xFF));
+}
+
+/* Trim leading/trailing ASCII whitespace in place; returns a pointer into s. */
+static char *trim_ws(char *s)
+{
+    while (*s && isspace((unsigned char)*s)) s++;
+    if (*s == '\0') return s;
+    char *end = s + strlen(s) - 1;
+    while (end > s && isspace((unsigned char)*end)) *end-- = '\0';
+    return s;
+}
+
+/* Parse a standard WireGuard .conf file and persist the mapped vpn_* settings.
+ * Maps [Interface]/[Peer] keys onto this router's existing NVS parameters; see
+ * vpn_config.h. Sets vpn_enabled=1 on success. IPv6 addresses are skipped. */
+esp_err_t vpn_import_conf(const char *text)
+{
+    if (text == NULL) return ESP_ERR_INVALID_ARG;
+
+    char *buf = strdup(text);
+    if (!buf) return ESP_ERR_NO_MEM;
+
+    char privkey[128] = "", pubkey[128] = "", psk[128] = "";
+    char endpoint_host[128] = "", address_ip[48] = "", netmask[16] = "", dns[128] = "";
+    int port = 51820, keepalive = 0, route_all = -1;
+    bool have_port = false;
+
+    char *save = NULL;
+    for (char *line = strtok_r(buf, "\n", &save); line; line = strtok_r(NULL, "\n", &save)) {
+        char *p = trim_ws(line);
+        if (*p == '\0' || *p == '#' || *p == ';' || *p == '[') continue;  /* blank/comment/section */
+
+        char *eq = strchr(p, '=');
+        if (!eq) continue;
+        *eq = '\0';
+        char *key = trim_ws(p);
+        char *val = trim_ws(eq + 1);
+        if (*val == '\0') continue;
+
+        if (strcasecmp(key, "PrivateKey") == 0) {
+            strlcpy(privkey, val, sizeof(privkey));
+        } else if (strcasecmp(key, "PublicKey") == 0) {
+            strlcpy(pubkey, val, sizeof(pubkey));
+        } else if (strcasecmp(key, "PresharedKey") == 0) {
+            strlcpy(psk, val, sizeof(psk));
+        } else if (strcasecmp(key, "Address") == 0) {
+            char *comma = strchr(val, ',');           /* first entry only (IPv4) */
+            if (comma) *comma = '\0';
+            char *first = trim_ws(val);
+            char *slash = strchr(first, '/');
+            int prefix = 32;
+            if (slash) { *slash = '\0'; prefix = atoi(slash + 1); }
+            strlcpy(address_ip, trim_ws(first), sizeof(address_ip));
+            prefix_to_netmask(prefix, netmask, sizeof(netmask));
+        } else if (strcasecmp(key, "DNS") == 0) {
+            char *comma = strchr(val, ',');           /* first DNS only */
+            if (comma) *comma = '\0';
+            strlcpy(dns, trim_ws(val), sizeof(dns));
+        } else if (strcasecmp(key, "Endpoint") == 0) {
+            char *colon = strrchr(val, ':');          /* host:port */
+            if (colon) { *colon = '\0'; port = atoi(colon + 1); have_port = true; }
+            strlcpy(endpoint_host, trim_ws(val), sizeof(endpoint_host));
+        } else if (strcasecmp(key, "PersistentKeepalive") == 0) {
+            keepalive = atoi(val);
+        } else if (strcasecmp(key, "AllowedIPs") == 0) {
+            route_all = (strstr(val, "0.0.0.0/0") != NULL) ? 1 : 0;
+        }
+    }
+
+    free(buf);
+
+    if (privkey[0] == '\0' || pubkey[0] == '\0' ||
+        endpoint_host[0] == '\0' || address_ip[0] == '\0') {
+        ESP_LOGE(TAG, "WireGuard import: missing required field (need PrivateKey, PublicKey, Endpoint, Address)");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    set_config_param_str("vpn_privkey", privkey);
+    set_config_param_str("vpn_pubkey", pubkey);
+    set_config_param_str("vpn_psk", psk);              /* may be empty */
+    set_config_param_str("vpn_endpoint", endpoint_host);
+    set_config_param_str("vpn_ip", address_ip);
+    set_config_param_str("vpn_mask", netmask[0] ? netmask : "255.255.255.255");
+    if (dns[0]) set_config_param_str("vpn_dns", dns);
+    if (have_port) set_config_param_int("vpn_port", port);
+    set_config_param_int("vpn_ka", keepalive);
+    if (route_all >= 0) set_config_param_int("vpn_rall", route_all);
+    set_config_param_int("vpn_enabled", 1);
+
+    ESP_LOGI(TAG, "WireGuard config imported (endpoint=%s:%d ip=%s dns=%s route_all=%d)",
+             endpoint_host, port, address_ip, dns[0] ? dns : "(none)", route_all);
+    return ESP_OK;
+}
+
 void register_router(void)
 {
     register_show();
@@ -3541,6 +3644,7 @@ static struct {
     struct arg_str *address;
     struct arg_str *psk;
     struct arg_str *mask;
+    struct arg_str *dns;
     struct arg_int *port;
     struct arg_int *keepalive;
     struct arg_int *enable;
@@ -3582,6 +3686,9 @@ static int set_vpn_cmd(int argc, char **argv)
     if (set_vpn_args.mask->count > 0) {
         nvs_set_str(nvs, "vpn_mask", set_vpn_args.mask->sval[0]);
     }
+    if (set_vpn_args.dns->count > 0) {
+        nvs_set_str(nvs, "vpn_dns", set_vpn_args.dns->sval[0]);
+    }
     if (set_vpn_args.port->count > 0) {
         nvs_set_i32(nvs, "vpn_port", set_vpn_args.port->ival[0]);
     }
@@ -3612,6 +3719,7 @@ static void register_set_vpn(void)
     set_vpn_args.address   = arg_str0(NULL, NULL, "<address>", "Tunnel IP (e.g. 10.0.0.2)");
     set_vpn_args.psk       = arg_str0("k", "psk", "<preshared_key>", "Preshared key (base64)");
     set_vpn_args.mask      = arg_str0("m", "mask", "<netmask>", "Tunnel netmask (default 255.255.255.0)");
+    set_vpn_args.dns       = arg_str0("d", "dns", "<dns_ip>", "DNS server for AP clients while VPN is up");
     set_vpn_args.port      = arg_int0("p", "port", "<port>", "Peer UDP port (default 51820)");
     set_vpn_args.keepalive = arg_int0("a", "keepalive", "<seconds>", "Persistent keepalive (0=disabled)");
     set_vpn_args.enable    = arg_int0("e", "enable", "<0|1>", "Enable/disable VPN");
