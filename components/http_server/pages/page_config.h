@@ -59,7 +59,7 @@ setTimeout(\"location.href = '/'\", 10000);\
 }\
 </script>"
 
-/* AP Settings section - uses %s for: ap_ssid, ap_ip, ap_dns, ap_mac, ap_en_checked, open_checked, hidden_checked */
+/* AP Settings section - uses %s for: ap_ssid, ap_ip, ap_hostname, ap_dns, ap_mac, ap_en_checked, open_checked, hidden_checked */
 /* ETH_UPLINK builds add an extra %d for ap_channel */
 #if CONFIG_ETH_UPLINK
 #define CONFIG_CHUNK_AP_CHANNEL_ROW \
@@ -74,6 +74,7 @@ setTimeout(\"location.href = '/'\", 10000);\
 <tr><td>SSID</td><td><input type='text' name='ap_ssid' value='%s' placeholder='Network name'/></td></tr>\
 <tr><td>Password</td><td><input type='password' id='ap_pw' name='ap_password' placeholder='unchanged' oninput=\"document.getElementById('ap_op').checked=false;\"/></td></tr>\
 <tr><td>AP IP Address</td><td><input type='text' name='ap_ip_addr' value='%s' placeholder='192.168.4.1'/></td></tr>\
+<tr><td>Hostname</td><td><input type='text' name='ap_hostname' value='%s' placeholder='esp32-nat-router' maxlength='32' pattern='[A-Za-z0-9-]*'/></td></tr>\
 <tr><td>DNS Server</td><td><input type='text' name='ap_dns' value='%s' placeholder='empty = use upstream DNS'/></td></tr>\
 <tr><td>MAC Address</td><td><input type='text' name='ap_mac' value='%s' placeholder='AA:BB:CC:DD:EE:FF'/></td></tr>\
 " CONFIG_CHUNK_AP_CHANNEL_ROW "\

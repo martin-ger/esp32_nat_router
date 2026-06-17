@@ -914,7 +914,7 @@ static struct {
     struct arg_end *end;
 } set_hostname_arg;
 
-static int set_hostname_cmd(int argc, char **argv)
+int set_hostname(int argc, char **argv)
 {
     int nerrors = arg_parse(argc, argv, (void **) &set_hostname_arg);
     if (nerrors != 0) {
@@ -969,7 +969,7 @@ static void register_set_hostname(void)
         .command = "set_hostname",
         .help = "Set DHCP client hostname for upstream network (empty to use default)",
         .hint = NULL,
-        .func = &set_hostname_cmd,
+        .func = &set_hostname,
         .argtable = &set_hostname_arg
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );

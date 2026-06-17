@@ -79,6 +79,7 @@ int set_sta_static(int argc, char **argv);
 int set_ap(int argc, char **argv);
 int set_ap_mac(int argc, char **argv);
 int set_ap_ip(int argc, char **argv);
+int set_hostname(int argc, char **argv);
 
 // AP disable flag (persisted in NVS as "ap_disabled")
 extern bool ap_disabled;

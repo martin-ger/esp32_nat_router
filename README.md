@@ -99,6 +99,7 @@ Full documentation is available in the [Wiki](https://github.com/martin-ger/esp3
 | [MQTT Home Assistant](https://github.com/martin-ger/esp32_nat_router/wiki/MQTT-Home-Assistant) | MQTT telemetry with HA auto-discovery |
 | [MCP Bridge](https://github.com/martin-ger/esp32_nat_router/wiki/MCP-Bridge) | AI assistant integration via Model Context Protocol |
 | [CLI Reference](https://github.com/martin-ger/esp32_nat_router/wiki/CLI-Reference) | Full command listing for the serial/remote console |
+| [NVS Storage](https://github.com/martin-ger/esp32_nat_router/wiki/NVS-Storage) | Reference of all persisted configuration keys |
 | [Hardware](https://github.com/martin-ger/esp32_nat_router/wiki/Hardware) | LED status, OLED display, antenna switch, factory reset |
 | [WT32-ETH01](https://github.com/martin-ger/esp32_nat_router/wiki/WT32-ETH01) | Ethernet uplink variant (LAN8720 PHY) |
 | [Installation](https://github.com/martin-ger/esp32_nat_router/wiki/Installation) | Flashing pre-built binaries |
