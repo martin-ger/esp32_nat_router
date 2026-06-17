@@ -178,6 +178,18 @@ static bool check_csrf(httpd_req_t *req)
     if (httpd_req_get_hdr_value_str(req, "Origin", origin, sizeof(origin)) != ESP_OK) {
         return true;  /* No Origin — non-browser or same-origin fetch, allow */
     }
+    /* Same-origin check: the Origin host[:port] must equal the Host header the
+     * browser used to reach us. This covers access by mDNS hostname
+     * (e.g. http://esp32.local) or a non-default port, which the IP checks below
+     * would miss. A cross-site attacker's Origin won't match our Host, so it's
+     * still rejected. */
+    char host[64];
+    if (httpd_req_get_hdr_value_str(req, "Host", host, sizeof(host)) == ESP_OK) {
+        char expected_host[72];
+        snprintf(expected_host, sizeof(expected_host), "http://%s", host);
+        if (strcmp(origin, expected_host) == 0) return true;
+    }
+
     char expected[32];
     ip4_addr_t addr;
 
@@ -242,8 +254,11 @@ static esp_err_t create_session(httpd_req_t *req)
     session_expiry_time = esp_timer_get_time() + SESSION_TIMEOUT_US;
 
     // Set cookie in response (using static buffer because httpd stores pointer)
+    /* Max-Age makes this a persistent cookie (matching SESSION_TIMEOUT_US) so it
+     * survives page reloads and the iOS captive-portal browser, which discards
+     * session-only cookies aggressively. */
     snprintf(session_cookie_header, sizeof(session_cookie_header),
-             "session=%s; Path=/; SameSite=Strict", current_session_token);
+             "session=%s; Path=/; Max-Age=1800; SameSite=Strict", current_session_token);
     httpd_resp_set_hdr(req, "Set-Cookie", session_cookie_header);
 
     ESP_LOGI(TAG, "Session created, expires in 30 minutes");
@@ -999,11 +1014,34 @@ static esp_err_t index_get_handler(httpd_req_t *req)
     bool authenticated = false;
     bool password_protection_enabled = is_web_password_set();
 
-    /* Get query string if any */
-    buf_len = httpd_req_get_url_query_len(req) + 1;
-    if (buf_len > 1) {
-        buf = malloc(buf_len);
-        if (buf != NULL && httpd_req_get_url_query_str(req, buf, buf_len) == ESP_OK) {
+    /* The login/password forms POST their fields (keeps the password out of the
+     * URL); nav links and logout use GET query params. Both arrive as
+     * key=value&key=value, so httpd_query_key_value() parses either. */
+    if (req->method == HTTP_POST) {
+        if (req->content_len > 0 && req->content_len < 1024) {
+            buf = malloc(req->content_len + 1);
+            if (buf != NULL) {
+                int recv_len = httpd_req_recv(req, buf, req->content_len);
+                if (recv_len > 0) {
+                    buf[recv_len] = '\0';
+                } else {
+                    free(buf);
+                    buf = NULL;
+                }
+            }
+        }
+    } else {
+        buf_len = httpd_req_get_url_query_len(req) + 1;
+        if (buf_len > 1) {
+            buf = malloc(buf_len);
+            if (buf != NULL && httpd_req_get_url_query_str(req, buf, buf_len) != ESP_OK) {
+                free(buf);
+                buf = NULL;
+            }
+        }
+    }
+
+    if (buf != NULL) {
 
             /* Handle logout */
             if (httpd_query_key_value(buf, "logout", param, sizeof(param)) == ESP_OK) {
@@ -1069,9 +1107,8 @@ static esp_err_t index_get_handler(httpd_req_t *req)
             else if (httpd_query_key_value(buf, "auth_required", param, sizeof(param)) == ESP_OK) {
                 strcpy(login_message, "Please log in to access that page.");
             }
-        }
-        if (buf) free(buf);
     }
+    if (buf) free(buf);
 
     /* Check current authentication status */
     authenticated = is_authenticated(req);
@@ -1200,8 +1237,12 @@ static esp_err_t index_get_handler(httpd_req_t *req)
         httpd_resp_send_chunk(req,
             "<div style='margin-top: 1.5rem; padding: 1.5rem; background: rgba(28, 8, 44, 0.6); border: 1px solid rgba(167, 139, 250, 0.2); border-radius: 12px;'>"
             "<h2 style='margin-top: 0; margin-bottom: 1rem; color: #a78bfa; font-size: 1.1rem;'>🔒 Login Required</h2>"
-            "<form action='' method='GET'>"
-            "<input type='password' name='login_password' placeholder='Enter password' style='width: 100%; padding: 0.75rem; margin-bottom: 0.75rem; background: rgba(255,255,255,0.1); border: 1px solid rgba(167,139,250,0.3); border-radius: 8px; color: #cacad8; font-size: 1rem;'/>"
+            "<form action='/' method='POST'>"
+            /* Hidden username field gives iOS/Safari and password managers an account
+             * to associate the saved password with, so AutoFill works on this
+             * password-only login instead of demanding a username. */
+            "<input type='text' name='username' value='admin' autocomplete='username' style='display:none' aria-hidden='true' tabindex='-1'/>"
+            "<input type='password' name='login_password' placeholder='Enter password' autocomplete='current-password' style='width: 100%; padding: 0.75rem; margin-bottom: 0.75rem; background: rgba(255,255,255,0.1); border: 1px solid rgba(167,139,250,0.3); border-radius: 8px; color: #cacad8; font-size: 1rem;'/>"
             "<input type='submit' value='Login' style='width: 100%; padding: 0.75rem; background: linear-gradient(135deg, #7c3aed 0%, #764ba2 100%); color: #fff; border: none; border-radius: 8px; font-size: 1rem; font-weight: 600; cursor: pointer;'/>"
             "</form>"
             "</div>", HTTPD_RESP_USE_STRLEN);
@@ -1216,9 +1257,11 @@ static esp_err_t index_get_handler(httpd_req_t *req)
         httpd_resp_send_chunk(req, form_title, HTTPD_RESP_USE_STRLEN);
         httpd_resp_send_chunk(req,
             "</h2>"
-            "<form action='' method='GET'>"
-            "<input type='password' name='new_password' placeholder='New password (empty to disable)' style='width: 100%; padding: 0.75rem; margin-bottom: 0.75rem; background: rgba(255,255,255,0.1); border: 1px solid rgba(167,139,250,0.3); border-radius: 8px; color: #cacad8; font-size: 1rem;'/>"
-            "<input type='password' name='confirm_password' placeholder='Confirm password' style='width: 100%; padding: 0.75rem; margin-bottom: 0.75rem; background: rgba(255,255,255,0.1); border: 1px solid rgba(167,139,250,0.3); border-radius: 8px; color: #cacad8; font-size: 1rem;'/>"
+            /* POST keeps the new password out of the URL and makes the Origin-header
+             * CSRF check effective (browsers send Origin on POST but not GET). */
+            "<form action='/' method='POST'>"
+            "<input type='password' name='new_password' placeholder='New password (empty to disable)' autocomplete='new-password' style='width: 100%; padding: 0.75rem; margin-bottom: 0.75rem; background: rgba(255,255,255,0.1); border: 1px solid rgba(167,139,250,0.3); border-radius: 8px; color: #cacad8; font-size: 1rem;'/>"
+            "<input type='password' name='confirm_password' placeholder='Confirm password' autocomplete='new-password' style='width: 100%; padding: 0.75rem; margin-bottom: 0.75rem; background: rgba(255,255,255,0.1); border: 1px solid rgba(167,139,250,0.3); border-radius: 8px; color: #cacad8; font-size: 1rem;'/>"
             "<input type='submit' value='", HTTPD_RESP_USE_STRLEN);
         httpd_resp_send_chunk(req, form_title, HTTPD_RESP_USE_STRLEN);
         httpd_resp_send_chunk(req,
@@ -1248,6 +1291,14 @@ static esp_err_t index_get_handler(httpd_req_t *req)
 static httpd_uri_t indexp = {
     .uri       = "/",
     .method    = HTTP_GET,
+    .handler   = index_get_handler,
+};
+
+/* Same handler also serves POST so the login form can submit its password in the
+ * request body instead of the URL query string. */
+static httpd_uri_t indexp_post = {
+    .uri       = "/",
+    .method    = HTTP_POST,
     .handler   = index_get_handler,
 };
 
@@ -1327,6 +1378,16 @@ static esp_err_t config_get_handler(httpd_req_t *req)
                     argv[1] = param1;
                     argv[2] = param2;
                     set_ap(argc, argv);
+
+                    // Check for optional hostname (mDNS / DHCP name).
+                    // set_hostname validates (RFC 952) and updates the global.
+                    if (httpd_query_key_value(buf, "ap_hostname", param4, sizeof(param4)) == ESP_OK) {
+                        ESP_LOGI(TAG, "Found URL query parameter => ap_hostname=%s", param4);
+                        char* host_argv[2];
+                        host_argv[0] = "set_hostname";
+                        host_argv[1] = param4;
+                        set_hostname(2, host_argv);
+                    }
 
                     // Check for optional AP MAC address
                     if (httpd_query_key_value(buf, "ap_mac", param4, sizeof(param4)) == ESP_OK && strlen(param4) > 0) {
@@ -1723,6 +1784,7 @@ static esp_err_t config_get_handler(httpd_req_t *req)
     const char* auth_sel2 = (ap_authmode == 2) ? "selected" : "";
     snprintf(section, sizeof(section), CONFIG_CHUNK_AP,
         safe_ap_ssid, ap_mac_str,
+        hostname ? hostname : "",
         auth_sel0, auth_sel1, auth_sel2,
         ap_en_checked, ap_open_checked, ap_hidden_checked);
     httpd_resp_send_chunk(req, section, HTTPD_RESP_USE_STRLEN);
@@ -2999,7 +3061,7 @@ httpd_handle_t start_webserver(uint16_t port)
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = port;
     config.stack_size = 16384;  // Large stack needed for mappings page with 3x 2KB HTML buffers
-    config.max_uri_handlers = 13;
+    config.max_uri_handlers = 14;
     config.max_uri_len = 1024;
     esp_timer_create(&restart_timer_args, &restart_timer);
 
@@ -3009,6 +3071,7 @@ httpd_handle_t start_webserver(uint16_t port)
         // Set URI handlers
         ESP_LOGI(TAG, "Registering URI handlers");
         httpd_register_uri_handler(server, &indexp);
+        httpd_register_uri_handler(server, &indexp_post);
         httpd_register_uri_handler(server, &configp);
         httpd_register_uri_handler(server, &firewallp);
         httpd_register_uri_handler(server, &scanp);

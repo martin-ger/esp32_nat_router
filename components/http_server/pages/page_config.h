@@ -59,7 +59,7 @@ setTimeout(\"location.href = '/'\", 10000);\
 }\
 </script>"
 
-/* AP Settings section - uses %s for: ap_ssid, ap_mac, auth_sel0/1/2, ap_en_checked, open_checked, hidden_checked */
+/* AP Settings section - uses %s for: ap_ssid, ap_mac, ap_hostname, auth_sel0/1/2, ap_en_checked, open_checked, hidden_checked */
 #define CONFIG_CHUNK_AP "\
 <h2>Access Point Settings</h2>\
 <form action='' method='GET'>\
@@ -67,6 +67,7 @@ setTimeout(\"location.href = '/'\", 10000);\
 <tr><td>SSID</td><td><input type='text' name='ap_ssid' value='%s' placeholder='Network name'/></td></tr>\
 <tr><td>Password</td><td><input type='text' id='ap_pw' name='ap_password' placeholder='unchanged' oninput=\"document.getElementById('ap_op').checked=false;\"/></td></tr>\
 <tr><td>MAC Address</td><td><input type='text' name='ap_mac' value='%s' placeholder='AA:BB:CC:DD:EE:FF'/></td></tr>\
+<tr><td>Hostname</td><td><input type='text' name='ap_hostname' value='%s' placeholder='esp32-nat-router' maxlength='32' pattern='[A-Za-z0-9-]*'/></td></tr>\
 <tr><td>Security</td><td><select name='ap_auth'><option value='0' %s>WPA2/WPA3</option><option value='1' %s>WPA2 only</option><option value='2' %s>WPA3 only</option></select></td></tr>\
 <tr><td>Enabled</td><td><input type='checkbox' name='ap_enabled' value='1' %s> <span style='color:#888;font-size:0.85rem;'>AP interface active</span></td></tr>\
 <tr><td>Options</td><td><input type='checkbox' id='ap_op' name='ap_open' value='1' %s onchange=\"if(this.checked)document.getElementById('ap_pw').value='';\"> <span style='color:#888;font-size:0.85rem;'>Open (no password)</span> &nbsp; <input type='checkbox' name='ap_hidden' value='1' %s> <span style='color:#888;font-size:0.85rem;'>Hidden SSID</span></td></tr>\
