@@ -105,6 +105,24 @@ esp_err_t vpn_connect(void)
     return ESP_OK;
 }
 
+void vpn_reassert_default_route(void)
+{
+    /* ESP-IDF's esp_netif owns lwIP's netif_default and recomputes it from
+     * route_prio on every uplink GOT_IP (initial association AND periodic DHCP
+     * renewals) and on interface up/down events. esp_wireguard_set_default()
+     * uses raw netif_set_default(), which esp_netif does not track, so the WG
+     * tunnel silently loses the default route to the uplink and route-all
+     * traffic leaks straight out the uplink. Re-assert the tunnel as default
+     * whenever one of those events fires while the VPN is up in route-all mode.
+     *
+     * Safe to call from event-handler context: WireGuard's own encrypted
+     * packets are sent via udp_sendto_if(underlying_netif) and never use the
+     * default route, so this only redirects the forwarded inner traffic. */
+    if (vpn_enabled && vpn_route_all && wg_initialized && wg_ctx.netif && vpn_connected) {
+        esp_wireguard_set_default(&wg_ctx);
+    }
+}
+
 void vpn_disconnect(void)
 {
     // Set vpn_connected false FIRST to prevent race with vpn_is_connected()

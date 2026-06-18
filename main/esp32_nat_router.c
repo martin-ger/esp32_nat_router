@@ -446,6 +446,12 @@ static void eth_event_handler(void* arg, esp_event_base_t event_base,
             ESP_LOGI(TAG, "set dns to:" IPSTR, IP2STR(&(dns.ip.u_addr.ip4)));
         }
 
+        // esp_netif just (re)set netif_default to the uplink on this GOT_IP. If
+        // the VPN is up in route-all mode, restore the tunnel as the default
+        // route so forwarded traffic keeps going through WireGuard across DHCP
+        // lease renewals and uplink reconnects.
+        vpn_reassert_default_route();
+
         init_byte_counter();
 
         init_sntp_if_needed();
@@ -695,6 +701,12 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
             esp_netif_set_dns_info(wifiAP, ESP_NETIF_DNS_MAIN, &dns);
             ESP_LOGI(TAG, "set dns to:" IPSTR, IP2STR(&(dns.ip.u_addr.ip4)));
         }
+
+        // esp_netif just (re)set netif_default to the uplink on this GOT_IP. If
+        // the VPN is up in route-all mode, restore the tunnel as the default
+        // route so forwarded traffic keeps going through WireGuard across DHCP
+        // lease renewals and uplink reconnects.
+        vpn_reassert_default_route();
 
         // Initialize byte counter after getting IP (interface is ready)
         init_byte_counter();
