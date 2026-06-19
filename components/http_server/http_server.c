@@ -48,6 +48,52 @@
 
 static const char *TAG = "HTTPServer";
 
+/* Stream one HTTP chunk and abort the handler immediately if the send fails.
+ *
+ * httpd_resp_send_chunk() blocks up to config.send_wait_timeout when the client
+ * is gone or its TCP window is full.  The page handlers issue dozens of chunks
+ * in sequence; without checking the result, a dead client makes the handler
+ * spin through every remaining chunk (one timeout each), wedging the single
+ * httpd worker and pinning that connection's buffers/socket.
+ *
+ * Returning ESP_FAIL on the first failed chunk lets httpd tear the connection
+ * down at once.  Handlers that stream with SEND_CHUNK must NOT hold a heap
+ * allocation across the chunk loop: a bail-out returns immediately and would
+ * leak it.  Render from a stack buffer, or free the heap copy after the
+ * snprintf into the stack buffer but before the SEND_CHUNK. */
+#define SEND_CHUNK(req, ...) \
+    do { \
+        if (httpd_resp_send_chunk((req), __VA_ARGS__) != ESP_OK) { \
+            return ESP_FAIL; \
+        } \
+    } while (0)
+
+/* Enable TCP keepalive on every accepted connection.  A client that just walks
+ * out of WiFi range never sends a TCP FIN, so its socket sits in ESTABLISHED
+ * forever, pinning a netconn + PCB + pbufs (the few-KB-per-disconnect leak)
+ * until the table fills.  Keepalive lets lwIP detect the dead peer and reclaim
+ * the socket automatically.  ~30 s idle, then 3 probes 5 s apart. */
+static esp_err_t http_open_fn(httpd_handle_t hd, int sockfd)
+{
+    int ka = 1, ka_idle = 30, ka_intvl = 5, ka_cnt = 3;
+    setsockopt(sockfd, SOL_SOCKET, SO_KEEPALIVE, &ka, sizeof(ka));
+    setsockopt(sockfd, IPPROTO_TCP, TCP_KEEPIDLE, &ka_idle, sizeof(ka_idle));
+    setsockopt(sockfd, IPPROTO_TCP, TCP_KEEPINTVL, &ka_intvl, sizeof(ka_intvl));
+    setsockopt(sockfd, IPPROTO_TCP, TCP_KEEPCNT, &ka_cnt, sizeof(ka_cnt));
+    return ESP_OK;
+}
+
+/* Escape src into a fixed stack buffer (truncating if needed) and free the
+ * heap copy from html_escape().  Page handlers use this so they never hold an
+ * html_escape() allocation across a chunked SEND_CHUNK render. */
+char* html_escape(const char* src);
+static void html_escape_to(char *dst, size_t dst_len, const char *src)
+{
+    char *e = html_escape(src ? src : "");
+    strlcpy(dst, e ? e : "", dst_len);
+    free(e);
+}
+
 /* Get client IP address string from HTTP request */
 static const char *get_client_ip(httpd_req_t *req, char *buf, size_t buf_len)
 {
@@ -1117,34 +1163,35 @@ static esp_err_t index_get_handler(httpd_req_t *req)
     char row[512];
 
     /* --- Begin chunked response --- */
-    httpd_resp_send_chunk(req, INDEX_CHUNK_HEAD, HTTPD_RESP_USE_STRLEN);
+    SEND_CHUNK(req, INDEX_CHUNK_HEAD, HTTPD_RESP_USE_STRLEN);
 
     /* Stream logout button if authenticated */
     if (authenticated) {
-        httpd_resp_send_chunk(req,
+        SEND_CHUNK(req,
             "<div style='text-align: right; margin-bottom: 0.5rem;'>"
             "<a href='/?logout=1' style='padding: 0.4rem 1rem; background: rgba(255,82,82,0.15); color: #ff5252; border: 1px solid #ff5252; border-radius: 6px; text-decoration: none; font-size: 0.85rem; font-weight: 500;'>Logout</a>"
             "</div>", HTTPD_RESP_USE_STRLEN);
     }
 
     /* Open status table */
-    httpd_resp_send_chunk(req, INDEX_CHUNK_STATUS_OPEN, HTTPD_RESP_USE_STRLEN);
+    SEND_CHUNK(req, INDEX_CHUNK_STATUS_OPEN, HTTPD_RESP_USE_STRLEN);
 
     /* Stream AP status rows */
     if (ap_disabled) {
-        httpd_resp_send_chunk(req,
+        SEND_CHUNK(req,
             "<tr><td>AP Interface:</td><td><strong style='color:#ff5252;'>Disabled</strong></td></tr>",
             HTTPD_RESP_USE_STRLEN);
     } else {
         char* safe_ap_ssid = html_escape(ap_ssid);
         if (safe_ap_ssid == NULL) safe_ap_ssid = strdup("(unknown)");
         snprintf(row, sizeof(row), "<tr><td>SSID:</td><td><strong>%s</strong></td></tr>", safe_ap_ssid);
-        httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
+        /* Free before SEND_CHUNK: a bail-out on a dead client returns immediately. */
         free(safe_ap_ssid);
+        SEND_CHUNK(req, row, HTTPD_RESP_USE_STRLEN);
 
         resync_connect_count();
         snprintf(row, sizeof(row), "<tr><td>AP Clients:</td><td>%d</td></tr>", connect_count);
-        httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
+        SEND_CHUNK(req, row, HTTPD_RESP_USE_STRLEN);
     }
 
     /* Stream Uplink row */
@@ -1152,12 +1199,12 @@ static esp_err_t index_get_handler(httpd_req_t *req)
         wifi_ap_record_t ap_info;
         if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
             snprintf(row, sizeof(row), "<tr><td>Uplink:</td><td><strong>Connected (%d dBm)</strong></td></tr>", ap_info.rssi);
-            httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
+            SEND_CHUNK(req, row, HTTPD_RESP_USE_STRLEN);
         } else {
-            httpd_resp_send_chunk(req, "<tr><td>Uplink:</td><td><strong>Connected</strong></td></tr>", HTTPD_RESP_USE_STRLEN);
+            SEND_CHUNK(req, "<tr><td>Uplink:</td><td><strong>Connected</strong></td></tr>", HTTPD_RESP_USE_STRLEN);
         }
     } else {
-        httpd_resp_send_chunk(req, "<tr><td>Uplink:</td><td><strong>Disconnected</strong></td></tr>", HTTPD_RESP_USE_STRLEN);
+        SEND_CHUNK(req, "<tr><td>Uplink:</td><td><strong>Disconnected</strong></td></tr>", HTTPD_RESP_USE_STRLEN);
     }
 
     /* Stream uplink IP row */
@@ -1168,7 +1215,7 @@ static esp_err_t index_get_handler(httpd_req_t *req)
     } else {
         snprintf(row, sizeof(row), "<tr><td>Mgmt IP:</td><td>N/A</td></tr>");
     }
-    httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
+    SEND_CHUNK(req, row, HTTPD_RESP_USE_STRLEN);
 
     /* Stream Bytes row (sent/received combined) */
     uint64_t bytes_sent = get_sta_bytes_sent();
@@ -1177,7 +1224,7 @@ static esp_err_t index_get_handler(httpd_req_t *req)
     format_bytes_human(bytes_sent, sent_buf, sizeof(sent_buf));
     format_bytes_human(bytes_received, recv_buf, sizeof(recv_buf));
     snprintf(row, sizeof(row), "<tr><td>Bytes:</td><td>%s sent / %s received</td></tr>", sent_buf, recv_buf);
-    httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
+    SEND_CHUNK(req, row, HTTPD_RESP_USE_STRLEN);
 
     /* Stream Monitoring row */
     pcap_capture_mode_t mode = pcap_get_mode();
@@ -1191,7 +1238,7 @@ static esp_err_t index_get_handler(httpd_req_t *req)
     } else {
         snprintf(row, sizeof(row), "<tr><td>Monitoring:</td><td><span style='color: #888;'>Off</span></td></tr>");
     }
-    httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
+    SEND_CHUNK(req, row, HTTPD_RESP_USE_STRLEN);
 
     /* Stream Uptime row */
     char uptime_str[32];
@@ -1199,13 +1246,13 @@ static esp_err_t index_get_handler(httpd_req_t *req)
     char boot_time_str[32];
     format_boot_time(boot_time_str, sizeof(boot_time_str));
     snprintf(row, sizeof(row), "<tr><td>Uptime:</td><td>%s (since %s)</td></tr>", uptime_str, boot_time_str);
-    httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
+    SEND_CHUNK(req, row, HTTPD_RESP_USE_STRLEN);
 
     /* Close status table */
-    httpd_resp_send_chunk(req, INDEX_CHUNK_STATUS_CLOSE, HTTPD_RESP_USE_STRLEN);
+    SEND_CHUNK(req, INDEX_CHUNK_STATUS_CLOSE, HTTPD_RESP_USE_STRLEN);
 
     /* Navigation buttons */
-    httpd_resp_send_chunk(req, INDEX_CHUNK_BUTTONS, HTTPD_RESP_USE_STRLEN);
+    SEND_CHUNK(req, INDEX_CHUNK_BUTTONS, HTTPD_RESP_USE_STRLEN);
 
     /* --- Auth UI Section (streamed directly) --- */
 
@@ -1220,12 +1267,12 @@ static esp_err_t index_get_handler(httpd_req_t *req)
         snprintf(row, sizeof(row),
                  "<div style='margin-top: 1.5rem; padding: 1rem; %s; border-radius: 8px; font-size: 0.95rem;'>%s</div>",
                  msg_style, login_message);
-        httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
+        SEND_CHUNK(req, row, HTTPD_RESP_USE_STRLEN);
     }
 
     /* Show warning if no password protection */
     if (!password_protection_enabled) {
-        httpd_resp_send_chunk(req,
+        SEND_CHUNK(req,
             "<div style='margin-top: 1.5rem; padding: 1rem; background: #fff3cd; border: 2px solid #ffa726; border-radius: 8px;'>"
             "<strong style='color: #f57c00;'>⚠ No Password Protection</strong>"
             "<p style='margin-top: 0.5rem; color: #666; font-size: 0.9rem;'>Anyone on this network can access router settings. Set a password below.</p>"
@@ -1234,7 +1281,7 @@ static esp_err_t index_get_handler(httpd_req_t *req)
 
     /* Show login form if password is set and not authenticated */
     if (password_protection_enabled && !authenticated) {
-        httpd_resp_send_chunk(req,
+        SEND_CHUNK(req,
             "<div style='margin-top: 1.5rem; padding: 1.5rem; background: rgba(28, 8, 44, 0.6); border: 1px solid rgba(167, 139, 250, 0.2); border-radius: 12px;'>"
             "<h2 style='margin-top: 0; margin-bottom: 1rem; color: #a78bfa; font-size: 1.1rem;'>🔒 Login Required</h2>"
             "<form action='/' method='POST'>"
@@ -1251,11 +1298,11 @@ static esp_err_t index_get_handler(httpd_req_t *req)
     /* Show password management form if authenticated or no password set */
     if (authenticated || !password_protection_enabled) {
         const char* form_title = password_protection_enabled ? "Change Password" : "Set Password";
-        httpd_resp_send_chunk(req,
+        SEND_CHUNK(req,
             "<div style='margin-top: 1.5rem; padding: 1.5rem; background: rgba(28, 8, 44, 0.6); border: 1px solid rgba(167, 139, 250, 0.2); border-radius: 12px;'>"
             "<h2 style='margin-top: 0; margin-bottom: 1rem; color: #a78bfa; font-size: 1.1rem;'>🔑 ", HTTPD_RESP_USE_STRLEN);
-        httpd_resp_send_chunk(req, form_title, HTTPD_RESP_USE_STRLEN);
-        httpd_resp_send_chunk(req,
+        SEND_CHUNK(req, form_title, HTTPD_RESP_USE_STRLEN);
+        SEND_CHUNK(req,
             "</h2>"
             /* POST keeps the new password out of the URL and makes the Origin-header
              * CSRF check effective (browsers send Origin on POST but not GET). */
@@ -1263,8 +1310,8 @@ static esp_err_t index_get_handler(httpd_req_t *req)
             "<input type='password' name='new_password' placeholder='New password (empty to disable)' autocomplete='new-password' style='width: 100%; padding: 0.75rem; margin-bottom: 0.75rem; background: rgba(255,255,255,0.1); border: 1px solid rgba(167,139,250,0.3); border-radius: 8px; color: #cacad8; font-size: 1rem;'/>"
             "<input type='password' name='confirm_password' placeholder='Confirm password' autocomplete='new-password' style='width: 100%; padding: 0.75rem; margin-bottom: 0.75rem; background: rgba(255,255,255,0.1); border: 1px solid rgba(167,139,250,0.3); border-radius: 8px; color: #cacad8; font-size: 1rem;'/>"
             "<input type='submit' value='", HTTPD_RESP_USE_STRLEN);
-        httpd_resp_send_chunk(req, form_title, HTTPD_RESP_USE_STRLEN);
-        httpd_resp_send_chunk(req,
+        SEND_CHUNK(req, form_title, HTTPD_RESP_USE_STRLEN);
+        SEND_CHUNK(req,
             "' style='width: 100%; padding: 0.75rem; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: #fff; border: none; border-radius: 8px; font-size: 1rem; font-weight: 600; cursor: pointer;'/>"
             "<p style='margin-top: 0.75rem; color: #888; font-size: 0.85rem;'>Leave empty to disable password protection.</p>"
             "</form>"
@@ -1279,11 +1326,11 @@ static esp_err_t index_get_handler(httpd_req_t *req)
                  app_desc ? app_desc->version : "unknown",
                  app_desc ? app_desc->date : "",
                  app_desc ? app_desc->time : "");
-        httpd_resp_send_chunk(req, footer, HTTPD_RESP_USE_STRLEN);
+        SEND_CHUNK(req, footer, HTTPD_RESP_USE_STRLEN);
     }
 
     /* End chunked response */
-    httpd_resp_send_chunk(req, NULL, 0);
+    SEND_CHUNK(req, NULL, 0);
 
     return ESP_OK;
 }
@@ -1673,24 +1720,16 @@ static esp_err_t config_get_handler(httpd_req_t *req)
         if (buf) free(buf);
     }
 
-    /* Escape values for HTML */
-    char* safe_ssid = html_escape(prefill_ssid[0] ? prefill_ssid : ssid);
-    char* safe_ent_username = html_escape(ent_username);
-    char* safe_ent_identity = html_escape(ent_identity);
-    char* safe_ap_ssid = html_escape(ap_ssid);
-
-    // Check if any html_escape failed
-    if (safe_ap_ssid == NULL ||
-        safe_ssid == NULL ||
-        safe_ent_username == NULL || safe_ent_identity == NULL) {
-        ESP_LOGE(TAG, "Failed to escape HTML strings");
-        free(safe_ap_ssid);
-        free(safe_ssid);
-        free(safe_ent_username);
-        free(safe_ent_identity);
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
-        return ESP_ERR_NO_MEM;
-    }
+    /* Escape values into stack buffers and release the heap copies immediately.
+     * The chunked render below streams the page header/script/AP chunks before
+     * the STA chunk that uses these values; holding html_escape() allocations
+     * across those SEND_CHUNK calls would leak them on a bail-out to a dead
+     * client.  Copying into stack buffers keeps nothing on the heap. */
+    char safe_ssid[200], safe_ent_username[200], safe_ent_identity[200], safe_ap_ssid[200];
+    html_escape_to(safe_ssid, sizeof(safe_ssid), prefill_ssid[0] ? prefill_ssid : ssid);
+    html_escape_to(safe_ent_username, sizeof(safe_ent_username), ent_username);
+    html_escape_to(safe_ent_identity, sizeof(safe_ent_identity), ent_identity);
+    html_escape_to(safe_ap_ssid, sizeof(safe_ap_ssid), ap_ssid);
 
     // Get MAC addresses as strings
     char ap_mac_str[18] = "";
@@ -1760,23 +1799,25 @@ static esp_err_t config_get_handler(httpd_req_t *req)
     uint32_t pcap_dropped = pcap_get_dropped_count();
     int current_snaplen = pcap_get_snaplen();
 
-    /* Reusable buffer for building sections */
-    char section[2048];
+    /* Reusable buffer for building sections.  Sized for the largest chunk
+     * (STA settings) once the escaped SSID / enterprise identity fields are
+     * fixed-size stack buffers, to satisfy -Wformat-truncation. */
+    char section[2560];
 
     /* --- Begin chunked response --- */
 
     /* Chunk 1: Page header (styles) */
-    httpd_resp_send_chunk(req, CONFIG_CHUNK_HEAD, HTTPD_RESP_USE_STRLEN);
+    SEND_CHUNK(req, CONFIG_CHUNK_HEAD, HTTPD_RESP_USE_STRLEN);
 
     /* Chunk 2: Logout button (if authenticated) */
     if (session_active && password_protection_enabled) {
-        httpd_resp_send_chunk(req,
+        SEND_CHUNK(req,
             "<a href='/?logout=1' style='padding: 0.4rem 1rem; background: rgba(255,82,82,0.15); color: #ff5252; border: 1px solid #ff5252; border-radius: 6px; text-decoration: none; font-size: 0.85rem; font-weight: 500;'>Logout</a>",
             HTTPD_RESP_USE_STRLEN);
     }
 
     /* Chunk 3: JavaScript */
-    httpd_resp_send_chunk(req, CONFIG_CHUNK_SCRIPT, HTTPD_RESP_USE_STRLEN);
+    SEND_CHUNK(req, CONFIG_CHUNK_SCRIPT, HTTPD_RESP_USE_STRLEN);
 
     /* Chunk 4: AP Settings */
     const char* auth_sel0 = (ap_authmode == 0) ? "selected" : "";
@@ -1787,7 +1828,7 @@ static esp_err_t config_get_handler(httpd_req_t *req)
         hostname ? hostname : "",
         auth_sel0, auth_sel1, auth_sel2,
         ap_en_checked, ap_open_checked, ap_hidden_checked);
-    httpd_resp_send_chunk(req, section, HTTPD_RESP_USE_STRLEN);
+    SEND_CHUNK(req, section, HTTPD_RESP_USE_STRLEN);
 
     /* Chunk 5: STA Settings */
     snprintf(section, sizeof(section), CONFIG_CHUNK_STA,
@@ -1804,12 +1845,12 @@ static esp_err_t config_get_handler(httpd_req_t *req)
         ttls_phase2 == 2 ? "selected" : "", ttls_phase2 == 3 ? "selected" : "",
         use_cert_bundle ? "checked" : "", disable_time_check ? "checked" : "",
         sta_mac_str);
-    httpd_resp_send_chunk(req, section, HTTPD_RESP_USE_STRLEN);
+    SEND_CHUNK(req, section, HTTPD_RESP_USE_STRLEN);
 
     /* Chunk 6: Static IP Settings */
     snprintf(section, sizeof(section), CONFIG_CHUNK_STATIC,
         static_ip, subnet_mask, gateway_addr);
-    httpd_resp_send_chunk(req, section, HTTPD_RESP_USE_STRLEN);
+    SEND_CHUNK(req, section, HTTPD_RESP_USE_STRLEN);
 
     /* Chunk 7: Remote Console */
     snprintf(section, sizeof(section), CONFIG_CHUNK_RC,
@@ -1817,7 +1858,7 @@ static esp_err_t config_get_handler(httpd_req_t *req)
         rc_status_color, rc_status_text, rc_kick_section,
         rc_config.port,
         (unsigned long)rc_config.idle_timeout_sec);
-    httpd_resp_send_chunk(req, section, HTTPD_RESP_USE_STRLEN);
+    SEND_CHUNK(req, section, HTTPD_RESP_USE_STRLEN);
 
     /* Chunk 8: PCAP */
     char sta_ip_str[16];
@@ -1831,10 +1872,10 @@ static esp_err_t config_get_handler(httpd_req_t *req)
         pcap_client_color, pcap_client_text,
         (unsigned long)pcap_captured, (unsigned long)pcap_dropped,
         current_snaplen, sta_ip_str);
-    httpd_resp_send_chunk(req, section, HTTPD_RESP_USE_STRLEN);
+    SEND_CHUNK(req, section, HTTPD_RESP_USE_STRLEN);
 
     /* Chunk 9: Device management heading */
-    httpd_resp_send_chunk(req, CONFIG_CHUNK_TAIL, HTTPD_RESP_USE_STRLEN);
+    SEND_CHUNK(req, CONFIG_CHUNK_TAIL, HTTPD_RESP_USE_STRLEN);
 
     /* Chunk 9a: Dynamic OTA info (running partition, version) */
     {
@@ -1849,24 +1890,20 @@ static esp_err_t config_get_handler(httpd_req_t *req)
             running ? running->label : "unknown",
             app_desc ? app_desc->version : "unknown",
             app_desc ? app_desc->date : "", app_desc ? app_desc->time : "");
-        httpd_resp_send_chunk(req, section, HTTPD_RESP_USE_STRLEN);
+        SEND_CHUNK(req, section, HTTPD_RESP_USE_STRLEN);
     }
 
     /* Chunk 9b: OTA upload form, config backup/restore, reboot */
-    httpd_resp_send_chunk(req, CONFIG_CHUNK_TAIL2, HTTPD_RESP_USE_STRLEN);
+    SEND_CHUNK(req, CONFIG_CHUNK_TAIL2, HTTPD_RESP_USE_STRLEN);
 
     /* Chunk 9c: Danger Zone */
-    httpd_resp_send_chunk(req, CONFIG_CHUNK_DANGER, HTTPD_RESP_USE_STRLEN);
+    SEND_CHUNK(req, CONFIG_CHUNK_DANGER, HTTPD_RESP_USE_STRLEN);
 
     /* End chunked response */
-    httpd_resp_send_chunk(req, NULL, 0);
+    SEND_CHUNK(req, NULL, 0);
 
-    /* Cleanup */
-    free(safe_ap_ssid);
-    free(safe_ssid);
-    free(safe_ent_username);
-    free(safe_ent_identity);
-
+    /* No cleanup needed: all escaped values live in stack buffers (the heap
+     * copies were freed by html_escape_to before streaming began). */
     return ESP_OK;
 }
 
@@ -2082,7 +2119,7 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
     /* --- Begin chunked response --- */
 
     /* Chunk 1: Page header (styles, scripts) */
-    httpd_resp_send_chunk(req, MAPPINGS_CHUNK_HEAD, HTTPD_RESP_USE_STRLEN);
+    SEND_CHUNK(req, MAPPINGS_CHUNK_HEAD, HTTPD_RESP_USE_STRLEN);
 
     /* Chunk 2: Error modal (if any) */
     if (error_msg[0] != '\0') {
@@ -2095,21 +2132,21 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
             "</div>"
             "</div>",
             error_msg);
-        httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
+        SEND_CHUNK(req, row, HTTPD_RESP_USE_STRLEN);
     }
 
     /* Chunk 3: Container start and header */
-    httpd_resp_send_chunk(req, MAPPINGS_CHUNK_MID1, HTTPD_RESP_USE_STRLEN);
+    SEND_CHUNK(req, MAPPINGS_CHUNK_MID1, HTTPD_RESP_USE_STRLEN);
 
     /* Chunk 4: Logout button (if authenticated) */
     if (session_active && password_protection_enabled) {
-        httpd_resp_send_chunk(req,
+        SEND_CHUNK(req,
             "<a href='/?logout=1' style='padding: 0.4rem 1rem; background: rgba(255,82,82,0.15); color: #ff5252; border: 1px solid #ff5252; border-radius: 6px; text-decoration: none; font-size: 0.85rem; font-weight: 500;'>Logout</a>",
             HTTPD_RESP_USE_STRLEN);
     }
 
     /* Chunk 5: Connected clients table header */
-    httpd_resp_send_chunk(req,
+    SEND_CHUNK(req,
         client_stats_enabled ? MAPPINGS_CHUNK_MID2 : MAPPINGS_CHUNK_MID2_NOSTATS,
         HTTPD_RESP_USE_STRLEN);
 
@@ -2178,10 +2215,10 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
                     mac_str, ip_str, clients[i].name[0] ? clients[i].name : "-",
                     mac_str, clients[i].has_ip ? ip_str : "", js_name);
             }
-            httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
+            SEND_CHUNK(req, row, HTTPD_RESP_USE_STRLEN);
         }
     } else {
-        httpd_resp_send_chunk(req,
+        SEND_CHUNK(req,
             client_stats_enabled
                 ? "<tr><td colspan='5' style='text-align:center; color:#888;'>No clients connected</td></tr>"
                 : "<tr><td colspan='4' style='text-align:center; color:#888;'>No clients connected</td></tr>",
@@ -2189,7 +2226,7 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
     }
 
     /* Chunk 7: DHCP reservations heading */
-    httpd_resp_send_chunk(req, MAPPINGS_CHUNK_MID3, HTTPD_RESP_USE_STRLEN);
+    SEND_CHUNK(req, MAPPINGS_CHUNK_MID3, HTTPD_RESP_USE_STRLEN);
 
     /* DHCP Pool info */
     {
@@ -2201,11 +2238,11 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
         snprintf(row, sizeof(row),
                  "<small style='color:#888;'>Pool: " IPSTR " - " IPSTR "</small>",
                  IP2STR(&start_addr), IP2STR(&end_addr));
-        httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
+        SEND_CHUNK(req, row, HTTPD_RESP_USE_STRLEN);
     }
 
     /* DHCP reservations table header */
-    httpd_resp_send_chunk(req, MAPPINGS_CHUNK_MID3B, HTTPD_RESP_USE_STRLEN);
+    SEND_CHUNK(req, MAPPINGS_CHUNK_MID3B, HTTPD_RESP_USE_STRLEN);
 
     /* Chunk 8: Stream DHCP reservation rows */
     bool has_reservations = false;
@@ -2237,22 +2274,22 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
                 dhcp_reservations[i].mac[2], dhcp_reservations[i].mac[3],
                 dhcp_reservations[i].mac[4], dhcp_reservations[i].mac[5]
             );
-            httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
+            SEND_CHUNK(req, row, HTTPD_RESP_USE_STRLEN);
         }
     }
 
     if (!has_reservations) {
-        httpd_resp_send_chunk(req,
+        SEND_CHUNK(req,
             "<tr><td colspan='4' style='text-align:center; color:#888;'>No DHCP reservations configured</td></tr>",
             HTTPD_RESP_USE_STRLEN);
     }
 
     /* Chunk 9: DHCP reservation form */
-    httpd_resp_send_chunk(req, MAPPINGS_CHUNK_MID4, HTTPD_RESP_USE_STRLEN);
+    SEND_CHUNK(req, MAPPINGS_CHUNK_MID4, HTTPD_RESP_USE_STRLEN);
 
     /* Chunk 10: Port forwarding section (hidden when NAT is disabled) */
 #if CONFIG_REPEATER_MODE
-    httpd_resp_send_chunk(req,
+    SEND_CHUNK(req,
         "<div class='section'><p style='color:#888; padding: 0.5rem 0;'>"
         "Port forwarding and DHCP reservations are not applicable in L2 repeater mode."
         "</p></div>",
@@ -2261,7 +2298,7 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
 #else
     if (ap_nat_enabled) {
 #endif
-        httpd_resp_send_chunk(req, MAPPINGS_CHUNK_PORTFWD_HEAD, HTTPD_RESP_USE_STRLEN);
+        SEND_CHUNK(req, MAPPINGS_CHUNK_PORTFWD_HEAD, HTTPD_RESP_USE_STRLEN);
 
         bool has_mappings = false;
         for (int i = 0; i < IP_PORTMAP_MAX; i++) {
@@ -2295,28 +2332,28 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
                     portmap_tab[i].proto == PROTO_TCP ? "TCP" : "UDP",
                     portmap_tab[i].mport
                 );
-                httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
+                SEND_CHUNK(req, row, HTTPD_RESP_USE_STRLEN);
             }
         }
 
         if (!has_mappings) {
-            httpd_resp_send_chunk(req,
+            SEND_CHUNK(req,
                 "<tr><td colspan='6' style='text-align:center; color:#888;'>No port mappings configured</td></tr>",
                 HTTPD_RESP_USE_STRLEN);
         }
 
-        httpd_resp_send_chunk(req, MAPPINGS_CHUNK_PORTFWD_TAIL, HTTPD_RESP_USE_STRLEN);
+        SEND_CHUNK(req, MAPPINGS_CHUNK_PORTFWD_TAIL, HTTPD_RESP_USE_STRLEN);
     } else {
-        httpd_resp_send_chunk(req,
+        SEND_CHUNK(req,
             "<div class='section'><p style='color:#888; padding: 0.5rem 0;'>Port forwarding is not available in routed mode (NAT disabled).</p></div>",
             HTTPD_RESP_USE_STRLEN);
     }
 
     /* Chunk 11: Page footer */
-    httpd_resp_send_chunk(req, MAPPINGS_CHUNK_PAGE_FOOTER, HTTPD_RESP_USE_STRLEN);
+    SEND_CHUNK(req, MAPPINGS_CHUNK_PAGE_FOOTER, HTTPD_RESP_USE_STRLEN);
 
     /* End chunked response */
-    httpd_resp_send_chunk(req, NULL, 0);
+    SEND_CHUNK(req, NULL, 0);
 
     return ESP_OK;
 }
@@ -2503,7 +2540,7 @@ static esp_err_t firewall_get_handler(httpd_req_t *req)
     /* --- Begin chunked response --- */
 
     /* Chunk 1: Page header (styles) */
-    httpd_resp_send_chunk(req, FIREWALL_CHUNK_HEAD, HTTPD_RESP_USE_STRLEN);
+    SEND_CHUNK(req, FIREWALL_CHUNK_HEAD, HTTPD_RESP_USE_STRLEN);
 
     /* Chunk 2: Error modal (if any) */
     if (error_msg[0] != '\0') {
@@ -2516,29 +2553,29 @@ static esp_err_t firewall_get_handler(httpd_req_t *req)
             "</div>"
             "</div>",
             error_msg);
-        httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
+        SEND_CHUNK(req, row, HTTPD_RESP_USE_STRLEN);
     }
 
     /* Chunk 3: Container start and header */
-    httpd_resp_send_chunk(req, FIREWALL_CHUNK_MID1, HTTPD_RESP_USE_STRLEN);
+    SEND_CHUNK(req, FIREWALL_CHUNK_MID1, HTTPD_RESP_USE_STRLEN);
 
     /* Chunk 4: Logout button (if authenticated) */
     if (session_active && password_protection_enabled) {
-        httpd_resp_send_chunk(req,
+        SEND_CHUNK(req,
             "<a href='/?logout=1' style='padding: 0.4rem 1rem; background: rgba(255,82,82,0.15); color: #ff5252; border: 1px solid #ff5252; border-radius: 6px; text-decoration: none; font-size: 0.85rem; font-weight: 500;'>Logout</a>",
             HTTPD_RESP_USE_STRLEN);
     }
 
     /* Chunk 5: Description text */
-    httpd_resp_send_chunk(req, FIREWALL_CHUNK_MID2, HTTPD_RESP_USE_STRLEN);
+    SEND_CHUNK(req, FIREWALL_CHUNK_MID2, HTTPD_RESP_USE_STRLEN);
 
     /* Chunk 5b: Connected clients table */
     {
         connected_client_t fw_clients[8];
         int fw_client_count = get_connected_clients(fw_clients, 8);
-        httpd_resp_send_chunk(req, FIREWALL_CHUNK_CLIENTS_HEAD, HTTPD_RESP_USE_STRLEN);
+        SEND_CHUNK(req, FIREWALL_CHUNK_CLIENTS_HEAD, HTTPD_RESP_USE_STRLEN);
         if (fw_client_count == 0) {
-            httpd_resp_send_chunk(req, FIREWALL_CHUNK_CLIENTS_NONE, HTTPD_RESP_USE_STRLEN);
+            SEND_CHUNK(req, FIREWALL_CHUNK_CLIENTS_NONE, HTTPD_RESP_USE_STRLEN);
         } else {
             for (int i = 0; i < fw_client_count; i++) {
                 char fw_ip[16] = "-";
@@ -2557,13 +2594,13 @@ static esp_err_t firewall_get_handler(httpd_req_t *req)
                     fw_clients[i].mac[4], fw_clients[i].mac[5],
                     fw_ip,
                     fw_clients[i].name[0] ? fw_clients[i].name : "-");
-                httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
+                SEND_CHUNK(req, row, HTTPD_RESP_USE_STRLEN);
             }
         }
-        httpd_resp_send_chunk(req, FIREWALL_CHUNK_CLIENTS_TAIL, HTTPD_RESP_USE_STRLEN);
+        SEND_CHUNK(req, FIREWALL_CHUNK_CLIENTS_TAIL, HTTPD_RESP_USE_STRLEN);
     }
 
-    httpd_resp_send_chunk(req, "<h2>ACLs</h2>", HTTPD_RESP_USE_STRLEN);
+    SEND_CHUNK(req, "<h2>ACLs</h2>", HTTPD_RESP_USE_STRLEN);
 
     /* Chunk 6: Stream ACL sections.
      * Copy data under lock then release before sending HTTP chunks,
@@ -2598,10 +2635,10 @@ static esp_err_t firewall_get_handler(httpd_req_t *req)
             (unsigned long)stats_copy.packets_denied,
             (unsigned long)stats_copy.packets_nomatch,
             list_no);
-        httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
+        SEND_CHUNK(req, row, HTTPD_RESP_USE_STRLEN);
 
         /* Rules table header */
-        httpd_resp_send_chunk(req,
+        SEND_CHUNK(req,
             "<table class='data-table'>"
             "<thead><tr>"
             "<th>#</th><th>Proto</th><th>Source</th><th>SPort</th>"
@@ -2674,24 +2711,24 @@ static esp_err_t firewall_get_handler(httpd_req_t *req)
                 i, proto_str, src_str, s_port_str,
                 dst_str, d_port_str, action_str, (unsigned long)rules_copy[i].hit_count,
                 list_no, i);
-            httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
+            SEND_CHUNK(req, row, HTTPD_RESP_USE_STRLEN);
         }
 
         if (rule_count == 0) {
-            httpd_resp_send_chunk(req,
+            SEND_CHUNK(req,
                 "<tr><td colspan='9' style='text-align:center; color:#888;'>No rules (all packets allowed)</td></tr>",
                 HTTPD_RESP_USE_STRLEN);
         }
 
         /* Close table and section */
-        httpd_resp_send_chunk(req, "</tbody></table></div>", HTTPD_RESP_USE_STRLEN);
+        SEND_CHUNK(req, "</tbody></table></div>", HTTPD_RESP_USE_STRLEN);
     }
 
     /* Chunk 7: Add form and footer */
-    httpd_resp_send_chunk(req, FIREWALL_CHUNK_TAIL, HTTPD_RESP_USE_STRLEN);
+    SEND_CHUNK(req, FIREWALL_CHUNK_TAIL, HTTPD_RESP_USE_STRLEN);
 
     /* End chunked response */
-    httpd_resp_send_chunk(req, NULL, 0);
+    SEND_CHUNK(req, NULL, 0);
 
     return ESP_OK;
 }
@@ -3027,7 +3064,7 @@ static esp_err_t setup_get_handler(httpd_req_t *req)
     /* Render page */
     httpd_resp_set_type(req, "text/html");
 
-    httpd_resp_send_chunk(req, SETUP_CHUNK_HEAD, HTTPD_RESP_USE_STRLEN);
+    SEND_CHUNK(req, SETUP_CHUNK_HEAD, HTTPD_RESP_USE_STRLEN);
 
     char* safe_ap_ssid = html_escape(ap_ssid);
     if (safe_ap_ssid == NULL) safe_ap_ssid = strdup("");
@@ -3038,12 +3075,13 @@ static esp_err_t setup_get_handler(httpd_req_t *req)
     char section[1024];
     snprintf(section, sizeof(section), SETUP_CHUNK_FORM,
         safe_ap_ssid, safe_ssid);
-    httpd_resp_send_chunk(req, section, HTTPD_RESP_USE_STRLEN);
-
+    /* Escaped values copied into the stack buffer; free before streaming so a
+     * SEND_CHUNK bail-out on a dead client cannot leak them. */
     free(safe_ap_ssid);
     free(safe_ssid);
+    SEND_CHUNK(req, section, HTTPD_RESP_USE_STRLEN);
 
-    httpd_resp_send_chunk(req, NULL, 0);
+    SEND_CHUNK(req, NULL, 0);
     return ESP_OK;
 }
 
@@ -3063,6 +3101,18 @@ httpd_handle_t start_webserver(uint16_t port)
     config.stack_size = 16384;  // Large stack needed for mappings page with 3x 2KB HTML buffers
     config.max_uri_handlers = 14;
     config.max_uri_len = 1024;
+    config.open_fn = http_open_fn;
+    /* Fail a stalled send/recv fast (default 5s) so an abandoned connection
+     * frees its socket and buffers quickly instead of pinning them; paired
+     * with the SEND_CHUNK bail-out, a dead client costs ~one timeout total. */
+    config.send_wait_timeout = 2;
+    config.recv_wait_timeout = 2;
+    /* A WiFi client that walks out of range never sends a TCP FIN, so its
+     * connections sit in httpd's socket table forever, each pinning a netconn +
+     * PCB + pbufs.  lru_purge_enable lets httpd close the least-recently-used
+     * connection to admit a new one; the keepalive probes set in http_open_fn
+     * reap the dead sockets proactively before it ever comes to that. */
+    config.lru_purge_enable = true;
     esp_timer_create(&restart_timer_args, &restart_timer);
 
     // Start the httpd server

@@ -177,6 +177,9 @@ esp_err_t get_config_param_str(char* name, char** param)
             err = nvs_get_str(nvs, name, *param, &len);
             ESP_LOGI(TAG, "%s %s", name, *param);
         } else {
+            /* Key missing (NVS_NOT_FOUND) is the common case for optional keys;
+             * must still close the handle here or it leaks on every lookup. */
+            nvs_close(nvs);
             return err;
         }
         nvs_close(nvs);
@@ -195,6 +198,9 @@ esp_err_t get_config_param_int(char* name, int* param)
         if ( (err = nvs_get_i32(nvs, name, (int32_t*)(param))) == ESP_OK) {
             ESP_LOGI(TAG, "%s %d", name, *param);
         } else {
+            /* Key missing (NVS_NOT_FOUND) is the common case for optional keys;
+             * must still close the handle here or it leaks on every lookup. */
+            nvs_close(nvs);
             return err;
         }
         nvs_close(nvs);
@@ -224,6 +230,9 @@ esp_err_t get_config_param_blob(char* name, uint8_t** blob, size_t blob_len)
             err = nvs_get_blob(nvs, name, *blob, &len);
             ESP_LOGI(TAG, "%s: %d", name, len);
         } else {
+            /* Key missing (NVS_NOT_FOUND) is the common case for optional keys;
+             * must still close the handle here or it leaks on every lookup. */
+            nvs_close(nvs);
             return err;
         }
         nvs_close(nvs);
