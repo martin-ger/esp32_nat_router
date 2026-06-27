@@ -63,7 +63,7 @@ Flash directly from your browser — no tools or command line required:
 
 **[Open Web Installer](https://martin-ger.github.io/esp32_nat_router/)**
 
-Requires Chrome, Edge, or Opera. Select your firmware variant (WiFi or Ethernet) and click "Connect & Install".
+Requires a browser with Web Serial API. Select your firmware variant (WiFi or Ethernet) and click "Connect & Install".
 
 ### esptool (Command Line)
 
