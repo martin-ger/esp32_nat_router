@@ -41,6 +41,7 @@
 #include "acl.h"
 #include "remote_console.h"
 #include "cJSON.h"
+#include "bandwidth_manager.h"
 #include "esp_ota_ops.h"
 #include "esp_app_format.h"
 #include "esp_app_desc.h"
@@ -2410,6 +2411,50 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
                 del_portmap(proto, port);
                 ESP_LOGI(TAG, "Deleted port mapping: %s %d", param1, port);
             }
+
+            /* Check for bandwidth limit actions */
+            if (httpd_query_key_value(buf, "bw_action", param1, sizeof(param1)) == ESP_OK &&
+                httpd_query_key_value(buf, "bw_mac", param2, sizeof(param2)) == ESP_OK) {
+
+                preprocess_string(param2);
+                unsigned int mac[6];
+                if (sscanf(param2, "%02x:%02x:%02x:%02x:%02x:%02x",
+                           &mac[0], &mac[1], &mac[2], &mac[3], &mac[4], &mac[5]) == 6 ||
+                    sscanf(param2, "%02x-%02x-%02x-%02x-%02x-%02x",
+                           &mac[0], &mac[1], &mac[2], &mac[3], &mac[4], &mac[5]) == 6) {
+
+                    uint8_t mac_bytes[6];
+                    for (int i = 0; i < 6; i++) {
+                        mac_bytes[i] = (uint8_t)mac[i];
+                    }
+
+                    if (strcmp(param1, "Remove") == 0) {
+                        bw_remove(mac_bytes);
+                        ESP_LOGI(TAG, "Removed bandwidth limits for %s", param2);
+                    } else if (strcmp(param1, "Set+Limits") == 0 || strcmp(param1, "Set Limits") == 0) {
+                        char up_buf[16] = "0";
+                        char down_buf[16] = "0";
+                        char cap_buf[16] = "0";
+                        httpd_query_key_value(buf, "bw_up", up_buf, sizeof(up_buf));
+                        httpd_query_key_value(buf, "bw_down", down_buf, sizeof(down_buf));
+                        httpd_query_key_value(buf, "bw_cap", cap_buf, sizeof(cap_buf));
+
+                        uint32_t up_kbs = atoi(up_buf);
+                        uint32_t down_kbs = atoi(down_buf);
+                        uint32_t cap_mb = atoi(cap_buf);
+
+                        /* Convert KB/s to B/s and MB to B */
+                        uint32_t up_bps = up_kbs * 1024;
+                        uint32_t down_bps = down_kbs * 1024;
+                        uint64_t cap_bytes = (uint64_t)cap_mb * 1024 * 1024;
+
+                        bw_set_limits(mac_bytes, up_bps, down_bps, cap_bytes);
+                        ESP_LOGI(TAG, "Set bandwidth limits for %s: up=%lu B/s, down=%lu B/s, cap=%llu B",
+                                 param2, (unsigned long)up_bps, (unsigned long)down_bps,
+                                 (unsigned long long)cap_bytes);
+                    }
+                }
+            }
         }
         free(buf);
     }
@@ -2588,7 +2633,65 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
     /* Chunk 9: DHCP reservation form */
     SEND_CHUNK(req, MAPPINGS_CHUNK_MID4, HTTPD_RESP_USE_STRLEN);
 
-    /* Chunk 10: Port forwarding section (hidden when NAT is disabled) */
+    /* Chunk 10: Bandwidth limits section */
+    SEND_CHUNK(req, MAPPINGS_CHUNK_BW_HEAD, HTTPD_RESP_USE_STRLEN);
+
+    {
+        client_bw_entry_t *bw_all = bw_get_all();
+        bool has_bw = false;
+        for (int i = 0; i < BW_MAX_CLIENTS; i++) {
+            if (bw_all[i].active) {
+                has_bw = true;
+                char up_buf[12], down_buf[12], cap_buf[12], rollover_buf[12], up_used[12], down_used[12];
+                format_bytes_human(bw_all[i].upload_bps, up_buf, sizeof(up_buf));
+                format_bytes_human(bw_all[i].download_bps, down_buf, sizeof(down_buf));
+                format_bytes_human(bw_all[i].daily_cap_bytes, cap_buf, sizeof(cap_buf));
+                format_bytes_human(bw_all[i].daily_rollover_bytes, rollover_buf, sizeof(rollover_buf));
+                format_bytes_human(bw_all[i].daily_up_bytes, up_used, sizeof(up_used));
+                format_bytes_human(bw_all[i].daily_down_bytes, down_used, sizeof(down_used));
+
+                const char *status = bw_all[i].blocked ? "BLOCKED" : "Active";
+                char status_html[64];
+                if (bw_all[i].blocked) {
+                    snprintf(status_html, sizeof(status_html),
+                        "<span style='color:#ff5252;font-weight:bold;'>BLOCKED</span>");
+                } else {
+                    snprintf(status_html, sizeof(status_html), "%s", status);
+                }
+
+                snprintf(row, sizeof(row),
+                    "<tr>"
+                    "<td>%02X:%02X:%02X:%02X:%02X:%02X</td>"
+                    "<td>%s</td>"
+                    "<td>%s</td>"
+                    "<td>%s</td>"
+                    "<td>%s</td>"
+                    "<td>%s</td>"
+                    "<td>%s</td>"
+                    "<td>%s</td>"
+                    "</tr>",
+                    bw_all[i].mac[0], bw_all[i].mac[1],
+                    bw_all[i].mac[2], bw_all[i].mac[3],
+                    bw_all[i].mac[4], bw_all[i].mac[5],
+                    bw_all[i].upload_bps == 0 ? "Unlimited" : up_buf,
+                    bw_all[i].download_bps == 0 ? "Unlimited" : down_buf,
+                    bw_all[i].daily_cap_bytes == 0 ? "Unlimited" : cap_buf,
+                    bw_all[i].daily_rollover_bytes == 0 ? "-" : rollover_buf,
+                    up_used, down_used, status_html);
+                SEND_CHUNK(req, row, HTTPD_RESP_USE_STRLEN);
+            }
+        }
+
+        if (!has_bw) {
+            SEND_CHUNK(req,
+                "<tr><td colspan='8' style='text-align:center; color:#888;'>No bandwidth limits configured</td></tr>",
+                HTTPD_RESP_USE_STRLEN);
+        }
+    }
+
+    SEND_CHUNK(req, MAPPINGS_CHUNK_BW_TAIL, HTTPD_RESP_USE_STRLEN);
+
+    /* Chunk 11: Port forwarding section (hidden when NAT is disabled) */
     if (ap_nat_enabled) {
         SEND_CHUNK(req, MAPPINGS_CHUNK_PORTFWD_HEAD, HTTPD_RESP_USE_STRLEN);
 

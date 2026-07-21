@@ -68,6 +68,7 @@
 #include "syslog_client.h"
 #include "oled_display.h"
 #include "led_strip_status.h"
+#include "bandwidth_manager.h"
 #if !defined(CONFIG_IDF_TARGET_ESP32C5)
 #include "mdns.h"
 #endif
@@ -734,6 +735,8 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
         ESP_LOGI(TAG, "AP started");
         // Initialize AP netif hooks now that interface is ready
         init_ap_netif_hooks();
+        // Initialize bandwidth manager
+        bw_init();
         /* Re-enable NAPT on every AP start: covers the initial start and any
          * restart caused by the band-aware scan forcing a channel change. */
         if (ap_nat_enabled && my_ap_ip != 0)

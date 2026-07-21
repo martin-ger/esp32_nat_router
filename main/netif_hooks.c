@@ -19,6 +19,7 @@
 #include "lwip/prot/ip4.h"
 #include "lwip/inet_chksum.h"
 #include "acl.h"
+#include "bandwidth_manager.h"
 #include "client_stats.h"
 #include "pcap_capture.h"
 #include "router_config.h"
@@ -560,6 +561,15 @@ static IRAM_ATTR err_t ap_netif_input_hook(struct pbuf *p, struct netif *netif) 
         }
     }
 
+    // Bandwidth rate limit: upload (client -> Internet), source MAC = client
+    if (p != NULL && p->len >= 14) {
+        const uint8_t *src_mac = ((const uint8_t *)p->payload) + 6;
+        if (!bw_check_upload(src_mac, p->tot_len)) {
+            pbuf_free(p);
+            return ERR_OK;
+        }
+    }
+
     // Capture packet based on mode and ACL monitor flag (AP interface = true)
     if (pcap_should_capture(is_acl_monitored, true)) {
         pcap_capture_packet(p);
@@ -603,6 +613,14 @@ static IRAM_ATTR err_t ap_netif_linkoutput_hook(struct netif *netif, struct pbuf
         if (entry) {
             entry->bytes_sent += p->tot_len;
             entry->packets_sent++;
+        }
+    }
+
+    // Bandwidth rate limit: download (Internet -> client), dest MAC = client
+    if (p != NULL && p->len >= 14) {
+        const uint8_t *dst_mac = (const uint8_t *)p->payload;
+        if (!bw_check_download(dst_mac, p->tot_len)) {
+            return ERR_OK;
         }
     }
 
