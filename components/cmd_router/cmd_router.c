@@ -45,6 +45,7 @@
 #include "pcap_capture.h"
 #include "acl.h"
 #include "remote_console.h"
+#include "bandwidth_manager.h"
 /* web UI bind API */
 extern uint8_t web_ui_get_bind(void);
 extern void    web_ui_set_bind(uint8_t bind);
@@ -110,6 +111,7 @@ static void register_set_sta_band(void);
 #endif
 static void register_set_vpn(void);
 static void register_set_tz(void);
+static void register_bandwidth(void);
 
 /* ACL helper functions (forward declarations) */
 static char* acl_format_ip_with_name(uint32_t ip, uint32_t mask, char* buf, size_t buf_len);
@@ -445,6 +447,7 @@ void register_router(void)
     register_syslog_cmd();
     register_set_tz();
     register_set_vpn();
+    register_bandwidth();
 #if defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32S3)
     register_set_oled();
     register_set_oled_gpio();
@@ -3747,4 +3750,138 @@ static void register_set_vpn(void)
         .argtable = &set_vpn_args
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
+}
+
+/* --- Bandwidth CLI commands --- */
+
+static int set_bw_cmd(int argc, char **argv)
+{
+    if (argc < 2) {
+        printf("Usage: set_bw <MAC> [up_KB/s] [down_KB/s] [cap_MB]\n");
+        printf("  MAC       - Client MAC address (AA:BB:CC:DD:EE:FF)\n");
+        printf("  up_KB/s   - Upload limit in KB/s (0 = unlimited, default)\n");
+        printf("  down_KB/s - Download limit in KB/s (0 = unlimited, default)\n");
+        printf("  cap_MB    - Daily data cap in MB (0 = unlimited, default)\n");
+        printf("Example: set_bw AA:BB:CC:DD:EE:FF 100 500 1024\n");
+        return 0;
+    }
+
+    unsigned int mac[6];
+    if (sscanf(argv[1], "%02x:%02x:%02x:%02x:%02x:%02x",
+               &mac[0], &mac[1], &mac[2], &mac[3], &mac[4], &mac[5]) != 6 &&
+        sscanf(argv[1], "%02x-%02x-%02x-%02x-%02x-%02x",
+               &mac[0], &mac[1], &mac[2], &mac[3], &mac[4], &mac[5]) != 6) {
+        printf("Error: Invalid MAC address format\n");
+        return 1;
+    }
+
+    uint8_t mac_bytes[6];
+    for (int i = 0; i < 6; i++) mac_bytes[i] = (uint8_t)mac[i];
+
+    uint32_t up_kbs = (argc > 2) ? atoi(argv[2]) : 0;
+    uint32_t down_kbs = (argc > 3) ? atoi(argv[3]) : 0;
+    uint32_t cap_mb = (argc > 4) ? atoi(argv[4]) : 0;
+
+    uint32_t up_bps = up_kbs * 1024;
+    uint32_t down_bps = down_kbs * 1024;
+    uint64_t cap_bytes = (uint64_t)cap_mb * 1024 * 1024;
+
+    esp_err_t err = bw_set_limits(mac_bytes, up_bps, down_bps, cap_bytes);
+    if (err == ESP_OK) {
+        printf("Bandwidth limits set for %s\n", argv[1]);
+        printf("  Upload: %lu B/s (%lu KB/s)\n", (unsigned long)up_bps, (unsigned long)up_kbs);
+        printf("  Download: %lu B/s (%lu KB/s)\n", (unsigned long)down_bps, (unsigned long)down_kbs);
+        printf("  Daily cap: %llu bytes (%lu MB)\n", (unsigned long long)cap_bytes, (unsigned long)cap_mb);
+    } else {
+        printf("Error: Failed to set bandwidth limits (table full?)\n");
+    }
+    return 0;
+}
+
+static void register_set_bw(void)
+{
+    const esp_console_cmd_t cmd = {
+        .command = "set_bw",
+        .help = "Set per-client bandwidth limits and daily data cap",
+        .hint = NULL,
+        .func = &set_bw_cmd,
+        .argtable = NULL
+    };
+    ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
+}
+
+static int show_bw_cmd(int argc, char **argv)
+{
+    client_bw_entry_t *all = bw_get_all();
+    bool any = false;
+
+    printf("Bandwidth limits and usage:\n");
+    printf("%-17s  %-12s  %-12s  %-12s  %-12s  %-12s  %-12s  %s\n",
+           "MAC", "Upload", "Download", "Daily Cap", "Rollover", "Uploaded", "Downloaded", "Status");
+    printf("%-17s  %-12s  %-12s  %-12s  %-12s  %-12s  %-12s  %s\n",
+           "-----------------", "------------", "------------",
+           "------------", "------------", "------------", "------------", "------");
+
+    for (int i = 0; i < BW_MAX_CLIENTS; i++) {
+        if (all[i].active) {
+            any = true;
+            char mac_str[18];
+            snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
+                     all[i].mac[0], all[i].mac[1], all[i].mac[2],
+                     all[i].mac[3], all[i].mac[4], all[i].mac[5]);
+
+            printf("%-17s  %lu B/s       %lu B/s       %llu B      %llu B      %llu B      %llu B      %s\n",
+                   mac_str,
+                   (unsigned long)all[i].upload_bps,
+                   (unsigned long)all[i].download_bps,
+                   (unsigned long long)all[i].daily_cap_bytes,
+                   (unsigned long long)all[i].daily_rollover_bytes,
+                   (unsigned long long)all[i].daily_up_bytes,
+                   (unsigned long long)all[i].daily_down_bytes,
+                   all[i].blocked ? "BLOCKED" : "Active");
+        }
+    }
+
+    if (!any) {
+        printf("  No bandwidth limits configured.\n");
+    }
+    return 0;
+}
+
+static void register_show_bw(void)
+{
+    const esp_console_cmd_t cmd = {
+        .command = "show_bw",
+        .help = "Show per-client bandwidth limits and daily usage",
+        .hint = NULL,
+        .func = &show_bw_cmd,
+        .argtable = NULL
+    };
+    ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
+}
+
+static int clear_bw_cmd(int argc, char **argv)
+{
+    bw_clear_all();
+    printf("All bandwidth limits cleared.\n");
+    return 0;
+}
+
+static void register_clear_bw(void)
+{
+    const esp_console_cmd_t cmd = {
+        .command = "clear_bw",
+        .help = "Clear all bandwidth limits and usage data",
+        .hint = NULL,
+        .func = &clear_bw_cmd,
+        .argtable = NULL
+    };
+    ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
+}
+
+static void register_bandwidth(void)
+{
+    register_set_bw();
+    register_show_bw();
+    register_clear_bw();
 }
