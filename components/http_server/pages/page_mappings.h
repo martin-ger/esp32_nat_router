@@ -139,6 +139,40 @@ document.getElementById('dhcp_mac').scrollIntoView({behavior: 'smooth', block: '
 </form>\
 </div>"
 
+#define MAPPINGS_CHUNK_BW_HEAD "\
+<div class='section'>\
+<h2>Bandwidth Limits</h2>\
+<form action='/mappings' method='GET'>\
+<table>\
+<tr><td>MAC Address</td><td><input type='text' name='bw_mac' placeholder='AA:BB:CC:DD:EE:FF'/></td></tr>\
+<tr><td>Upload (KB/s)</td><td><input type='number' name='bw_up' min='0' placeholder='0 = unlimited'/></td></tr>\
+<tr><td>Download (KB/s)</td><td><input type='number' name='bw_down' min='0' placeholder='0 = unlimited'/></td></tr>\
+<tr><td>Daily Cap (MB)</td><td><input type='number' name='bw_cap' min='0' placeholder='0 = unlimited'/></td></tr>\
+<tr><td></td><td><input type='submit' name='bw_action' value='Set Limits' class='ok-button'/>\
+<input type='submit' name='bw_action' value='Remove' class='red-button' style='width:100%;padding:0.75rem 1.5rem;font-size:0.95rem;border-radius:8px;margin-top:0.5rem;'/></td></tr>\
+</table>\
+</form>\
+<h2>Bandwidth Usage</h2>\
+<table class='data-table'>\
+<thead>\
+<tr>\
+<th>MAC Address</th>\
+<th>Upload Limit</th>\
+<th>Download Limit</th>\
+<th>Daily Cap</th>\
+<th>Rollover</th>\
+<th>Uploaded</th>\
+<th>Downloaded</th>\
+<th>Status</th>\
+</tr>\
+</thead>\
+<tbody>"
+
+#define MAPPINGS_CHUNK_BW_TAIL "\
+</tbody>\
+</table>\
+</div>"
+
 #define MAPPINGS_CHUNK_PORTFWD_HEAD "\
 <div class='section'>\
 <h2>Port Forwarding</h2>\
