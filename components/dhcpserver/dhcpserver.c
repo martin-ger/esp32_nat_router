@@ -969,8 +969,19 @@ static u8_t parse_options(dhcps_t *dhcps, u8_t *optptr, s16_t len)
                     if (hostname_len >= DHCPS_MAX_HOSTNAME_LEN) {
                         hostname_len = DHCPS_MAX_HOSTNAME_LEN - 1;
                     }
-                    memcpy(dhcps->current_hostname, optptr + 2, hostname_len);
-                    dhcps->current_hostname[hostname_len] = '\0';
+                    /* Option 12 is whatever bytes the client felt like sending.
+                     * It is surfaced in the web UI and the console, so restrict
+                     * it to the RFC 1123 hostname alphabet here, at the single
+                     * point where it enters the system, rather than trusting
+                     * every later consumer to escape it. */
+                    u8_t kept = 0;
+                    for (u8_t k = 0; k < hostname_len; k++) {
+                        char c = (char)*(optptr + 2 + k);
+                        bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                                  (c >= '0' && c <= '9') || c == '-' || c == '.' || c == '_';
+                        dhcps->current_hostname[kept++] = ok ? c : '_';
+                    }
+                    dhcps->current_hostname[kept] = '\0';
 #if DHCPS_DEBUG
                     DHCPS_LOG("dhcps: DHCP_OPTION_HOSTNAME = %s\n", dhcps->current_hostname);
 #endif

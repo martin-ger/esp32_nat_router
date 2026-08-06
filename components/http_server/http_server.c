@@ -163,8 +163,16 @@ static esp_err_t http_open_fn(httpd_handle_t hd, int sockfd)
     if (on_ap  && (s_web_bind & RC_BIND_AP))  allowed = true;
     if (on_sta && (s_web_bind & RC_BIND_STA)) allowed = true;
     if (on_vpn && (s_web_bind & RC_BIND_VPN)) allowed = true;
-    /* If local_ip could not be determined, allow through (fail open) */
-    if (local_ip == 0) allowed = true;
+
+    /* An unknown local address used to be allowed through, which turned the
+     * whole interface restriction into a suggestion. getsockname() does not
+     * fail on an accepted socket in practice; if it ever does, refusing is the
+     * only answer that keeps the setting meaningful. Serial console recovery
+     * (web_ui bind all) is documented for the lockout case either way. */
+    if (local_ip == 0) {
+        ESP_LOGW(TAG, "HTTP connection rejected (local address unknown)");
+        return ESP_FAIL;
+    }
 
     if (!allowed) {
         ESP_LOGW(TAG, "HTTP connection rejected (interface not allowed, local=" IPSTR ")",
@@ -242,18 +250,28 @@ static bool get_cookie_value(httpd_req_t *req, const char* cookie_name,
         return false;
     }
 
-    // Search for the cookie name
+    /* Match the name only at a cookie boundary — a plain strstr() for
+     * "session=" also matches a cookie called "xsession", letting a caller
+     * supply the value the check is meant to verify. */
     char search_pattern[64];
     snprintf(search_pattern, sizeof(search_pattern), "%s=", cookie_name);
-    char* cookie_start = strstr(cookie_header, search_pattern);
+    size_t pattern_len = strlen(search_pattern);
+
+    char* cookie_start = NULL;
+    for (char* p = cookie_header; (p = strstr(p, search_pattern)) != NULL; p += pattern_len) {
+        bool at_boundary = (p == cookie_header) ||
+                           (p[-1] == ';') ||
+                           (p[-1] == ' ' && p >= cookie_header + 2 && p[-2] == ';');
+        if (at_boundary) {
+            cookie_start = p + pattern_len;
+            break;
+        }
+    }
 
     if (cookie_start == NULL) {
         free(cookie_header);
         return false;
     }
-
-    // Move past the "name=" part
-    cookie_start += strlen(search_pattern);
 
     // Find the end of the cookie value (semicolon or end of string)
     char* cookie_end = strchr(cookie_start, ';');
@@ -339,8 +357,17 @@ static bool is_authenticated(httpd_req_t *req)
         return false;
     }
 
-    // Validate token matches
-    if (strcmp(session_token, current_session_token) != 0) {
+    /* Constant-time compare: strcmp() returns as soon as two bytes differ, so
+     * response timing leaks how much of the token a guess got right. */
+    size_t expected_len = strlen(current_session_token);
+    if (strlen(session_token) != expected_len) {
+        return false;
+    }
+    uint8_t diff = 0;
+    for (size_t i = 0; i < expected_len; i++) {
+        diff |= (uint8_t)(session_token[i] ^ current_session_token[i]);
+    }
+    if (diff != 0) {
         return false;
     }
 
@@ -367,8 +394,11 @@ static esp_err_t create_session(httpd_req_t *req)
     /* Max-Age makes this a persistent cookie (matching SESSION_TIMEOUT_US) so it
      * survives page reloads and the iOS captive-portal browser, which discards
      * session-only cookies aggressively. */
+    /* HttpOnly keeps the token out of document.cookie, so an XSS bug on any
+     * page cannot hand the session to an attacker. Nothing here reads the
+     * cookie from JavaScript. */
     snprintf(session_cookie_header, sizeof(session_cookie_header),
-             "session=%s; Path=/; Max-Age=1800; SameSite=Strict", current_session_token);
+             "session=%s; Path=/; Max-Age=1800; SameSite=Strict; HttpOnly", current_session_token);
     httpd_resp_set_hdr(req, "Set-Cookie", session_cookie_header);
 
     ESP_LOGI(TAG, "Session created, expires in 30 minutes");
@@ -571,15 +601,21 @@ static char *nvs_export_to_json_robust(bool include_secrets)
         nvs_entry_info(it, &info);
 
         /* Skip secrets for plain (unencrypted) exports:
-         *   passwd      — STA WiFi password (also used as WPA-Enterprise EAP password)
-         *   ap_passwd   — AP WiFi password
-         *   vpn_privkey — WireGuard private key
-         *   vpn_psk     — WireGuard pre-shared key */
+         *   passwd       — STA WiFi password (also used as WPA-Enterprise EAP password)
+         *   ap_passwd    — AP WiFi password
+         *   vpn_privkey  — WireGuard private key
+         *   vpn_psk      — WireGuard pre-shared key
+         *   web_password — salt:hash of the web UI password. Exporting it put
+         *                  the hash in a plaintext file anyone could take away
+         *                  and grind offline.
+         *   mqtt_pass    — MQTT broker credential */
         if (!include_secrets &&
-            (strcmp(info.key, "passwd")      == 0 ||
-             strcmp(info.key, "ap_passwd")   == 0 ||
-             strcmp(info.key, "vpn_privkey") == 0 ||
-             strcmp(info.key, "vpn_psk")     == 0)) {
+            (strcmp(info.key, "passwd")       == 0 ||
+             strcmp(info.key, "ap_passwd")    == 0 ||
+             strcmp(info.key, "vpn_privkey")  == 0 ||
+             strcmp(info.key, "vpn_psk")      == 0 ||
+             strcmp(info.key, "web_password") == 0 ||
+             strcmp(info.key, "mqtt_pass")    == 0)) {
             err = nvs_entry_next(&it);
             continue;
         }
@@ -2316,7 +2352,10 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
                 for (char *p = param1; *p; p++) {
                     if (*p == '+') *p = ' ';
                 }
-                snprintf(error_msg, sizeof(error_msg), "%s", param1);
+                /* Reflected straight back into the page below, so it has to be
+                 * escaped here — the value comes from the URL, which anyone can
+                 * craft and hand to an admin. */
+                html_escape_to(error_msg, sizeof(error_msg), param1);
             }
 
             /* Check for add DHCP reservation */
@@ -2543,15 +2582,21 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
                 clients[i].mac[2], clients[i].mac[3],
                 clients[i].mac[4], clients[i].mac[5]);
 
-            /* Escape single quotes in name for JavaScript */
-            char js_name[DHCP_RESERVATION_NAME_LEN * 2];
+            /* This lands inside onclick="fillDhcpForm('...')" — an HTML
+             * attribute wrapping a JavaScript string literal, which needs two
+             * layers of escaping to get right. Restricting the value to a safe
+             * alphabet sidesteps both; device names are hostnames, so nothing
+             * legitimate is lost. Escaping only the apostrophe, as this did
+             * before, left <, ", and backslash to break out. */
+            char js_name[DHCP_RESERVATION_NAME_LEN];
             const char *src_name = clients[i].name[0] ? clients[i].name : "";
             int j = 0;
-            for (int k = 0; src_name[k] && j < (int)sizeof(js_name) - 2; k++) {
-                if (src_name[k] == '\'') {
-                    js_name[j++] = '\\';
-                }
-                js_name[j++] = src_name[k];
+            for (int k = 0; src_name[k] && j < (int)sizeof(js_name) - 1; k++) {
+                char c = src_name[k];
+                bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                          (c >= '0' && c <= '9') || c == '-' || c == '.' ||
+                          c == '_' || c == ' ';
+                js_name[j++] = ok ? c : '_';
             }
             js_name[j] = '\0';
 
@@ -2572,7 +2617,7 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
                     "<td>%s</td><td>%s</td><td>%s</td><td>%s</td>"
                     "<td><button type='button' class='select-button' onclick=\"fillDhcpForm('%s','%s','%s')\">Select</button></td>"
                     "</tr>",
-                    mac_str, ip_str, clients[i].name[0] ? clients[i].name : "-", traffic_str,
+                    mac_str, ip_str, js_name[0] ? js_name : "-", traffic_str,
                     mac_str, clients[i].has_ip ? ip_str : "", js_name);
             } else {
                 snprintf(row, sizeof(row),
@@ -2580,7 +2625,7 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
                     "<td>%s</td><td>%s</td><td>%s</td>"
                     "<td><button type='button' class='select-button' onclick=\"fillDhcpForm('%s','%s','%s')\">Select</button></td>"
                     "</tr>",
-                    mac_str, ip_str, clients[i].name[0] ? clients[i].name : "-",
+                    mac_str, ip_str, js_name[0] ? js_name : "-",
                     mac_str, clients[i].has_ip ? ip_str : "", js_name);
             }
             SEND_CHUNK(req, row, HTTPD_RESP_USE_STRLEN);
@@ -2770,7 +2815,8 @@ static esp_err_t firewall_get_handler(httpd_req_t *req)
                 for (char *p = error_param; *p; p++) {
                     if (*p == '+') *p = ' ';
                 }
-                snprintf(error_msg, sizeof(error_msg), "%s", error_param);
+                /* Reflected straight back into the page below — escape it. */
+                html_escape_to(error_msg, sizeof(error_msg), error_param);
             }
 
             /* Handle Add Rule */
