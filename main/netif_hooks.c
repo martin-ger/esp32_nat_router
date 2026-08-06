@@ -436,8 +436,12 @@ static void send_icmp_frag_needed(struct pbuf *p, struct netif *netif, uint16_t 
     // Don't generate ICMP errors in response to ICMP (avoid feedback loops)
     if (IPH_PROTO(orig_ip) == 1 /* ICMP */) return;
 
+    /* IHL comes from the sender, so the claimed header length has to be backed
+     * by bytes actually present in this pbuf before it is copied out below —
+     * otherwise up to 40 bytes of adjacent memory would be echoed back to it. */
     uint16_t orig_ihl = IPH_HL(orig_ip) * 4;
     if (orig_ihl < 20 || orig_ihl > 60) return;
+    if (p->len < 14u + orig_ihl) return;
 
     // ICMP body: 2 bytes unused + 2 bytes next-hop MTU + orig IP header + first 8 data bytes
     uint16_t avail_data = (p->len > 14u + orig_ihl) ? (p->len - 14 - orig_ihl) : 0;

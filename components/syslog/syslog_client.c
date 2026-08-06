@@ -65,6 +65,10 @@ static const char *TAG = "syslog";
 /* Queue depth — how many messages can be buffered */
 #define SYSLOG_QUEUE_DEPTH  16
 
+/* Bounded wait for the sender task to exit before its queue is deleted. */
+#define SYSLOG_STOP_TIMEOUT_MS 2000
+#define SYSLOG_STOP_POLL_MS    20
+
 /* Message passed through the queue */
 typedef struct {
     uint16_t len;
@@ -79,7 +83,8 @@ static uint16_t s_port = SYSLOG_DEFAULT_PORT;
 
 /* Sender task state */
 static QueueHandle_t s_queue = NULL;
-static TaskHandle_t s_sender_task = NULL;
+/* Cleared by sender_task on its way out; stop_sender() polls it. */
+static TaskHandle_t volatile s_sender_task = NULL;
 static int s_sock = -1;
 static struct sockaddr_in s_dest_addr;
 static atomic_bool s_resolved = false;
@@ -326,18 +331,34 @@ static void stop_sender(void)
         /* Send poison pill to stop the sender task */
         syslog_msg_t msg = { .len = 0 };
         xQueueSend(s_queue, &msg, pdMS_TO_TICKS(100));
-        /* Give the task time to exit */
-        vTaskDelay(pdMS_TO_TICKS(50));
+        /* Wait for the task to clear its own handle.  A fixed delay could
+         * expire while it was still blocked in xQueueReceive(), and the
+         * vQueueDelete() below would then pull the queue out from under it. */
+        for (int waited = 0; s_sender_task && waited < SYSLOG_STOP_TIMEOUT_MS;
+             waited += SYSLOG_STOP_POLL_MS) {
+            vTaskDelay(pdMS_TO_TICKS(SYSLOG_STOP_POLL_MS));
+        }
+    }
+    if (s_sender_task) {
+        ESP_LOGW(TAG, "syslog sender still running; keeping its queue");
+        return;
     }
     if (s_queue) {
         vQueueDelete(s_queue);
         s_queue = NULL;
     }
+    /* Release the format buffers under the same lock syslog_vprintf() takes,
+     * so a concurrent log call sees them NULL rather than freed.  s_fmt_mutex
+     * itself is kept for the lifetime of the process — deleting it here would
+     * race with a writer already blocked on xSemaphoreTake(). */
+    if (s_fmt_mutex) {
+        xSemaphoreTake(s_fmt_mutex, portMAX_DELAY);
+    }
     free(s_rawbuf); s_rawbuf = NULL;
     free(s_pktbuf); s_pktbuf = NULL;
+    s_rawpos = 0;
     if (s_fmt_mutex) {
-        vSemaphoreDelete(s_fmt_mutex);
-        s_fmt_mutex = NULL;
+        xSemaphoreGive(s_fmt_mutex);
     }
 }
 

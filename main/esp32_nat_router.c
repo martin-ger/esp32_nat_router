@@ -461,7 +461,7 @@ static void eth_event_handler(void* arg, esp_event_base_t event_base,
         init_sntp_if_needed();
         syslog_notify_connected();
         if (vpn_enabled) {
-            xTaskCreate(vpn_connect_task, "vpn_connect", 4096, NULL, 5, NULL);
+            vpn_connect_task_start();
         }
         xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);
     }
@@ -503,7 +503,12 @@ static void wifi_ap_event_handler(void* arg, esp_event_base_t event_base,
         }
     } else if (event_id == WIFI_EVENT_AP_STADISCONNECTED) {
         wifi_event_ap_stadisconnected_t* event = (wifi_event_ap_stadisconnected_t*) event_data;
-        connect_count--;
+        /* Blocked MACs are deauthed on connect without ever being counted, and
+         * that deauth raises this event — decrementing here would underflow the
+         * unsigned counter to 65535. */
+        if (!is_mac_blocked(event->mac) && connect_count > 0) {
+            connect_count--;
+        }
         client_stats_on_disconnect(event->mac);
         const char* name = lookup_device_name_by_mac(event->mac);
         if (name) {
@@ -723,7 +728,7 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
 
         // Start VPN connection if enabled
         if (vpn_enabled) {
-            xTaskCreate(vpn_connect_task, "vpn_connect", 4096, NULL, 5, NULL);
+            vpn_connect_task_start();
         }
 
         /* Re-enable NAPT here in case the AP cycled (channel change from
@@ -778,7 +783,12 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
     else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_AP_STADISCONNECTED)
     {
         wifi_event_ap_stadisconnected_t* event = (wifi_event_ap_stadisconnected_t*) event_data;
-        connect_count--;
+        /* Blocked MACs are deauthed on connect without ever being counted, and
+         * that deauth raises this event — decrementing here would underflow the
+         * unsigned counter to 65535. */
+        if (!is_mac_blocked(event->mac) && connect_count > 0) {
+            connect_count--;
+        }
         client_stats_on_disconnect(event->mac);
 
         /* Look up device name from DHCP reservations */
@@ -797,9 +807,6 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
     }
 }
 #endif
-
-const int CONNECTED_BIT = BIT0;
-#define JOIN_TIMEOUT_MS (2000)
 
 void ap_set_enabled(bool enabled)
 {
@@ -1122,8 +1129,6 @@ void wifi_init(const uint8_t* mac, const char* ssid, const char* ent_username, c
     // esp_netif_get_dns_info(ESP_IF_WIFI_AP, ESP_NETIF_DNS_MAIN, &dnsinfo);
     // ESP_LOGI(TAG, "DNS IP:" IPSTR, IP2STR(&dnsinfo.ip.u_addr.ip4));
 
-    xEventGroupWaitBits(wifi_event_group, CONNECTED_BIT,
-        pdFALSE, pdTRUE, pdMS_TO_TICKS(JOIN_TIMEOUT_MS));
     ESP_ERROR_CHECK(esp_wifi_start());
 
     if (strlen(ssid) > 0) {

@@ -33,6 +33,10 @@ esp_err_t vpn_connect(void);
 void vpn_disconnect(void);
 bool vpn_is_connected(void);
 void vpn_connect_task(void *pvParameters);
+
+/* Spawns vpn_connect_task unless one is already pending.  Returns false if a
+ * connect attempt was already in flight. */
+bool vpn_connect_task_start(void);
 void init_sntp_if_needed(void);
 
 // VPN subnet helpers (for kill switch packet filtering)

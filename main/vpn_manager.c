@@ -161,6 +161,26 @@ static void init_sntp(void)
     esp_sntp_init();
 }
 
+/* Guards against a second connect task while one is still waiting for SNTP:
+ * every uplink GOT_IP would otherwise spawn another 4 KB task that sits for up
+ * to 30 s and then races the others inside vpn_connect() over wg_ctx. */
+static volatile bool vpn_connect_pending = false;
+
+bool vpn_connect_task_start(void)
+{
+    if (vpn_connect_pending) {
+        ESP_LOGI(TAG, "VPN connect already pending, skipping");
+        return false;
+    }
+    vpn_connect_pending = true;
+    if (xTaskCreate(vpn_connect_task, "vpn_connect", 4096, NULL, 5, NULL) != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create VPN connect task");
+        vpn_connect_pending = false;
+        return false;
+    }
+    return true;
+}
+
 void vpn_connect_task(void *pvParameters)
 {
     // Wait for SNTP time sync before connecting VPN
@@ -190,6 +210,7 @@ void vpn_connect_task(void *pvParameters)
         ESP_LOGW(TAG, "SNTP sync timeout after %ds, proceeding with VPN anyway", max_retry / 2);
     }
     vpn_connect();
+    vpn_connect_pending = false;
     vTaskDelete(NULL);
 }
 
