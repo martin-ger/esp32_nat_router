@@ -10,6 +10,9 @@
  * Password-protected pages use cookie-based sessions (30-min timeout).
  * HTML templates are defined in pages.h as C macro strings.
  */
+#include <stdlib.h>
+#include <string.h>
+#include "driver/gpio.h"
 #include "esp_netif.h"
 #include "lwip/ip_addr.h"
 #include "lwip/inet.h"
@@ -1350,6 +1353,22 @@ static httpd_uri_t indexp_post = {
 };
 
 
+/* Parse a GPIO number from a form field. An empty field means "none" (-1);
+ * anything that is not a plain number leaves *out untouched so a malformed
+ * field never silently reprograms a pin. */
+static void parse_gpio_field(const char *value, int *out)
+{
+    if (value[0] == '\0') {
+        *out = -1;
+        return;
+    }
+    char *end;
+    long v = strtol(value, &end, 10);
+    if (end != value && *end == '\0' && v >= -1 && v < GPIO_NUM_MAX) {
+        *out = (int)v;
+    }
+}
+
 /* Router Config page GET handler */
 static esp_err_t config_get_handler(httpd_req_t *req)
 {
@@ -1702,6 +1721,36 @@ static esp_err_t config_get_handler(httpd_req_t *req)
                 httpd_resp_send(req, NULL, 0);
                 return ESP_OK;
             }
+
+            /* Handle antenna switch settings (single form) */
+            if (httpd_query_key_value(buf, "ant_save", param1, sizeof(param1)) == ESP_OK) {
+                int new_gpio = antenna_gpio;
+                int new_en = antenna_en_gpio;
+                int new_sel = antenna_state;
+                if (httpd_query_key_value(buf, "ant_gpio", param1, sizeof(param1)) == ESP_OK) {
+                    preprocess_string(param1);
+                    parse_gpio_field(param1, &new_gpio);
+                }
+                if (httpd_query_key_value(buf, "ant_en", param1, sizeof(param1)) == ESP_OK) {
+                    preprocess_string(param1);
+                    parse_gpio_field(param1, &new_en);
+                }
+                if (httpd_query_key_value(buf, "ant_sel", param1, sizeof(param1)) == ESP_OK) {
+                    preprocess_string(param1);
+                    new_sel = (strcmp(param1, "1") == 0) ? 1 : 0;
+                }
+                if (antenna_switch_set(new_gpio, new_sel, new_en) == ESP_OK) {
+                    ESP_LOGI(TAG, "Antenna switch settings saved via web");
+                } else {
+                    ESP_LOGW(TAG, "Antenna switch settings rejected (GPIO %d / enable %d)",
+                             new_gpio, new_en);
+                }
+                free(buf);
+                httpd_resp_set_status(req, "303 See Other");
+                httpd_resp_set_hdr(req, "Location", "/config");
+                httpd_resp_send(req, NULL, 0);
+                return ESP_OK;
+            }
         }
         free(buf);
     }
@@ -1873,6 +1922,24 @@ static esp_err_t config_get_handler(httpd_req_t *req)
         (unsigned long)pcap_captured, (unsigned long)pcap_dropped,
         current_snaplen, sta_ip_str);
     SEND_CHUNK(req, section, HTTPD_RESP_USE_STRLEN);
+
+    /* Chunk 8a: Antenna switch */
+    {
+        const char* ant_color = (antenna_gpio < 0) ? "#888" : "#4caf50";
+        const char* ant_text;
+        if (antenna_gpio < 0) {
+            ant_text = "Disabled";
+        } else {
+            ant_text = antenna_state ? "Active - external antenna"
+                                     : "Active - on-board antenna";
+        }
+        snprintf(section, sizeof(section), CONFIG_CHUNK_ANT,
+            antenna_gpio, antenna_en_gpio,
+            antenna_state ? "" : "selected",
+            antenna_state ? "selected" : "",
+            ant_color, ant_text);
+        SEND_CHUNK(req, section, HTTPD_RESP_USE_STRLEN);
+    }
 
     /* Chunk 9: Device management heading */
     SEND_CHUNK(req, CONFIG_CHUNK_TAIL, HTTPD_RESP_USE_STRLEN);

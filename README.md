@@ -376,6 +376,8 @@ set_led_lowactive                 Invert LED polarity (active-low LEDs)
 set_led_strip [<n>|none]          GPIO for WS2812/SK6812 addressable LED
 set_oled [enable|disable]         OLED display (ESP32-C3/S3 only)
 set_oled_gpio <sda> <scl>         I2C pins for OLED
+set_antenna [<gpio>] <0|1> [<en>] Antenna switch: 0 = on-board, 1 = external
+set_antenna off                   Disable antenna switching, release the pins
 set_rf_switch_XIAO [0|1]          XIAO ESP32-C6: built-in (0) or external (1) antenna
 ```
 

@@ -174,6 +174,25 @@ setTimeout(\"location.href = '/'\", 10000);\
 <small>Connect using: nc %s 19000 | wireshark -k -i -</small>\
 </form>"
 
+/* Antenna switch section - uses: ant_gpio, ant_en, sel_onboard, sel_external,
+   status_color, status_text */
+#define CONFIG_CHUNK_ANT "\
+<h2>Antenna Switch</h2>\
+<form action='' method='GET'>\
+<input type='hidden' name='ant_save' value='1'/>\
+<table>\
+<tr><td>Control GPIO</td><td><input type='number' name='ant_gpio' value='%d' min='-1' max='63' style='width: 100px;'/> <span style='color:#888;font-size:0.85rem;'>-1 = disabled</span></td></tr>\
+<tr><td>Enable GPIO</td><td><input type='number' name='ant_en' value='%d' min='-1' max='63' style='width: 100px;'/> <span style='color:#888;font-size:0.85rem;'>optional, held low (-1 = none)</span></td></tr>\
+<tr><td>Antenna</td><td><select name='ant_sel'>\
+<option value='0' %s>On-board</option>\
+<option value='1' %s>External</option>\
+</select></td></tr>\
+<tr><td>Status</td><td><strong style='color: %s;'>%s</strong></td></tr>\
+<tr><td></td><td><input type='submit' value='Save' class='ok-button'/></td></tr>\
+</table>\
+<small>" ANTENNA_BOARD_HINT " Applied immediately, no reboot needed.</small>\
+</form>"
+
 /* Device management and footer */
 #define CONFIG_CHUNK_TAIL "\
 <h2>Device Management</h2>\

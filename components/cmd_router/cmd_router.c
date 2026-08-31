@@ -80,6 +80,7 @@ static void register_client_stats_cmd(void);
 static void register_set_ap_nat(void);
 static void register_set_tx_power(void);
 static void register_set_wifi_country(void);
+static void register_set_antenna(void);
 #if defined(CONFIG_IDF_TARGET_ESP32C6)
 static void register_set_rf_switch(void);
 #endif
@@ -308,6 +309,7 @@ void register_router(void)
 #if WIFI_HAS_5GHZ
     register_set_sta_band();
 #endif
+    register_set_antenna();
 #if defined(CONFIG_IDF_TARGET_ESP32C6)
     register_set_rf_switch();
 #endif
@@ -2236,14 +2238,124 @@ static void register_set_wifi_country(void)
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }
 
+/* 'set_antenna' command - GPIO-driven antenna (RF) switch */
+static void print_antenna_status(void)
+{
+    if (antenna_gpio < 0) {
+        printf("Antenna switch: disabled (no control GPIO configured)\n");
+        return;
+    }
+    printf("Antenna switch: GPIO%d = %d (%s antenna)\n",
+           antenna_gpio, antenna_state, antenna_state ? "external" : "on-board");
+    if (antenna_en_gpio >= 0) {
+        printf("  Enable GPIO: %d (held low)\n", antenna_en_gpio);
+    } else {
+        printf("  Enable GPIO: none\n");
+    }
+}
+
+/* Parse a plain decimal GPIO number; returns false on trailing junk */
+static bool parse_gpio_arg(const char *s, int *out)
+{
+    char *end;
+    long v = strtol(s, &end, 10);
+    if (end == s || *end != '\0' || v < -1 || v >= GPIO_NUM_MAX) {
+        return false;
+    }
+    *out = (int)v;
+    return true;
+}
+
+static int set_antenna_cmd(int argc, char **argv)
+{
+    if (argc < 2) {
+        print_antenna_status();
+        printf("Usage: set_antenna [<gpio>] <0|1> [<enable_gpio>]\n");
+        printf("       set_antenna off            disable, release the pins\n");
+        printf("  0 = on-board antenna, 1 = external antenna\n");
+        printf("  <enable_gpio> is optional and held low while the switch is used\n");
+        printf("  %s\n", ANTENNA_BOARD_HINT);
+        return 0;
+    }
+
+    int gpio, state = 0, en_gpio = -1;
+
+    if (strcasecmp(argv[1], "off") == 0 || strcmp(argv[1], "-1") == 0) {
+        gpio = -1;
+    } else if (argc == 2) {
+        /* Selection only — reuse the pins already configured */
+        if (antenna_gpio < 0) {
+            printf("No control GPIO configured yet.\n");
+            printf("Usage: set_antenna <gpio> <0|1> [<enable_gpio>]\n");
+            printf("  %s\n", ANTENNA_BOARD_HINT);
+            return 1;
+        }
+        if (strcmp(argv[1], "0") != 0 && strcmp(argv[1], "1") != 0) {
+            printf("Invalid value. Use 0 (on-board) or 1 (external).\n");
+            return 1;
+        }
+        gpio = antenna_gpio;
+        en_gpio = antenna_en_gpio;
+        state = (argv[1][0] == '1');
+    } else {
+        if (!parse_gpio_arg(argv[1], &gpio) || gpio < 0) {
+            printf("Invalid control GPIO '%s'.\n", argv[1]);
+            return 1;
+        }
+        if (strcmp(argv[2], "0") != 0 && strcmp(argv[2], "1") != 0) {
+            printf("Invalid value. Use 0 (on-board) or 1 (external).\n");
+            return 1;
+        }
+        state = (argv[2][0] == '1');
+        if (argc > 3) {
+            if (strcasecmp(argv[3], "none") == 0) {
+                en_gpio = -1;
+            } else if (!parse_gpio_arg(argv[3], &en_gpio)) {
+                printf("Invalid enable GPIO '%s'.\n", argv[3]);
+                return 1;
+            }
+        }
+    }
+
+    esp_err_t err = antenna_switch_set(gpio, state, en_gpio);
+    if (err == ESP_ERR_INVALID_ARG) {
+        printf("GPIO not usable as an output on this target.\n");
+        return 1;
+    }
+    if (err != ESP_OK) {
+        printf("Failed to save setting: %s\n", esp_err_to_name(err));
+        return err;
+    }
+
+    if (gpio < 0) {
+        printf("Antenna switch disabled.\n");
+    } else {
+        printf("Switched to %s antenna (GPIO%d = %d).\n",
+               state ? "external" : "on-board", gpio, state);
+    }
+    printf("Setting saved (persists across reboots).\n");
+    return 0;
+}
+
+static void register_set_antenna(void)
+{
+    const esp_console_cmd_t cmd = {
+        .command = "set_antenna",
+        .help = "Antenna switch: set_antenna [<gpio>] <0=on-board|1=external> [<enable_gpio>], or 'off'",
+        .hint = NULL,
+        .func = &set_antenna_cmd,
+    };
+    ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
+}
+
 #if defined(CONFIG_IDF_TARGET_ESP32C6)
-/* 'set_rf_switch_XIAO' command - XIAO ESP32-C6 antenna selection */
+/* 'set_rf_switch_XIAO' command - XIAO ESP32-C6 antenna selection.
+ * Kept for compatibility; a thin wrapper over the generic antenna switch
+ * with the XIAO's pins (GPIO14 selects, GPIO3 enables). */
 static int set_rf_switch_cmd(int argc, char **argv)
 {
     if (argc < 2) {
-        int current = 0;
-        get_config_param_int("rf_switch", &current);
-        printf("XIAO ESP32-C6 RF switch: %s\n", current ? "external antenna" : "built-in antenna (default)");
+        print_antenna_status();
         printf("Usage: set_rf_switch_XIAO <0|1>\n");
         printf("  0 = built-in ceramic antenna (default)\n");
         printf("  1 = external antenna\n");
@@ -2260,17 +2372,10 @@ static int set_rf_switch_cmd(int argc, char **argv)
         return 1;
     }
 
-    esp_err_t err = set_config_param_int("rf_switch", value);
+    esp_err_t err = antenna_switch_set(14, value, 3);
     if (err == ESP_OK) {
-        // Apply immediately
-        gpio_reset_pin(GPIO_NUM_3);
-        gpio_set_direction(GPIO_NUM_3, GPIO_MODE_OUTPUT);
-        gpio_set_level(GPIO_NUM_3, 0);  // Activate RF switch control
-        vTaskDelay(pdMS_TO_TICKS(10));
-        gpio_reset_pin(GPIO_NUM_14);
-        gpio_set_direction(GPIO_NUM_14, GPIO_MODE_OUTPUT);
-        gpio_set_level(GPIO_NUM_14, value); // 0 = built-in, 1 = external
-
+        /* Keep the legacy key in step for configs exported from older builds */
+        set_config_param_int("rf_switch", value);
         if (value) {
             printf("Switched to external antenna.\n");
         } else {

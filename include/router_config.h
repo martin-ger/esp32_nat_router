@@ -7,6 +7,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include "esp_err.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -42,6 +43,46 @@ extern uint8_t led_toggle;
 
 // Addressable LED strip GPIO (-1 = disabled/none)
 extern int led_strip_gpio;
+
+/* Antenna (RF) switch — boards with an on-board/external antenna switch drive
+ * it from a GPIO.  All three values are persisted in NVS as "ant_gpio",
+ * "ant_en" and "ant_sel".
+ *
+ * Known boards:
+ *   Waveshare ESP32-C5-Zero : select GPIO 26, no enable pin
+ *                             (low = on-board, high = external IPEX-1)
+ *   XIAO ESP32-C6           : select GPIO 14, enable GPIO 3
+ *                             (low = on-board ceramic, high = external)
+ *
+ * ANTENNA_BOARD_HINT is the wiring hint the console command and the web UI
+ * show for the target's best-known board, so the right pin is one copy/paste
+ * away.
+ */
+#if defined(CONFIG_IDF_TARGET_ESP32C5)
+#define ANTENNA_BOARD_HINT "Waveshare ESP32-C5-Zero: control GPIO 26, no enable pin (0 = on-board, 1 = external IPEX-1)."
+#elif defined(CONFIG_IDF_TARGET_ESP32C6)
+#define ANTENNA_BOARD_HINT "XIAO ESP32-C6: control GPIO 14 with enable GPIO 3 (0 = on-board ceramic, 1 = external)."
+#else
+#define ANTENNA_BOARD_HINT "Check the board schematic for the GPIO that drives the RF switch."
+#endif
+
+// Antenna select GPIO (-1 = antenna switching disabled, pins left alone)
+extern int antenna_gpio;
+
+// Optional RF-switch enable GPIO, driven low while the switch is in use
+// (-1 = board has no enable pin)
+extern int antenna_en_gpio;
+
+// Level driven on antenna_gpio: 0 = on-board antenna, 1 = external antenna
+extern uint8_t antenna_state;
+
+// Drive the configured pins from the current antenna_* values (no NVS write).
+// Does nothing when antenna_gpio is negative.
+esp_err_t antenna_switch_apply(void);
+
+// Persist and apply an antenna switch configuration. A negative gpio disables
+// the switch and releases the previously used pins; en_gpio may be negative.
+esp_err_t antenna_switch_set(int gpio, int state, int en_gpio);
 
 // TTL override for STA upstream (0 = disabled/no change, 1-255 = fixed TTL)
 extern uint8_t sta_ttl_override;
