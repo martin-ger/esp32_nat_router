@@ -171,6 +171,10 @@ int led_gpio = -1;  // -1 means LED disabled (none)
 uint8_t led_lowactive = 0;  // 0 = active-high (default), 1 = active-low (inverted)
 uint8_t led_toggle = 0;  // Shared toggle state for packet-driven LED flicker
 
+int antenna_gpio = -1;      // -1 means antenna switching disabled (pins untouched)
+int antenna_en_gpio = -1;   // Optional RF-switch enable pin, driven low
+uint8_t antenna_state = 0;  // 0 = on-board antenna, 1 = external antenna
+
 uint32_t my_ip;
 uint32_t my_ap_ip;
 
@@ -1158,6 +1162,93 @@ char* param_set_default(const char* def_val) {
     return retval;
 }
 
+/* Antenna (RF) switch control.
+ *
+ * Boards with both an on-board and an external antenna route the RF path
+ * through a switch that is driven by a GPIO: the Waveshare ESP32-C5-Zero uses
+ * GPIO 26 (low = on-board, high = external IPEX-1), the XIAO ESP32-C6 uses
+ * GPIO 14 for the selection plus GPIO 3 to enable the switch.  Both pin
+ * numbers are configuration, not compile-time constants, so any board with
+ * such a switch can be driven from the console or the web UI. */
+esp_err_t antenna_switch_apply(void)
+{
+    if (antenna_gpio < 0) {
+        return ESP_OK;
+    }
+    if (!GPIO_IS_VALID_OUTPUT_GPIO(antenna_gpio)) {
+        ESP_LOGE(TAG, "Antenna switch: GPIO%d is not usable as output", antenna_gpio);
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (antenna_en_gpio >= 0) {
+        if (!GPIO_IS_VALID_OUTPUT_GPIO(antenna_en_gpio)) {
+            ESP_LOGE(TAG, "Antenna switch: enable GPIO%d is not usable as output",
+                     antenna_en_gpio);
+            return ESP_ERR_INVALID_ARG;
+        }
+        gpio_reset_pin((gpio_num_t)antenna_en_gpio);
+        gpio_set_direction((gpio_num_t)antenna_en_gpio, GPIO_MODE_OUTPUT);
+        gpio_set_level((gpio_num_t)antenna_en_gpio, 0);  // Active-low: power the RF switch
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+
+    gpio_reset_pin((gpio_num_t)antenna_gpio);
+    gpio_set_direction((gpio_num_t)antenna_gpio, GPIO_MODE_OUTPUT);
+    gpio_set_level((gpio_num_t)antenna_gpio, antenna_state);
+
+    ESP_LOGI(TAG, "Antenna switch: GPIO%d = %d (%s antenna)",
+             antenna_gpio, antenna_state,
+             antenna_state ? "external" : "on-board");
+    return ESP_OK;
+}
+
+esp_err_t antenna_switch_set(int gpio, int state, int en_gpio)
+{
+    if (gpio >= 0 && !GPIO_IS_VALID_OUTPUT_GPIO(gpio)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (gpio >= 0 && en_gpio >= 0 && !GPIO_IS_VALID_OUTPUT_GPIO(en_gpio)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (gpio >= 0 && gpio == en_gpio) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (gpio < 0) {
+        gpio = -1;
+        en_gpio = -1;
+    }
+    if (en_gpio < 0) {
+        en_gpio = -1;
+    }
+
+    /* Hand any pin we were driving but no longer use back to its default state */
+    if (antenna_gpio >= 0 && antenna_gpio != gpio && antenna_gpio != en_gpio) {
+        gpio_reset_pin((gpio_num_t)antenna_gpio);
+    }
+    if (antenna_en_gpio >= 0 && antenna_en_gpio != gpio && antenna_en_gpio != en_gpio) {
+        gpio_reset_pin((gpio_num_t)antenna_en_gpio);
+    }
+
+    antenna_gpio = gpio;
+    antenna_en_gpio = en_gpio;
+    antenna_state = (state != 0) ? 1 : 0;
+
+    esp_err_t err = set_config_param_int("ant_gpio", antenna_gpio);
+    if (err == ESP_OK) {
+        err = set_config_param_int("ant_en", antenna_en_gpio);
+    }
+    if (err == ESP_OK) {
+        err = set_config_param_int("ant_sel", antenna_state);
+    }
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Antenna switch: failed to save settings: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    return antenna_switch_apply();
+}
+
 void app_main(void)
 {
     initialize_nvs();
@@ -1271,21 +1362,33 @@ void app_main(void)
         led_strip_gpio = led_strip_gpio_setting;
     }
 
+    // Antenna (RF) switch: select pin, optional enable pin and the selected
+    // antenna. Disabled (GPIO -1) unless configured, so untouched boards keep
+    // every pin free.
+    int ant_gpio_setting = -1;
+    if (get_config_param_int("ant_gpio", &ant_gpio_setting) == ESP_OK) {
+        antenna_gpio = ant_gpio_setting;
+
+        int ant_en_setting = -1;
+        get_config_param_int("ant_en", &ant_en_setting);
+        antenna_en_gpio = ant_en_setting;
+
+        int ant_sel_setting = 0;
+        get_config_param_int("ant_sel", &ant_sel_setting);
+        antenna_state = (ant_sel_setting != 0) ? 1 : 0;
+    }
 #if defined(CONFIG_IDF_TARGET_ESP32C6)
-    // XIAO ESP32-C6 RF switch: GPIO3 enables switch, GPIO14 selects antenna
-    int rf_switch_setting = 0;
-    get_config_param_int("rf_switch", &rf_switch_setting);
-    if (rf_switch_setting) {
-        gpio_reset_pin(GPIO_NUM_3);
-        gpio_set_direction(GPIO_NUM_3, GPIO_MODE_OUTPUT);
-        gpio_set_level(GPIO_NUM_3, 0);  // Activate RF switch control
-        vTaskDelay(pdMS_TO_TICKS(10));
-        gpio_reset_pin(GPIO_NUM_14);
-        gpio_set_direction(GPIO_NUM_14, GPIO_MODE_OUTPUT);
-        gpio_set_level(GPIO_NUM_14, 1); // Select external antenna
-        ESP_LOGI(TAG, "XIAO ESP32-C6 RF switch: external antenna enabled");
+    else {
+        // Legacy XIAO ESP32-C6 key: GPIO3 enables the switch, GPIO14 selects
+        int rf_switch_setting = 0;
+        if (get_config_param_int("rf_switch", &rf_switch_setting) == ESP_OK && rf_switch_setting) {
+            antenna_gpio = 14;
+            antenna_en_gpio = 3;
+            antenna_state = 1;
+        }
     }
 #endif
+    antenna_switch_apply();
 
     // Load per-client stats enabled flag from NVS (default 0 = disabled)
     int cstats_setting = 0;
