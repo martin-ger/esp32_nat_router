@@ -281,7 +281,7 @@ esp_err_t remote_console_init(void) {
         /* Create server task */
         BaseType_t ret = xTaskCreate(remote_console_task, "remote_console",
                                      RC_TASK_STACK_SIZE, NULL,
-                                     RC_TASK_PRIORITY, &rc_state.task_handle);
+                                     RC_TASK_PRIORITY, (TaskHandle_t *)&rc_state.task_handle);
         if (ret != pdPASS) {
             ESP_LOGE(TAG, "Failed to create remote console task");
             return ESP_ERR_NO_MEM;
@@ -310,7 +310,7 @@ esp_err_t remote_console_enable(void) {
         rc_state.shutdown_requested = false;
         BaseType_t ret = xTaskCreate(remote_console_task, "remote_console",
                                      RC_TASK_STACK_SIZE, NULL,
-                                     RC_TASK_PRIORITY, &rc_state.task_handle);
+                                     RC_TASK_PRIORITY, (TaskHandle_t *)&rc_state.task_handle);
         if (ret != pdPASS) {
             ESP_LOGE(TAG, "Failed to create remote console task");
             rc_config.enabled = false;

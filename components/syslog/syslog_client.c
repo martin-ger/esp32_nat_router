@@ -321,7 +321,7 @@ static void start_sender(void)
     if (!s_pktbuf) s_pktbuf = malloc(SYSLOG_PKT_MAX);
 
     if (!s_sender_task && s_queue) {
-        xTaskCreate(sender_task, "syslog_tx", 3072, NULL, 5, &s_sender_task);
+        xTaskCreate(sender_task, "syslog_tx", 3072, NULL, 5, (TaskHandle_t *)&s_sender_task);
     }
 }
 
