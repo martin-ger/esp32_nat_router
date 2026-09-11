@@ -87,6 +87,10 @@ bool ringbuf_alloc(size_t size)
     return true;
 }
 
+/* Releases the data buffer only.  The mutex and semaphore are created once by
+ * ringbuf_init() and must outlive it: this runs on every client disconnect
+ * while the packet hook may still be inside ringbuf_write(), and ringbuf_init()
+ * is not called again for the lifetime of the server task. */
 void ringbuf_free(void)
 {
     if (ringbuf_mutex == NULL) {
@@ -107,10 +111,6 @@ void ringbuf_free(void)
     }
 
     xSemaphoreGive(ringbuf_mutex);
-    vSemaphoreDelete(ringbuf_mutex);
-    ringbuf_mutex = NULL;
-    vSemaphoreDelete(data_ready_sem);
-    data_ready_sem = NULL;
 }
 
 void ringbuf_reset(void)
