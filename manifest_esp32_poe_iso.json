@@ -1,0 +1,16 @@
+{
+  "name": "ESP32 NAT Router",
+  "version": "2.4.17",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32",
+      "parts": [
+        { "path": "firmware_esp32_poe_iso/bootloader.bin", "offset": 4096 },
+        { "path": "firmware_esp32_poe_iso/partition-table.bin", "offset": 32768 },
+        { "path": "firmware_esp32_poe_iso/ota_data_initial.bin", "offset": 61440 },
+        { "path": "firmware_esp32_poe_iso/esp32_nat_router.bin", "offset": 131072 }
+      ]
+    }
+  ]
+}
