@@ -162,6 +162,18 @@ void preprocess_string(char* str)
     *q = '\0';
 }
 
+/* Keys whose value must never reach the console, the log, or syslog. */
+static bool is_secret_param(const char *name)
+{
+    static const char *const secrets[] = {
+        "passwd", "ap_passwd", "vpn_privkey", "vpn_psk", "web_password", "mqtt_pass"
+    };
+    for (size_t i = 0; i < sizeof(secrets) / sizeof(secrets[0]); i++) {
+        if (strcmp(name, secrets[i]) == 0) return true;
+    }
+    return false;
+}
+
 esp_err_t get_config_param_str(char* name, char** param)
 {
     nvs_handle_t nvs;
@@ -176,7 +188,7 @@ esp_err_t get_config_param_str(char* name, char** param)
                 return ESP_ERR_NO_MEM;
             }
             err = nvs_get_str(nvs, name, *param, &len);
-            ESP_LOGI(TAG, "%s %s", name, *param);
+            ESP_LOGI(TAG, "%s %s", name, is_secret_param(name) ? "<hidden>" : *param);
         } else {
             /* Key missing (NVS_NOT_FOUND) is the common case for optional keys;
              * must still close the handle here or it leaks on every lookup. */
