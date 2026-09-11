@@ -1,7 +1,7 @@
 ESP32 NAT Router Build Information
 =================================
 Target: ESP32-C5 (esp32c5)
-Build Time: 2026-08-31 20:52:57
-Git Hash: 764cd25
+Build Time: 2026-09-11 11:37:04
+Git Hash: 7bed41b
 Binary Files: 4
 Build Directory: build
