@@ -6,7 +6,7 @@
 set -e  # Exit on any error
 
 # Build targets in order
-BUILD_ORDER=("esp32" "wt32_eth01" "esp32s3" "esp32c5" "esp32c6" "esp32c3")
+BUILD_ORDER=("esp32" "wt32_eth01" "esp32_poe_iso" "esp32s3" "esp32c5" "esp32c6" "esp32c3")
 
 # Target descriptions
 declare -A TARGET_DESC=(
@@ -16,6 +16,7 @@ declare -A TARGET_DESC=(
     ["esp32c3"]="ESP32-C3"
     ["esp32c5"]="ESP32-C5"
     ["wt32_eth01"]="WT32-ETH01 (Ethernet)"
+    ["esp32_poe_iso"]="Olimex ESP32-POE-ISO (Ethernet)"
 )
 
 # IDF chip target for each build target
@@ -26,22 +27,51 @@ declare -A TARGET_CHIP=(
     ["esp32c3"]="esp32c3"
     ["esp32c5"]="esp32c5"
     ["wt32_eth01"]="esp32"
+    ["esp32_poe_iso"]="esp32"
 )
 
-# Extra sdkconfig defaults (semicolon-separated)
+# Extra sdkconfig defaults (semicolon-separated).
+# ESP-IDF automatically applies sdkconfig.defaults.<IDF_TARGET> on top of every
+# file listed here, so the chip targets would work with plain sdkconfig.defaults.
+# The board variants (wt32_eth01, esp32_poe_iso) are not chip names and need
+# their files listed explicitly; the chip entries are spelled out for clarity.
 declare -A TARGET_SDKCONFIG=(
-    ["wt32_eth01"]="sdkconfig.defaults;sdkconfig.defaults.wt32_eth01"
+    ["esp32"]="sdkconfig.defaults"
+    ["esp32s3"]="sdkconfig.defaults;sdkconfig.defaults.esp32s3"
+    ["esp32c6"]="sdkconfig.defaults;sdkconfig.defaults.esp32c6"
+    ["esp32c3"]="sdkconfig.defaults;sdkconfig.defaults.esp32c3"
+    ["esp32c5"]="sdkconfig.defaults;sdkconfig.defaults.esp32c5"
+    ["wt32_eth01"]="sdkconfig.defaults;sdkconfig.defaults.eth_common;sdkconfig.defaults.wt32_eth01"
+    ["esp32_poe_iso"]="sdkconfig.defaults;sdkconfig.defaults.eth_common;sdkconfig.defaults.esp32_poe_iso"
 )
 
-# Custom build directory (empty = default "build")
+# Per-target build directory and sdkconfig, so a stale config from the previous
+# target can never leak into the next one.
 declare -A TARGET_BUILD_DIR=(
+    ["esp32"]="build_esp32"
+    ["esp32s3"]="build_esp32s3"
+    ["esp32c6"]="build_esp32c6"
+    ["esp32c3"]="build_esp32c3"
+    ["esp32c5"]="build_esp32c5"
     ["wt32_eth01"]="build_eth"
+    ["esp32_poe_iso"]="build_poe_iso"
 )
 
-# Custom sdkconfig file path (empty = default "sdkconfig")
 declare -A TARGET_SDKCONFIG_FILE=(
+    ["esp32"]="sdkconfig.esp32"
+    ["esp32s3"]="sdkconfig.esp32s3"
+    ["esp32c6"]="sdkconfig.esp32c6"
+    ["esp32c3"]="sdkconfig.esp32c3"
+    ["esp32c5"]="sdkconfig.esp32c5"
     ["wt32_eth01"]="sdkconfig.eth"
+    ["esp32_poe_iso"]="sdkconfig.poe_iso"
 )
+
+# Warn when the app leaves almost no room in its OTA slot.
+# ota_0 is 1536 KiB (partitions_example.csv). idf.py itself fails the build
+# once the image no longer fits; this only makes the headroom visible.
+OTA_SLOT_BYTES=$((1536 * 1024))
+OTA_MAX_PERCENT=95
 
 # Colors for output
 RED='\033[0;31m'
@@ -104,6 +134,9 @@ build_target() {
     # Build project
     print_status "Starting compilation for $target..."
     if idf.py "${build_args[@]}" build; then
+        if ! check_ota_headroom "$target"; then
+            return 1
+        fi
         # Save binary artifacts to separate directory
         save_binary_artifacts "$target" "$description"
         print_success "Build completed successfully for $target"
@@ -112,6 +145,29 @@ build_target() {
         print_error "Build failed for $target"
         return 1
     fi
+}
+
+# Report how full the OTA slot is and warn when it is nearly exhausted. Without
+# this the C3 and C5 images crept to over 99% of ota_0 unnoticed.
+check_ota_headroom() {
+    local target=$1
+    local build_dir="${TARGET_BUILD_DIR[$target]:-build}"
+    local app="$build_dir/esp32_nat_router.bin"
+
+    [ -f "$app" ] || return 0
+
+    local size
+    size=$(stat -c%s "$app" 2>/dev/null || stat -f%z "$app" 2>/dev/null) || return 0
+    local percent=$((size * 100 / OTA_SLOT_BYTES))
+    local free=$((OTA_SLOT_BYTES - size))
+
+    print_status "  ota_0 usage: $size / $OTA_SLOT_BYTES bytes (${percent}%, ${free} free)"
+
+    if [ "$percent" -ge "$OTA_MAX_PERCENT" ]; then
+        print_warning "$target fills ${percent}% of ota_0 (warning threshold ${OTA_MAX_PERCENT}%)"
+        print_warning "Consider freeing flash before publishing — see 'idf.py size-components'."
+    fi
+    return 0
 }
 
 # Function to save binary artifacts to separate directory

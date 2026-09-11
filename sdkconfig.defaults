@@ -10,6 +10,14 @@ CONFIG_LWIP_IRAM_OPTIMIZATION=y
 CONFIG_BOOTLOADER_LOG_LEVEL_WARN=y
 CONFIG_BOOTLOADER_LOG_LEVEL=2
 
+# assert() aborts without the __FILE__/expression strings
+CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_SILENT=y
+CONFIG_COMPILER_OPTIMIZATION_ASSERTION_LEVEL=1
+
+# esp_err_to_name() returns the numeric code instead of carrying the full
+# error-string table
+CONFIG_ESP_ERR_TO_NAME_LOOKUP=n
+
 # Increase main task stack size
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=7168
 

@@ -1,0 +1,10 @@
+# Settings shared by every LAN8720 Ethernet-uplink board.
+# Board files add PHY address, power GPIO and RMII clocking on top.
+
+# Ethernet uplink mode
+CONFIG_ETH_UPLINK=y
+CONFIG_ETH_MDC_GPIO=23
+CONFIG_ETH_MDIO_GPIO=18
+
+# Ethernet driver
+CONFIG_ETH_USE_ESP32_EMAC=y
