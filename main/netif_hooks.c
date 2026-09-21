@@ -530,6 +530,35 @@ static void send_icmp_frag_needed(struct pbuf *p, struct netif *netif, uint16_t 
 // AP netif hook functions (for PCAP capture and ACL)
 static IRAM_ATTR err_t ap_netif_input_hook(struct pbuf *p, struct netif *netif) {
     bool is_acl_monitored = false;
+    bool captured = false;
+
+    /* Per-client byte counting: source MAC = client.
+     *
+     * This has to happen before the bridge gets the frame. In repeater mode
+     * bridge_ap_to_sta() consumes (and frees) every ARP and IPv4 frame headed
+     * upstream, which is nearly all client traffic, and repeater_ap_rx_handle()
+     * then returns ERR_OK from here. Counting below that early return only ever
+     * saw the frames addressed to the ESP32 itself, so RX read as 0 for every
+     * client while TX accumulated normally -- the bridge's downstream path
+     * emits through ap_netif->linkoutput, which is the hook that counts TX. */
+    if (client_stats_enabled && p != NULL && p->len >= 14) {
+        const uint8_t *src_mac = ((const uint8_t *)p->payload) + 6;
+        client_stats_entry_t *entry = find_client_stats(src_mac);
+        if (entry) {
+            entry->bytes_received += p->tot_len;
+            entry->packets_received++;
+        }
+    }
+
+    /* Capture before the bridge handler too, and for the same reason as the
+     * counting above: bridged frames never reach the capture call at the end
+     * of this function, so a promiscuous capture in repeater mode recorded
+     * only the STA->AP direction (which is emitted through
+     * ap_netif_linkoutput_hook) and none of what the clients actually sent. */
+    if (pcap_should_capture(is_acl_monitored, true)) {
+        pcap_capture_packet(p);
+        captured = true;
+    }
 
 #if CONFIG_REPEATER_MODE
     if (repeater_ap_rx_handle(p, netif)) {
@@ -545,18 +574,8 @@ static IRAM_ATTR err_t ap_netif_input_hook(struct pbuf *p, struct netif *netif) 
     // Clamp TCP MSS on SYN packets from clients
     clamp_tcp_mss(p, ap_mss_clamp);
 
-    // Per-client byte counting: source MAC = client
-    if (client_stats_enabled && p != NULL && p->len >= 14) {
-        const uint8_t *src_mac = ((const uint8_t *)p->payload) + 6;
-        client_stats_entry_t *entry = find_client_stats(src_mac);
-        if (entry) {
-            entry->bytes_received += p->tot_len;
-            entry->packets_received++;
-        }
-    }
-
     // Capture packet based on mode and ACL monitor flag (AP interface = true)
-    if (pcap_should_capture(is_acl_monitored, true)) {
+    if (!captured && pcap_should_capture(is_acl_monitored, true)) {
         pcap_capture_packet(p);
     }
 
