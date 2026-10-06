@@ -126,6 +126,7 @@ uint8_t sta_band = STA_BAND_AUTO;
 int32_t vpn_enabled = 0;
 int32_t vpn_port = 51820;
 int32_t vpn_keepalive = 0;
+int32_t vpn_mtu = VPN_MTU_DEFAULT;
 char* vpn_private_key = NULL;
 char* vpn_public_key = NULL;
 char* vpn_preshared_key = NULL;
@@ -1559,6 +1560,12 @@ void app_main(void)
     if (get_config_param_int("vpn_ka", &vpn_ka_setting) == ESP_OK) {
         vpn_keepalive = (int32_t)vpn_ka_setting;
     }
+    int vpn_mtu_setting = VPN_MTU_DEFAULT;
+    if (get_config_param_int("vpn_mtu", &vpn_mtu_setting) == ESP_OK) {
+        if (vpn_mtu_setting < VPN_MTU_MIN) vpn_mtu_setting = VPN_MTU_MIN;
+        if (vpn_mtu_setting > VPN_MTU_MAX) vpn_mtu_setting = VPN_MTU_MAX;
+        vpn_mtu = (int32_t)vpn_mtu_setting;
+    }
     int vpn_ks_setting = 1;  // Default on
     if (get_config_param_int("vpn_ks", &vpn_ks_setting) == ESP_OK) {
         vpn_killswitch = (int32_t)vpn_ks_setting;
@@ -1578,9 +1585,9 @@ void app_main(void)
     }
     // Pre-set MSS/PMTU when VPN is enabled (before WiFi connects)
     if (vpn_enabled) {
-        ap_mss_clamp = 1380;
-        ap_pmtu = 1440;
-        ESP_LOGI(TAG, "VPN enabled, MSS=1380 PMTU=1440 pre-set");
+        ap_mss_clamp = (uint16_t)(vpn_mtu - 40);
+        ap_pmtu = (uint16_t)vpn_mtu;
+        ESP_LOGI(TAG, "VPN enabled, MSS=%u PMTU=%u pre-set", ap_mss_clamp, ap_pmtu);
     }
 
 #if !CONFIG_ETH_UPLINK

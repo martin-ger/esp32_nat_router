@@ -340,7 +340,7 @@ esp_err_t vpn_import_conf(const char *text)
 
     char privkey[128] = "", pubkey[128] = "", psk[128] = "";
     char endpoint_host[128] = "", address_ip[48] = "", netmask[16] = "", dns[128] = "";
-    int port = 51820, keepalive = 0, route_all = -1;
+    int port = 51820, keepalive = 0, route_all = -1, mtu = 0;
     bool have_port = false;
 
     char *save = NULL;
@@ -380,6 +380,8 @@ esp_err_t vpn_import_conf(const char *text)
             strlcpy(endpoint_host, trim_ws(val), sizeof(endpoint_host));
         } else if (strcasecmp(key, "PersistentKeepalive") == 0) {
             keepalive = atoi(val);
+        } else if (strcasecmp(key, "MTU") == 0) {
+            mtu = atoi(val);
         } else if (strcasecmp(key, "AllowedIPs") == 0) {
             route_all = (strstr(val, "0.0.0.0/0") != NULL) ? 1 : 0;
         }
@@ -402,6 +404,7 @@ esp_err_t vpn_import_conf(const char *text)
     if (dns[0]) set_config_param_str("vpn_dns", dns);
     if (have_port) set_config_param_int("vpn_port", port);
     set_config_param_int("vpn_ka", keepalive);
+    if (mtu > 0) set_config_param_int("vpn_mtu", mtu);
     if (route_all >= 0) set_config_param_int("vpn_rall", route_all);
     set_config_param_int("vpn_enabled", 1);
 
@@ -1737,6 +1740,7 @@ static int show(int argc, char **argv)
         printf("Netmask: %s\n", (vpn_netmask && vpn_netmask[0]) ? vpn_netmask : "255.255.255.0");
         printf("Endpoint: %s:%ld\n", (vpn_endpoint && vpn_endpoint[0]) ? vpn_endpoint : "<not set>", (long)vpn_port);
         printf("Keepalive: %ld sec\n", (long)vpn_keepalive);
+        printf("MTU: %ld\n", (long)vpn_mtu);
         printf("Private Key: %s\n", (vpn_private_key && vpn_private_key[0]) ? "<set>" : "<not set>");
         printf("Public Key: %s\n", (vpn_public_key && vpn_public_key[0]) ? vpn_public_key : "<not set>");
         printf("Preshared Key: %s\n", (vpn_preshared_key && vpn_preshared_key[0]) ? "<set>" : "<not set>");
@@ -3823,6 +3827,7 @@ static struct {
     struct arg_str *dns;
     struct arg_int *port;
     struct arg_int *keepalive;
+    struct arg_int *mtu;
     struct arg_int *enable;
     struct arg_int *killswitch;
     struct arg_int *route_all;
@@ -3871,6 +3876,15 @@ static int set_vpn_cmd(int argc, char **argv)
     if (set_vpn_args.keepalive->count > 0) {
         nvs_set_i32(nvs, "vpn_ka", set_vpn_args.keepalive->ival[0]);
     }
+    if (set_vpn_args.mtu->count > 0) {
+        int mtu = set_vpn_args.mtu->ival[0];
+        if (mtu < VPN_MTU_MIN || mtu > VPN_MTU_MAX) {
+            printf("MTU must be %d-%d\n", VPN_MTU_MIN, VPN_MTU_MAX);
+            nvs_close(nvs);
+            return 1;
+        }
+        nvs_set_i32(nvs, "vpn_mtu", mtu);
+    }
     if (set_vpn_args.enable->count > 0) {
         nvs_set_i32(nvs, "vpn_enabled", set_vpn_args.enable->ival[0]);
     }
@@ -3898,6 +3912,7 @@ static void register_set_vpn(void)
     set_vpn_args.dns       = arg_str0("d", "dns", "<dns_ip>", "DNS server for AP clients while VPN is up");
     set_vpn_args.port      = arg_int0("p", "port", "<port>", "Peer UDP port (default 51820)");
     set_vpn_args.keepalive = arg_int0("a", "keepalive", "<seconds>", "Persistent keepalive (0=disabled)");
+    set_vpn_args.mtu       = arg_int0("M", "mtu", "<1280-1420>", "Tunnel MTU (default 1420; lower for CGNAT/PPPoE/LTE)");
     set_vpn_args.enable    = arg_int0("e", "enable", "<0|1>", "Enable/disable VPN");
     set_vpn_args.killswitch = arg_int0("K", "killswitch", "<0|1>", "Kill switch: block internet when VPN down (default on)");
     set_vpn_args.route_all = arg_int0("R", "route-all", "<0|1>", "Route all traffic through VPN (0=split tunnel)");

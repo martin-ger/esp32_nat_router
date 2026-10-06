@@ -3589,6 +3589,12 @@ static esp_err_t vpn_get_handler(httpd_req_t *req)
                     if (httpd_query_key_value(buf, "vpn_ka", param, sizeof(param)) == ESP_OK) {
                         nvs_set_i32(nvs, "vpn_ka", atoi(param));
                     }
+                    if (httpd_query_key_value(buf, "vpn_mtu", param, sizeof(param)) == ESP_OK) {
+                        int mtu = atoi(param);
+                        if (mtu >= VPN_MTU_MIN && mtu <= VPN_MTU_MAX) {
+                            nvs_set_i32(nvs, "vpn_mtu", mtu);
+                        }
+                    }
                     if (httpd_query_key_value(buf, "vpn_ks", param, sizeof(param)) == ESP_OK) {
                         nvs_set_i32(nvs, "vpn_ks", atoi(param));
                     }
@@ -3710,6 +3716,12 @@ static esp_err_t vpn_get_handler(httpd_req_t *req)
     snprintf(row, VPN_BUF_SIZE,
         "<tr><td>Keepalive (sec)</td><td><input type='number' name='vpn_ka' value='%d' min='0' max='65535'/></td></tr>",
         (int)vpn_keepalive);
+    SEND_CHUNK(req, row, HTTPD_RESP_USE_STRLEN);
+
+    snprintf(row, VPN_BUF_SIZE,
+        "<tr><td>MTU</td><td><input type='number' name='vpn_mtu' value='%d' min='%d' max='%d'/>"
+        "<br><small>Lower (e.g. 1280-1320) if the tunnel is up but traffic stalls (CGNAT, PPPoE, LTE)</small></td></tr>",
+        (int)vpn_mtu, VPN_MTU_MIN, VPN_MTU_MAX);
     SEND_CHUNK(req, row, HTTPD_RESP_USE_STRLEN);
 
     snprintf(row, VPN_BUF_SIZE,

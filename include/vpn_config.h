@@ -12,10 +12,18 @@
 extern "C" {
 #endif
 
+// Tunnel MTU bounds. 1420 is the WireGuard default (1500 minus 80 bytes of
+// IPv6 + UDP + WG overhead); lower it when the uplink path MTU is below 1500
+// (CGNAT, PPPoE, LTE). 1280 is the IPv6 minimum.
+#define VPN_MTU_DEFAULT 1420
+#define VPN_MTU_MIN     1280
+#define VPN_MTU_MAX     1420
+
 // WireGuard VPN settings (persisted in NVS)
 extern int32_t vpn_enabled;         // 0=off, 1=on
 extern int32_t vpn_port;            // Peer UDP port (default 51820)
 extern int32_t vpn_keepalive;       // Persistent keepalive seconds (0=disabled)
+extern int32_t vpn_mtu;             // Tunnel MTU; AP PMTU = vpn_mtu, MSS clamp = vpn_mtu - 40
 extern char* vpn_private_key;       // WireGuard private key (base64)
 extern char* vpn_public_key;        // Peer public key (base64)
 extern char* vpn_preshared_key;     // Preshared key (optional, base64)

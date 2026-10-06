@@ -89,8 +89,15 @@ esp_err_t vpn_connect(void)
         }
     }
 
-    ap_mss_clamp = 1380;
-    ap_pmtu = 1440;
+    /* Match the tunnel netif MTU to the configured value so lwIP fragments
+     * non-DF inner packets (plain UDP) before encryption; the outer WG packet
+     * is then at most vpn_mtu + 60 (IPv4) and fits a reduced uplink path MTU.
+     * PMTU/MSS cover DF and TCP traffic from AP clients. */
+    if (wg_ctx.netif) {
+        wg_ctx.netif->mtu = (u16_t)vpn_mtu;
+    }
+    ap_mss_clamp = (uint16_t)(vpn_mtu - 40);
+    ap_pmtu = (uint16_t)vpn_mtu;
     vpn_connected = true;
 
     /* Cache VPN tunnel IP and activate VPN-bound port mappings */
@@ -100,8 +107,9 @@ esp_err_t vpn_connect(void)
     delete_portmap_tab();
     apply_portmap_tab();
 
-    ESP_LOGI(TAG, "WireGuard VPN connected%s, MSS=1380 PMTU=1440",
-             vpn_route_all ? "" : " (split tunnel)");
+    ESP_LOGI(TAG, "WireGuard VPN connected%s, MTU=%u MSS=%u PMTU=%u",
+             vpn_route_all ? "" : " (split tunnel)",
+             (unsigned)vpn_mtu, ap_mss_clamp, ap_pmtu);
     return ESP_OK;
 }
 
