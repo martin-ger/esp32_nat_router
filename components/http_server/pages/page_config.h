@@ -88,7 +88,7 @@ setTimeout(\"location.href = '/'\", 10000);\
 #define CONFIG_CHUNK_STA_BAND_ROW ""
 #endif
 
-/* STA Settings section - uses %s for: ssid, ent_username, ent_identity,
+/* STA Settings section - uses %s for: ssid, sta_open checked, ent_username, ent_identity,
    eap_method selected x4, ttls_phase2 selected x4, cert_bundle checked, no_time_chk checked,
    [if WIFI_HAS_5GHZ: band_auto_sel, band_2g_sel, band_5g_sel,]
    sta_mac */
@@ -97,7 +97,8 @@ setTimeout(\"location.href = '/'\", 10000);\
 <form action='' method='GET'>\
 <table>\
 <tr><td>SSID</td><td><input type='text' name='ssid' value='%s' placeholder='Uplink network'/></td></tr>\
-<tr><td>Password</td><td><input type='text' name='password' placeholder='unchanged'/></td></tr>\
+<tr><td>Password</td><td><input type='text' id='sta_pw' name='password' placeholder='unchanged' oninput=\"document.getElementById('sta_op').checked=false;\"/></td></tr>\
+<tr><td></td><td><input type='checkbox' id='sta_op' name='sta_open' value='1' %s onchange=\"if(this.checked)document.getElementById('sta_pw').value='';\"> <span style='color:#888;font-size:0.85rem;'>Open network (no password)</span></td></tr>\
 " CONFIG_CHUNK_STA_BAND_ROW "\
 <tr><td colspan='2' style='padding-top: 1rem; color: #888; font-size: 0.85rem;'>WPA2 Enterprise (optional)</td></tr>\
 <tr><td>Username</td><td><input type='text' name='ent_username' value='%s' placeholder='Enterprise username'/></td></tr>\

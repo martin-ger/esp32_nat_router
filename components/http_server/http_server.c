@@ -1551,9 +1551,15 @@ static esp_err_t config_get_handler(httpd_req_t *req)
                 if (httpd_query_key_value(buf, "password", param2, sizeof(param2)) == ESP_OK) {
                     preprocess_string(param2);
 
-                    // Keep existing password if field was left empty
-                    if (strlen(param2) == 0) {
-                        strlcpy(param2, passwd, sizeof(param2));
+                    // "Open network" checkbox overrides password to empty
+                    {
+                        char open_val[4] = "";
+                        if (httpd_query_key_value(buf, "sta_open", open_val, sizeof(open_val)) == ESP_OK) {
+                            param2[0] = '\0';
+                        } else if (strlen(param2) == 0) {
+                            // Keep existing password if field was left empty
+                            strlcpy(param2, passwd, sizeof(param2));
+                        }
                     }
                     if (httpd_query_key_value(buf, "ent_username", param3, sizeof(param3)) == ESP_OK) {
                         ESP_LOGI(TAG, "Found URL query parameter => ent_username=%s", param3);
@@ -1833,6 +1839,7 @@ static esp_err_t config_get_handler(httpd_req_t *req)
 
     const char* ap_en_checked = ap_disabled ? "" : "checked";
     const char* ap_open_checked = (strlen(ap_passwd) == 0) ? "checked" : "";
+    const char* sta_open_checked = (strlen(passwd) == 0) ? "checked" : "";
     const char* ap_hidden_checked = ap_ssid_hidden ? "checked" : "";
     const char* rc_enabled_checked = rc_config.enabled ? "checked" : "";
     const char* rc_disabled_checked = rc_config.enabled ? "" : "checked";
@@ -1883,7 +1890,7 @@ static esp_err_t config_get_handler(httpd_req_t *req)
     /* Reusable buffer for building sections.  Sized for the largest chunk
      * (STA settings) once the escaped SSID / enterprise identity fields are
      * fixed-size stack buffers, to satisfy -Wformat-truncation. */
-    char section[2560];
+    char section[3072];
 
     /* --- Begin chunked response --- */
 
@@ -1913,7 +1920,7 @@ static esp_err_t config_get_handler(httpd_req_t *req)
 
     /* Chunk 5: STA Settings */
     snprintf(section, sizeof(section), CONFIG_CHUNK_STA,
-        safe_ssid,
+        safe_ssid, sta_open_checked,
 #if WIFI_HAS_5GHZ
         sta_band == STA_BAND_AUTO ? "selected" : "",
         sta_band == STA_BAND_2G ? "selected" : "",
@@ -3129,8 +3136,13 @@ static esp_err_t setup_get_handler(httpd_req_t *req)
                 preprocess_string(param1);
                 if (httpd_query_key_value(buf, "password", param2, sizeof(param2)) == ESP_OK) {
                     preprocess_string(param2);
-                    if (strlen(param2) == 0) {
-                        strlcpy(param2, passwd, sizeof(param2));
+                    {
+                        char open_val[4] = "";
+                        if (httpd_query_key_value(buf, "sta_open", open_val, sizeof(open_val)) == ESP_OK) {
+                            param2[0] = '\0';
+                        } else if (strlen(param2) == 0) {
+                            strlcpy(param2, passwd, sizeof(param2));
+                        }
                     }
 
                     /* Reset STA parameters to defaults (keep SSID/password from form) */
@@ -3181,9 +3193,9 @@ static esp_err_t setup_get_handler(httpd_req_t *req)
     char* safe_ssid = html_escape(prefill_ssid[0] ? prefill_ssid : ssid);
     if (safe_ssid == NULL) safe_ssid = strdup("");
 
-    char section[1024];
+    char section[1536];
     snprintf(section, sizeof(section), SETUP_CHUNK_FORM,
-        safe_ap_ssid, safe_ssid);
+        safe_ap_ssid, safe_ssid, (strlen(passwd) == 0) ? "checked" : "");
     /* Escaped values copied into the stack buffer; free before streaming so a
      * SEND_CHUNK bail-out on a dead client cannot leak them. */
     free(safe_ap_ssid);
