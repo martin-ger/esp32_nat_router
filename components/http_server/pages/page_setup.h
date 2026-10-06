@@ -22,6 +22,10 @@ td:first-child { color: #888; font-size: 0.9rem; padding-right: 0.75rem; width: 
 input[type='text'], input[type='password'] { width: 100%; background: rgba(22, 33, 62, 0.6); border: 1px solid rgba(0, 217, 255, 0.2); border-radius: 8px; color: #e0e0e0; padding: 0.75rem; font-size: 0.95rem; }\
 input[type='text']:focus, input[type='password']:focus { outline: none; border-color: #00d9ff; box-shadow: 0 0 0 3px rgba(0, 217, 255, 0.1); background: rgba(22, 33, 62, 0.8); }\
 input::placeholder { color: #666; }\
+input[type='checkbox'] { -webkit-appearance: none; -moz-appearance: none; appearance: none; width: 18px; height: 18px; border: 2px solid rgba(0, 217, 255, 0.3); border-radius: 4px; background: rgba(22, 33, 62, 0.6); cursor: pointer; vertical-align: middle; position: relative; flex-shrink: 0; }\
+input[type='checkbox']:checked { background: #00d9ff; border-color: #00d9ff; }\
+input[type='checkbox']:checked::after { content: ''; position: absolute; left: 4px; top: 1px; width: 6px; height: 10px; border: solid #1a1a2e; border-width: 0 2px 2px 0; transform: rotate(45deg); }\
+input[type='checkbox']:focus { outline: none; border-color: #00d9ff; box-shadow: 0 0 0 3px rgba(0, 217, 255, 0.1); }\
 .ok-button { border: none; border-radius: 8px; padding: 0.75rem 1.5rem; font-size: 0.95rem; font-weight: 600; cursor: pointer; width: 100%; margin-top: 0.5rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #fff; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4); }\
 .nav-link { display: inline-block; padding: 0.6rem 1.5rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #fff; border: none; border-radius: 8px; text-decoration: none; font-size: 0.9rem; font-weight: 600; margin-right: 0.5rem; }\
 @media (max-width: 600px) { body { padding: 0.5rem; } #container { padding: 1rem; } h1 { font-size: 1.25rem; } h2 { font-size: 1rem; } td:first-child { font-size: 0.8rem; width: 40%; } input[type='text'], input[type='password'] { font-size: 0.9rem; padding: 0.65rem; } .ok-button { font-size: 0.9rem; padding: 0.65rem 1.25rem; } }\
@@ -41,7 +45,7 @@ setTimeout(\"location.href = '/'\", 10000);\
 }\
 </script>"
 
-/* Setup form - uses: safe_ap_ssid, safe_ssid */
+/* Setup form - uses: safe_ap_ssid, safe_ssid, sta_open checked */
 #define SETUP_CHUNK_FORM "\
 <form action='/setup' method='GET'>\
 <h2>Access Point</h2>\
@@ -52,7 +56,8 @@ setTimeout(\"location.href = '/'\", 10000);\
 <h2>Uplink (Internet)</h2>\
 <table>\
 <tr><td>SSID</td><td><input type='text' name='ssid' value='%s' placeholder='WiFi network'/></td></tr>\
-<tr><td>Password</td><td><input type='password' name='password' placeholder='unchanged'/></td></tr>\
+<tr><td>Password</td><td><input type='password' id='sta_pw' name='password' placeholder='unchanged' oninput=\"document.getElementById('sta_op').checked=false;\"/></td></tr>\
+<tr><td></td><td><input type='checkbox' id='sta_op' name='sta_open' value='1' %s onchange=\"if(this.checked)document.getElementById('sta_pw').value='';\"> <span style='color:#888;font-size:0.85rem;'>Open network (no password)</span></td></tr>\
 <tr><td></td><td><input type='submit' value='Save &amp; Reboot' class='ok-button'/></td></tr>\
 </table>\
 </form>\

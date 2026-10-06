@@ -1783,9 +1783,15 @@ static esp_err_t config_get_handler(httpd_req_t *req)
                 if (httpd_query_key_value(buf, "password", param2, sizeof(param2)) == ESP_OK) {
                     preprocess_string(param2);
 
-                    // Keep existing password if field was left empty
-                    if (strlen(param2) == 0) {
-                        strlcpy(param2, passwd, sizeof(param2));
+                    // "Open network" checkbox overrides password to empty
+                    {
+                        char open_val[4] = "";
+                        if (httpd_query_key_value(buf, "sta_open", open_val, sizeof(open_val)) == ESP_OK) {
+                            param2[0] = '\0';
+                        } else if (strlen(param2) == 0) {
+                            // Keep existing password if field was left empty
+                            strlcpy(param2, passwd, sizeof(param2));
+                        }
                     }
                     if (httpd_query_key_value(buf, "ent_username", param3, sizeof(param3)) == ESP_OK) {
                         ESP_LOGI(TAG, "Found URL query parameter => ent_username=%s", param3);
@@ -2142,9 +2148,9 @@ static esp_err_t config_get_handler(httpd_req_t *req)
     int current_snaplen = pcap_get_snaplen();
 
     /* Reusable buffer for building sections.  Sized for the largest chunk
-     * (STA settings): its worst case is ~2571 bytes once the escaped SSID /
+     * (STA settings): its worst case is ~2890 bytes once the escaped SSID /
      * enterprise identity fields are accounted for as fixed-size stack buffers. */
-    char section[2816];
+    char section[3072];
 
     /* --- Begin chunked response --- */
 
@@ -2183,7 +2189,7 @@ static esp_err_t config_get_handler(httpd_req_t *req)
 #else
     /* Chunk 5: STA Settings */
     snprintf(section, sizeof(section), CONFIG_CHUNK_STA,
-        safe_ssid,
+        safe_ssid, (strlen(passwd) == 0) ? "checked" : "",
 #if WIFI_HAS_5GHZ
         sta_band == STA_BAND_AUTO ? "selected" : "",
         sta_band == STA_BAND_2G ? "selected" : "",
@@ -3404,8 +3410,13 @@ static esp_err_t setup_get_handler(httpd_req_t *req)
                 preprocess_string(param1);
                 if (httpd_query_key_value(buf, "password", param2, sizeof(param2)) == ESP_OK) {
                     preprocess_string(param2);
-                    if (strlen(param2) == 0) {
-                        strlcpy(param2, passwd, sizeof(param2));
+                    {
+                        char open_val[4] = "";
+                        if (httpd_query_key_value(buf, "sta_open", open_val, sizeof(open_val)) == ESP_OK) {
+                            param2[0] = '\0';
+                        } else if (strlen(param2) == 0) {
+                            strlcpy(param2, passwd, sizeof(param2));
+                        }
                     }
 
                     /* Reset STA parameters to defaults (keep SSID/password from form) */
@@ -3459,16 +3470,16 @@ static esp_err_t setup_get_handler(httpd_req_t *req)
     html_escape_to(safe_ap_ssid, sizeof(safe_ap_ssid), ap_ssid);
 
     /* Sized for the worst case once the two escaped SSID fields are fixed-size
-     * stack buffers (~1185 bytes); the default 1024 would risk truncation. */
-    char section[1280];
+     * stack buffers (~1500 bytes); the default 1024 would risk truncation. */
+    char section[1536];
 #if CONFIG_ETH_UPLINK
     snprintf(section, sizeof(section), SETUP_CHUNK_FORM,
-        safe_ap_ssid, "");
+        safe_ap_ssid, "", "");
 #else
     char safe_ssid[200];
     html_escape_to(safe_ssid, sizeof(safe_ssid), prefill_ssid[0] ? prefill_ssid : ssid);
     snprintf(section, sizeof(section), SETUP_CHUNK_FORM,
-        safe_ap_ssid, safe_ssid);
+        safe_ap_ssid, safe_ssid, (strlen(passwd) == 0) ? "checked" : "");
 #endif
     SEND_CHUNK(req, section, HTTPD_RESP_USE_STRLEN);
 
