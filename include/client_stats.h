@@ -23,7 +23,8 @@ typedef struct {
 
 /* Called from WiFi event handlers on client connect/disconnect */
 void client_stats_on_connect(const uint8_t *mac);
-void client_stats_on_disconnect(const uint8_t *mac);
+/* Returns true if the client was marked connected (i.e. counted on connect) */
+bool client_stats_on_disconnect(const uint8_t *mac);
 
 /* Copy active entries into caller-provided buffer. Returns count copied. */
 int client_stats_get_all(client_stats_entry_t *out, int max_entries);

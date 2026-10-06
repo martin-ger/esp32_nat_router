@@ -29,6 +29,10 @@ table { width: 100%; border-collapse: collapse; }\
 td { padding: 0.5rem 0; vertical-align: top; }\
 td:first-child { color: #888; font-size: 0.9rem; padding-right: 0.75rem; width: 30%; text-align: right; }\
 input[type='text'], input[type='number'], select { width: 100%; background: rgba(22, 33, 62, 0.6); border: 1px solid rgba(0, 217, 255, 0.2); border-radius: 8px; color: #e0e0e0; padding: 0.75rem; font-size: 0.95rem; transition: all 0.3s; }\
+input[type='checkbox'] { -webkit-appearance: none; -moz-appearance: none; appearance: none; width: 18px; height: 18px; border: 2px solid rgba(0, 217, 255, 0.3); border-radius: 4px; background: rgba(22, 33, 62, 0.6); cursor: pointer; vertical-align: middle; position: relative; flex-shrink: 0; }\
+input[type='checkbox']:checked { background: #00d9ff; border-color: #00d9ff; }\
+input[type='checkbox']:checked::after { content: ''; position: absolute; left: 4px; top: 1px; width: 6px; height: 10px; border: solid #1a1a2e; border-width: 0 2px 2px 0; transform: rotate(45deg); }\
+input[type='checkbox']:focus { outline: none; border-color: #00d9ff; box-shadow: 0 0 0 3px rgba(0, 217, 255, 0.1); }\
 input:focus, select:focus { outline: none; border-color: #00d9ff; box-shadow: 0 0 0 3px rgba(0, 217, 255, 0.1); background: rgba(22, 33, 62, 0.8); }\
 input::placeholder { color: #666; }\
 select { cursor: pointer; }\
@@ -110,6 +114,19 @@ document.getElementById('dhcp_mac').scrollIntoView({behavior: 'smooth', block: '
 <h2>DHCP Reservations</h2>"
 
 /* DHCP pool info streamed here */
+
+/* "Allow only known clients" switch, streamed after the pool info:
+   MAPPINGS_CHUNK_KNOWN_PRE + ("checked" or "") + MAPPINGS_CHUNK_KNOWN_POST */
+#define MAPPINGS_CHUNK_KNOWN_PRE "\
+<form action='/mappings' method='GET' style='margin:0.75rem 0;'>\
+<input type='hidden' name='set_known' value='1'/>\
+<label style='cursor:pointer;'><input type='checkbox' name='known_only' value='1' "
+
+#define MAPPINGS_CHUNK_KNOWN_POST " \
+onchange=\"if(!this.checked||confirm('Only clients with a fixed-IP reservation below will be able to connect. Make sure your own device is listed.'))this.form.submit();else this.checked=false;\"> \
+Allow only known clients</label> \
+<small style='color:#888;'>(MACs with a fixed-IP reservation below; applies to new connections)</small>\
+</form>"
 
 #define MAPPINGS_CHUNK_MID3B "\
 <table class='data-table'>\

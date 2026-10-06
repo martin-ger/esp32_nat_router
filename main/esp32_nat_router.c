@@ -95,6 +95,9 @@ uint16_t ap_pmtu = 0;
 // AP SSID hidden (0 = visible, 1 = hidden)
 uint8_t ap_ssid_hidden = 0;
 
+// Allow only known clients (1 = MACs without a fixed-IP reservation are blocked)
+uint8_t ap_known_only = 0;
+
 // WiFi regulatory country code ("01" = world-safe default)
 char wifi_country_code[3] = "01";
 
@@ -476,7 +479,8 @@ static void wifi_ap_event_handler(void* arg, esp_event_base_t event_base,
     } else if (event_id == WIFI_EVENT_AP_STACONNECTED) {
         wifi_event_ap_staconnected_t* event = (wifi_event_ap_staconnected_t*) event_data;
 
-        /* Check if this MAC is blacklisted (reservation with IP 0.0.0.0) */
+        /* Check if this MAC is blacklisted (reservation with IP 0.0.0.0), or
+         * unknown while "known clients only" is on */
         if (is_mac_blocked(event->mac)) {
             const char* name = lookup_device_name_by_mac(event->mac);
             ESP_LOGW(TAG, "Blocked client: %02X:%02X:%02X:%02X:%02X:%02X%s%s",
@@ -504,12 +508,12 @@ static void wifi_ap_event_handler(void* arg, esp_event_base_t event_base,
     } else if (event_id == WIFI_EVENT_AP_STADISCONNECTED) {
         wifi_event_ap_stadisconnected_t* event = (wifi_event_ap_stadisconnected_t*) event_data;
         /* Blocked MACs are deauthed on connect without ever being counted, and
-         * that deauth raises this event — decrementing here would underflow the
-         * unsigned counter to 65535. */
-        if (!is_mac_blocked(event->mac) && connect_count > 0) {
+         * that deauth raises this event. Decrement only for clients that were
+         * counted on connect — asking is_mac_blocked() here instead would miss
+         * clients blocked (or made unknown) while connected. */
+        if (client_stats_on_disconnect(event->mac) && connect_count > 0) {
             connect_count--;
         }
-        client_stats_on_disconnect(event->mac);
         const char* name = lookup_device_name_by_mac(event->mac);
         if (name) {
             ESP_LOGI(TAG, "Client disconnected: %02X:%02X:%02X:%02X:%02X:%02X (%s) - %d remain",
@@ -752,7 +756,8 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
     {
         wifi_event_ap_staconnected_t* event = (wifi_event_ap_staconnected_t*) event_data;
 
-        /* Check if this MAC is blacklisted (reservation with IP 0.0.0.0) */
+        /* Check if this MAC is blacklisted (reservation with IP 0.0.0.0), or
+         * unknown while "known clients only" is on */
         if (is_mac_blocked(event->mac)) {
             const char* name = lookup_device_name_by_mac(event->mac);
             ESP_LOGW(TAG, "Blocked client: %02X:%02X:%02X:%02X:%02X:%02X%s%s",
@@ -784,12 +789,12 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
     {
         wifi_event_ap_stadisconnected_t* event = (wifi_event_ap_stadisconnected_t*) event_data;
         /* Blocked MACs are deauthed on connect without ever being counted, and
-         * that deauth raises this event — decrementing here would underflow the
-         * unsigned counter to 65535. */
-        if (!is_mac_blocked(event->mac) && connect_count > 0) {
+         * that deauth raises this event. Decrement only for clients that were
+         * counted on connect — asking is_mac_blocked() here instead would miss
+         * clients blocked (or made unknown) while connected. */
+        if (client_stats_on_disconnect(event->mac) && connect_count > 0) {
             connect_count--;
         }
-        client_stats_on_disconnect(event->mac);
 
         /* Look up device name from DHCP reservations */
         const char* name = lookup_device_name_by_mac(event->mac);
@@ -1449,6 +1454,15 @@ void app_main(void)
     }
     if (ap_ssid_hidden) {
         ESP_LOGI(TAG, "AP SSID hidden enabled");
+    }
+
+    // Load "known clients only" setting from NVS (default 0 = all clients allowed)
+    int known_only_setting = 0;
+    if (get_config_param_int("ap_known_only", &known_only_setting) == ESP_OK) {
+        ap_known_only = (known_only_setting != 0) ? 1 : 0;
+    }
+    if (ap_known_only) {
+        ESP_LOGI(TAG, "AP known clients only enabled");
     }
 
     // Load AP auth mode from NVS (default 0 = WPA2/WPA3)

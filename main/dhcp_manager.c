@@ -210,7 +210,8 @@ bool is_mac_blocked(const uint8_t *mac) {
             return dhcp_reservations[i].ip == 0;
         }
     }
-    return false;
+    /* No entry: unknown clients are blocked when "known clients only" is on */
+    return ap_known_only != 0;
 }
 
 const char* lookup_device_name_by_ip(uint32_t ip) {

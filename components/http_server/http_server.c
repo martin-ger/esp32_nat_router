@@ -2364,6 +2364,21 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
                 html_escape_to(error_msg, sizeof(error_msg), param1);
             }
 
+            /* "Allow only known clients" switch (checkbox absent = off) */
+            if (httpd_query_key_value(buf, "set_known", param1, sizeof(param1)) == ESP_OK) {
+                int known_val = (httpd_query_key_value(buf, "known_only", param1, sizeof(param1)) == ESP_OK) ? 1 : 0;
+                set_config_param_int("ap_known_only", known_val);
+                ap_known_only = (uint8_t)known_val;
+                ESP_LOGI(TAG, "AP known clients only set to: %d", known_val);
+
+                /* Redirect so a reload does not resubmit the switch */
+                httpd_resp_set_status(req, "303 See Other");
+                httpd_resp_set_hdr(req, "Location", "/mappings");
+                httpd_resp_send(req, NULL, 0);
+                free(buf);
+                return ESP_OK;
+            }
+
             /* Check for add DHCP reservation */
             if (httpd_query_key_value(buf, "dhcp_action", param1, sizeof(param1)) == ESP_OK) {
                 bool is_block = (strcmp(param1, "Block") == 0);
@@ -2659,6 +2674,14 @@ static esp_err_t mappings_get_handler(httpd_req_t *req)
                  IP2STR(&start_addr), IP2STR(&end_addr));
         SEND_CHUNK(req, row, HTTPD_RESP_USE_STRLEN);
     }
+
+    /* "Allow only known clients" switch */
+    SEND_CHUNK(req, MAPPINGS_CHUNK_KNOWN_PRE, HTTPD_RESP_USE_STRLEN);
+    /* Never send an empty chunk: length 0 terminates the chunked response */
+    if (ap_known_only) {
+        SEND_CHUNK(req, "checked", HTTPD_RESP_USE_STRLEN);
+    }
+    SEND_CHUNK(req, MAPPINGS_CHUNK_KNOWN_POST, HTTPD_RESP_USE_STRLEN);
 
     /* DHCP reservations table header */
     SEND_CHUNK(req, MAPPINGS_CHUNK_MID3B, HTTPD_RESP_USE_STRLEN);
@@ -3391,6 +3414,7 @@ static esp_err_t setup_get_handler(httpd_req_t *req)
                     set_config_param_str("ap_dns",     "");
                     free(ap_dns); ap_dns = strdup("");
                     set_config_param_int("ap_hidden",   0); ap_ssid_hidden = 0;
+                    set_config_param_int("ap_known_only", 0); ap_known_only = 0;
                     set_config_param_int("ap_authmode", 0); ap_authmode    = 0;
                     set_config_param_int("ap_disabled", 0); ap_disabled    = false;
                     set_config_param_int("ap_nat",      1); ap_nat_enabled = 1;

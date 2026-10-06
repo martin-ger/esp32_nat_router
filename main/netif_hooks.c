@@ -91,11 +91,13 @@ void client_stats_on_connect(const uint8_t *mac) {
     }
 }
 
-void client_stats_on_disconnect(const uint8_t *mac) {
+bool client_stats_on_disconnect(const uint8_t *mac) {
     client_stats_entry_t *entry = find_client_stats(mac);
-    if (entry) {
+    if (entry && entry->connected) {
         entry->connected = 0;
+        return true;
     }
+    return false;
 }
 
 int client_stats_get_all(client_stats_entry_t *out, int max_entries) {

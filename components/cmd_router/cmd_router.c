@@ -70,6 +70,7 @@ static void register_set_sta_static(void);
 static void register_set_ap(void);
 static void register_set_ap_ip(void);
 static void register_set_ap_hidden(void);
+static void register_set_ap_known_only(void);
 static void register_set_ap_auth(void);
 static void register_ap(void);
 #if CONFIG_ETH_UPLINK
@@ -442,6 +443,7 @@ void register_router(void)
     register_set_tx_power();
     register_set_wifi_country();
     register_set_ap_hidden();
+    register_set_ap_known_only();
     register_set_ap_auth();
     register_ap();
 #if CONFIG_ETH_UPLINK
@@ -1699,7 +1701,7 @@ static int show(int argc, char **argv)
         printf("\nDHCP Pool:\n");
         print_dhcp_pool();
 
-        printf("\nDHCP Reservations:\n");
+        printf("\nDHCP Reservations (known clients only: %s):\n", ap_known_only ? "on" : "off");
         print_dhcp_reservations();
 
         printf("\nPort Mappings:\n");
@@ -2761,6 +2763,51 @@ static void register_set_ap_hidden(void)
         .help = "Hide or show the AP SSID (on/off, requires restart)",
         .hint = NULL,
         .func = &set_ap_hidden_cmd,
+    };
+    ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
+}
+
+/* 'set_ap_known_only' command - allow only clients with a fixed-IP reservation */
+static int set_ap_known_only_cmd(int argc, char **argv)
+{
+    if (argc < 2) {
+        printf("AP known clients only: %s\n", ap_known_only ? "on" : "off");
+        return 0;
+    }
+
+    esp_err_t err;
+    int known_val;
+
+    if (parse_bool_true(argv[1])) {
+        known_val = 1;
+    } else if (parse_bool_false(argv[1])) {
+        known_val = 0;
+    } else {
+        printf("Invalid value. Use on/off.\n");
+        return 1;
+    }
+
+    err = set_config_param_int("ap_known_only", known_val);
+    if (err == ESP_OK) {
+        ap_known_only = (uint8_t)known_val;
+        ESP_LOGI(TAG, "AP known clients only set to: %s", known_val ? "on" : "off");
+        printf("AP known clients only set to: %s\n", known_val ? "on" : "off");
+        if (known_val) {
+            printf("Applies to new connections; only clients with a fixed-IP DHCP reservation can connect.\n");
+        }
+    } else {
+        printf("Failed to save setting\n");
+    }
+    return err;
+}
+
+static void register_set_ap_known_only(void)
+{
+    const esp_console_cmd_t cmd = {
+        .command = "set_ap_known_only",
+        .help = "Allow only clients with a fixed-IP DHCP reservation to join the AP (on/off)",
+        .hint = NULL,
+        .func = &set_ap_known_only_cmd,
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }
