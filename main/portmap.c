@@ -28,6 +28,7 @@ esp_err_t apply_portmap_tab() {
                 if (vpn_tunnel_ip == 0) continue;  // VPN not connected, skip
                 bind_ip = vpn_tunnel_ip;
             } else {
+                if (my_ip == 0) continue;  // uplink has no IP yet, GOT_IP restores it
                 bind_ip = my_ip;
             }
             ip_portmap_add(portmap_tab[i].proto, bind_ip, portmap_tab[i].mport, portmap_tab[i].daddr, portmap_tab[i].dport);

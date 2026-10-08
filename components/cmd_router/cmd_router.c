@@ -3842,6 +3842,15 @@ static int set_vpn_cmd(int argc, char **argv)
         return 1;
     }
 
+    /* Validate before writing anything so a bad value doesn't leave a partial config */
+    if (set_vpn_args.mtu->count > 0) {
+        int mtu = set_vpn_args.mtu->ival[0];
+        if (mtu < VPN_MTU_MIN || mtu > VPN_MTU_MAX) {
+            printf("MTU must be %d-%d\n", VPN_MTU_MIN, VPN_MTU_MAX);
+            return 1;
+        }
+    }
+
     nvs_handle_t nvs;
     esp_err_t err = nvs_open(PARAM_NAMESPACE, NVS_READWRITE, &nvs);
     if (err != ESP_OK) {
@@ -3877,13 +3886,7 @@ static int set_vpn_cmd(int argc, char **argv)
         nvs_set_i32(nvs, "vpn_ka", set_vpn_args.keepalive->ival[0]);
     }
     if (set_vpn_args.mtu->count > 0) {
-        int mtu = set_vpn_args.mtu->ival[0];
-        if (mtu < VPN_MTU_MIN || mtu > VPN_MTU_MAX) {
-            printf("MTU must be %d-%d\n", VPN_MTU_MIN, VPN_MTU_MAX);
-            nvs_close(nvs);
-            return 1;
-        }
-        nvs_set_i32(nvs, "vpn_mtu", mtu);
+        nvs_set_i32(nvs, "vpn_mtu", set_vpn_args.mtu->ival[0]);
     }
     if (set_vpn_args.enable->count > 0) {
         nvs_set_i32(nvs, "vpn_enabled", set_vpn_args.enable->ival[0]);

@@ -703,6 +703,12 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
         esp_timer_stop(sta_reconnect_timer);
         ap_connect = true;
         my_ip = event->ip_info.ip.addr;
+        /* Re-enable NAPT here in case the AP cycled (channel change from
+         * band-aware scan) after the initial ip_napt_enable in app_main.
+         * Must precede the portmap restore: ip_portmap_add() is a silent
+         * no-op until NAPT has allocated its tables. */
+        if (ap_nat_enabled)
+            ip_napt_enable(my_ap_ip, 1);
         delete_portmap_tab();
         apply_portmap_tab();
         const char *eff_dns = effective_ap_dns();
@@ -735,11 +741,6 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
         if (vpn_enabled) {
             vpn_connect_task_start();
         }
-
-        /* Re-enable NAPT here in case the AP cycled (channel change from
-         * band-aware scan) after the initial ip_napt_enable in app_main. */
-        if (ap_nat_enabled)
-            ip_napt_enable(my_ap_ip, 1);
 
         xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);
     }
@@ -819,7 +820,12 @@ void ap_set_enabled(bool enabled)
 #if CONFIG_ETH_UPLINK
     if (enabled) {
         esp_wifi_start();
-        if (ap_nat_enabled) ip_napt_enable(my_ap_ip, 1);
+        if (ap_nat_enabled) {
+            ip_napt_enable(my_ap_ip, 1);
+            /* Portmaps restored while NAPT was off were dropped; re-add them */
+            delete_portmap_tab();
+            apply_portmap_tab();
+        }
     } else {
         connect_count = 0;
         esp_wifi_stop();
@@ -827,7 +833,12 @@ void ap_set_enabled(bool enabled)
 #else
     if (enabled) {
         esp_wifi_set_mode(WIFI_MODE_APSTA);
-        if (ap_nat_enabled) ip_napt_enable(my_ap_ip, 1);
+        if (ap_nat_enabled) {
+            ip_napt_enable(my_ap_ip, 1);
+            /* Portmaps restored while NAPT was off were dropped; re-add them */
+            delete_portmap_tab();
+            apply_portmap_tab();
+        }
     } else {
         connect_count = 0;
         esp_wifi_set_mode(WIFI_MODE_STA);
@@ -1638,6 +1649,11 @@ void app_main(void)
     if (!ap_disabled) {
         if (ap_nat_enabled) {
             ip_napt_enable(my_ap_ip, 1);
+            /* The uplink may have got its IP before NAPT allocated its
+             * tables, in which case the GOT_IP portmap restore was a no-op.
+             * Delete first: ip_portmap_add() would duplicate existing entries. */
+            delete_portmap_tab();
+            apply_portmap_tab();
             ESP_LOGI(TAG, "NAT is enabled");
         } else {
             ESP_LOGI(TAG, "NAT is disabled (routed mode)");
