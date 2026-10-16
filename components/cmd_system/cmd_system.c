@@ -600,6 +600,8 @@ static int ping_cmd(int argc, char **argv)
 
     esp_ping_config_t config = ESP_PING_DEFAULT_CONFIG();
     config.target_addr = target_addr;
+    // Default (2 KB) task stack overflows in the callbacks' printf on ESP32-S3
+    config.task_stack_size = 4096;
     config.count = ping_args.count->count > 0 ? ping_args.count->ival[0] : 5;
     if (ping_args.interval->count > 0) config.interval_ms = ping_args.interval->ival[0];
     if (ping_args.timeout->count > 0) config.timeout_ms = ping_args.timeout->ival[0];

@@ -21,6 +21,12 @@ CONFIG_ESP_ERR_TO_NAME_LOOKUP=n
 # Increase main task stack size
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=7168
 
+# Default event loop task (sys_evt): every ESP_LOG in an event handler runs the
+# full newlib vfprintf (~800 bytes frame), plus the syslog vprintf hook (~400 bytes
+# + a second format pass) when syslog is enabled. The 2304-byte default overflowed
+# on the ESP32-S3; the margin on the other targets is equally thin.
+CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096
+
 # Flash size
 CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 CONFIG_ESPTOOLPY_FLASHSIZE="4MB"
