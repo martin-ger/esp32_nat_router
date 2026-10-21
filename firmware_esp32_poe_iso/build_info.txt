@@ -1,7 +1,7 @@
 ESP32 NAT Router Build Information
 =================================
 Target: Olimex ESP32-POE-ISO (Ethernet) (esp32_poe_iso)
-Build Time: 2026-10-16 19:27:16
-Git Hash: c44331d
+Build Time: 2026-10-21 16:16:23
+Git Hash: c618b13
 Binary Files: 4
 Build Directory: build_poe_iso
