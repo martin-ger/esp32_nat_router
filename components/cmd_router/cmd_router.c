@@ -28,7 +28,7 @@
 
 #include "lwip/ip4_addr.h"
 #include "lwip/netif.h"
-#include "lwip/tcpip.h"
+#include "esp_netif.h"
 #if !IP_NAPT
 #error "IP_NAPT must be defined"
 #endif
@@ -1437,6 +1437,44 @@ static struct {
     struct arg_end *end;
 } show_args;
 
+/* Snapshot of the lwIP netif list for 'show routes'. Taken on the tcpip thread
+ * (esp_netif_tcpip_exec) so it is consistent even without core locking, which
+ * is off in our sdkconfigs; printing happens afterwards in the console task. */
+#define ROUTE_SNAP_MAX 8
+
+typedef struct {
+    char name[6];
+    ip4_addr_t ip, mask, gw;
+    bool up, link, is_default;
+} route_snap_t;
+
+typedef struct {
+    route_snap_t e[ROUTE_SNAP_MAX];
+    int n;
+} route_snap_list_t;
+
+static esp_err_t route_snapshot_cb(void *ctx)
+{
+    route_snap_list_t *l = (route_snap_list_t *)ctx;
+    struct netif *nif;
+
+    l->n = 0;
+    NETIF_FOREACH(nif) {
+        if (l->n >= ROUTE_SNAP_MAX) {
+            break;
+        }
+        route_snap_t *s = &l->e[l->n++];
+        snprintf(s->name, sizeof(s->name), "%c%c%u", nif->name[0], nif->name[1], (unsigned)nif->num);
+        ip4_addr_copy(s->ip, *netif_ip4_addr(nif));
+        ip4_addr_copy(s->mask, *netif_ip4_netmask(nif));
+        ip4_addr_copy(s->gw, *netif_ip4_gw(nif));
+        s->up = netif_is_up(nif);
+        s->link = netif_is_link_up(nif);
+        s->is_default = (nif == netif_default);
+    }
+    return ESP_OK;
+}
+
 /* 'show' command implementation */
 static int show(int argc, char **argv)
 {
@@ -1756,30 +1794,15 @@ static int show(int argc, char **argv)
     } else if (strcmp(type, "routes") == 0) {
         /* lwIP has no routing table: a packet leaves through the first up
          * interface whose subnet contains the destination, otherwise through
-         * netif_default. Snapshot under the core lock, print after releasing it. */
-        struct {
-            char name[6];
-            ip4_addr_t ip, mask, gw;
-            bool up, link, is_default;
-        } rt[8];
-        int n = 0;
-        struct netif *nif;
+         * netif_default. Snapshot on the tcpip thread, print afterwards. */
+        static route_snap_list_t snap;  // keep off the console task stack
+        const route_snap_t *rt = snap.e;
 
-        LOCK_TCPIP_CORE();
-        NETIF_FOREACH(nif) {
-            if (n >= (int)(sizeof(rt) / sizeof(rt[0]))) {
-                break;
-            }
-            snprintf(rt[n].name, sizeof(rt[n].name), "%c%c%u", nif->name[0], nif->name[1], (unsigned)nif->num);
-            ip4_addr_copy(rt[n].ip, *netif_ip4_addr(nif));
-            ip4_addr_copy(rt[n].mask, *netif_ip4_netmask(nif));
-            ip4_addr_copy(rt[n].gw, *netif_ip4_gw(nif));
-            rt[n].up = netif_is_up(nif);
-            rt[n].link = netif_is_link_up(nif);
-            rt[n].is_default = (nif == netif_default);
-            n++;
+        if (esp_netif_tcpip_exec(route_snapshot_cb, &snap) != ESP_OK) {
+            printf("Failed to read interface list\n");
+            return 1;
         }
-        UNLOCK_TCPIP_CORE();
+        int n = snap.n;
 
         printf("Iface  Address             Gateway          State\n");
         printf("-----  ------------------  ---------------  ---------------------\n");
