@@ -31,13 +31,12 @@ static volatile bool factory_reset_flag = false;
 #include "esp_rom_sys.h"
 #include "freertos/FreeRTOS.h"
 
-/* Timing assumes 240 MHz CPU. Catch misconfiguration at compile time. */
-_Static_assert(CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ == 240,
-    "ws2812 bit-bang timing constants assume 240 MHz CPU — update WS2812_* macros");
+/* Timing in CPU cycles, derived from the configured CPU frequency. */
+#define WS2812_NS_TO_CYCLES(ns) ((ns) * CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ / 1000)
 
-#define WS2812_T0H_CYCLES    96   /* 400 ns @ 240 MHz */
-#define WS2812_T1H_CYCLES   204   /* 850 ns @ 240 MHz */
-#define WS2812_PERIOD_CYCLES 300  /* 1250 ns @ 240 MHz */
+#define WS2812_T0H_CYCLES    WS2812_NS_TO_CYCLES(400)
+#define WS2812_T1H_CYCLES    WS2812_NS_TO_CYCLES(850)
+#define WS2812_PERIOD_CYCLES WS2812_NS_TO_CYCLES(1250)
 #define WS2812_RESET_US       55  /* >50 µs reset pulse */
 
 static bool strip_inited = false;

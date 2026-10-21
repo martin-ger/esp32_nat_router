@@ -1,10 +1,15 @@
 # ESP32-C5 target overrides
 
-# ESP32-C5 supports up to 240 MHz
+# 240 MHz is required for the USB_SERIAL_JTAG console: at 160 MHz the USJ goes
+# dead on v1.0 silicon and the app hangs once a host opens the port (issue #272).
+# Note: on some v1.0 boards (seen on a DevKit, not on the XIAO ESP32C5) cold
+# boots at 240 MHz panic once in system_early_init and recover after the reset.
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 
-# Use UART for console (USB_SERIAL_JTAG breaks idf.py flash monitor)
-CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+# Use built-in USB_SERIAL_JTAG for console output, like C3/C6/S3. Boards such
+# as the XIAO ESP32C5 have no USB-UART bridge (issue #272).
+CONFIG_ESP_CONSOLE_UART_DEFAULT=n
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 
 # Reduce static log level to save flash space
 CONFIG_LOG_DEFAULT_LEVEL_WARN=y
