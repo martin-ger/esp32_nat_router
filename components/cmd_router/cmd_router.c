@@ -27,6 +27,8 @@
 #include "esp_wifi.h"
 
 #include "lwip/ip4_addr.h"
+#include "lwip/netif.h"
+#include "lwip/tcpip.h"
 #if !IP_NAPT
 #error "IP_NAPT must be defined"
 #endif
@@ -1445,12 +1447,14 @@ static int show(int argc, char **argv)
     }
 
     if (show_args.type->count == 0) {
-        printf("Usage: show <status|config|mappings|acl|vpn|ota>\n");
+        printf("Usage: show <status|config|mappings|acl|vpn|routes|ota>\n");
         printf("  status   - Show router status (connection, clients, memory)\n");
         printf("  config   - Show router configuration (AP/STA settings)\n");
         printf("  mappings - Show DHCP pool, reservations and port mappings\n");
         printf("  acl      - Show firewall ACL rules\n");
         printf("  vpn      - Show WireGuard VPN status and config\n");
+        printf("  routes   - Show network interfaces and the default route\n");
+        printf("  ota      - Show firmware and OTA partition info\n");
         return 1;
     }
 
@@ -1749,6 +1753,54 @@ static int show(int argc, char **argv)
         printf("Kill Switch: %s\n", vpn_killswitch ? "on" : "off");
         printf("Route All: %s\n", vpn_route_all ? "yes (all traffic)" : "no (split tunnel)");
 
+    } else if (strcmp(type, "routes") == 0) {
+        /* lwIP has no routing table: a packet leaves through the first up
+         * interface whose subnet contains the destination, otherwise through
+         * netif_default. Snapshot under the core lock, print after releasing it. */
+        struct {
+            char name[6];
+            ip4_addr_t ip, mask, gw;
+            bool up, link, is_default;
+        } rt[8];
+        int n = 0;
+        struct netif *nif;
+
+        LOCK_TCPIP_CORE();
+        NETIF_FOREACH(nif) {
+            if (n >= (int)(sizeof(rt) / sizeof(rt[0]))) {
+                break;
+            }
+            snprintf(rt[n].name, sizeof(rt[n].name), "%c%c%u", nif->name[0], nif->name[1], (unsigned)nif->num);
+            ip4_addr_copy(rt[n].ip, *netif_ip4_addr(nif));
+            ip4_addr_copy(rt[n].mask, *netif_ip4_netmask(nif));
+            ip4_addr_copy(rt[n].gw, *netif_ip4_gw(nif));
+            rt[n].up = netif_is_up(nif);
+            rt[n].link = netif_is_link_up(nif);
+            rt[n].is_default = (nif == netif_default);
+            n++;
+        }
+        UNLOCK_TCPIP_CORE();
+
+        printf("Iface  Address             Gateway          State\n");
+        printf("-----  ------------------  ---------------  ---------------------\n");
+        for (int i = 0; i < n; i++) {
+            char addr[24], gw[16];
+            int prefix = __builtin_popcount(lwip_ntohl(ip4_addr_get_u32(&rt[i].mask)));
+            snprintf(addr, sizeof(addr), IPSTR "/%d", IP2STR(&rt[i].ip), prefix);
+            if (ip4_addr_isany_val(rt[i].gw)) {
+                strcpy(gw, "-");
+            } else {
+                snprintf(gw, sizeof(gw), IPSTR, IP2STR(&rt[i].gw));
+            }
+            printf("%-5s  %-18s  %-15s  %s%s%s\n", rt[i].name, addr, gw,
+                   rt[i].up ? "up" : "down",
+                   rt[i].link ? "" : " (no link)",
+                   rt[i].is_default ? "  * default" : "");
+        }
+        if (n == 0) {
+            printf("No interfaces\n");
+        }
+
     } else if (strcmp(type, "ota") == 0) {
         const esp_partition_t *running = esp_ota_get_running_partition();
         const esp_app_desc_t *app_desc = esp_app_get_description();
@@ -1788,7 +1840,7 @@ static int show(int argc, char **argv)
         }
 
     } else {
-        printf("Invalid parameter. Use: show <status|config|mappings|acl|vpn|ota>\n");
+        printf("Invalid parameter. Use: show <status|config|mappings|acl|vpn|routes|ota>\n");
         return 1;
     }
 
@@ -1797,12 +1849,12 @@ static int show(int argc, char **argv)
 
 static void register_show(void)
 {
-    show_args.type = arg_str1(NULL, NULL, "[status|config|mappings|acl|vpn|ota]", "Type of information");
+    show_args.type = arg_str1(NULL, NULL, "[status|config|mappings|acl|vpn|routes|ota]", "Type of information");
     show_args.end = arg_end(1);
 
     const esp_console_cmd_t cmd = {
         .command = "show",
-        .help = "Show router status, config, mappings, ACL rules, VPN or OTA info",
+        .help = "Show router status, config, mappings, ACL rules, VPN, routes or OTA info",
         .hint = NULL,
         .func = &show,
         .argtable = &show_args
