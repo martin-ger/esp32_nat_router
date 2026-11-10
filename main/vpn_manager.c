@@ -76,7 +76,15 @@ esp_err_t vpn_connect(void)
     err = esp_wireguard_connect(&wg_ctx);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "WireGuard connect failed: %s", esp_err_to_name(err));
-        // Reset so next attempt does a clean init (avoids leaked netif/timers)
+        /* Tear down whatever connect already set up (netif, UDP pcb, timer).
+         * Without this, the next attempt calls netif_add() on the same static
+         * netif again and trips lwIP's "netif already added" assert. Needs an
+         * esp_wireguard that publishes ctx->netif right after creating it;
+         * older versions leave it NULL here, so the guard makes this a no-op. */
+        if (wg_ctx.netif) {
+            esp_wireguard_disconnect(&wg_ctx);
+        }
+        // Reset so next attempt does a clean init
         wg_initialized = false;
         memset(&wg_ctx, 0, sizeof(wg_ctx));
         return err;
