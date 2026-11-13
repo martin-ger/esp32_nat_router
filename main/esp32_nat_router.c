@@ -79,7 +79,7 @@
 uint64_t sta_bytes_sent = 0;
 uint64_t sta_bytes_received = 0;
 
-// TTL override for STA upstream (0 = disabled/no change)
+// TTL override for STA upstream/downstream (0 = disabled/no change)
 uint8_t sta_ttl_override = 0;
 
 // Reconnect watchdog timeout in seconds (0 = disabled)

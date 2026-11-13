@@ -717,16 +717,18 @@ async def pcap_set_snaplen(snaplen: int) -> str:
 
 @mcp.tool()
 async def get_ttl() -> str:
-    """Get the current TTL (time-to-live) override setting for outgoing internet packets."""
+    """Get the current TTL (time-to-live) override setting for IPv4 packets to/from the internet uplink."""
     return await _cmd("set_ttl")
 
 
 @mcp.tool()
 async def set_ttl(ttl: int) -> str:
-    """Override the TTL (time-to-live) value on all packets sent to the internet. Takes effect immediately.
+    """Override the TTL (time-to-live) value on IPv4 packets to and from the internet uplink. Takes effect immediately.
 
-    This can help bypass ISP restrictions that detect tethering/hotspot usage by
-    normalizing the TTL across all devices. Set to 0 to disable the override.
+    Upstream packets get the TTL just before they are sent; downstream packets get it
+    before they are forwarded to clients (values >= 2 only). This can help bypass ISP
+    restrictions that detect tethering/hotspot usage by normalizing the TTL across all
+    devices, and hotspots that send packets with TTL=1. Set to 0 to disable the override.
 
     Args:
         ttl: TTL value 1-255, or 0 to disable (keep original TTL from each device).

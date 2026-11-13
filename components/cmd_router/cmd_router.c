@@ -2354,12 +2354,14 @@ static void register_set_led_strip(void)
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }
 
-/* 'set_ttl' command - set TTL override for upstream packets */
+/* 'set_ttl' command - set TTL override for routed STA packets (both directions) */
 static int set_ttl_cmd(int argc, char **argv)
 {
     if (argc < 2) {
         printf("Usage: set_ttl <value>\n");
         printf("  value: 0-255 (0 = disabled, no TTL change)\n");
+        printf("  Applied to IPv4 packets sent upstream and to packets received\n");
+        printf("  from upstream before forwarding (downstream needs a value >= 2).\n");
         printf("\nCurrent setting: %d", sta_ttl_override);
         if (sta_ttl_override == 0) {
             printf(" (disabled)\n");
@@ -2387,7 +2389,8 @@ static int set_ttl_cmd(int argc, char **argv)
             printf("TTL override disabled (no change to packets).\n");
         } else {
             ESP_LOGI(TAG, "TTL override set to %ld.", ttl_val);
-            printf("TTL override set to %ld for upstream packets.\n", ttl_val);
+            printf("TTL override set to %ld for %s packets.\n", ttl_val,
+                   ttl_val == 1 ? "upstream (not downstream)" : "upstream and downstream");
         }
     } else {
         printf("Failed to save setting\n");
@@ -2399,7 +2402,7 @@ static void register_set_ttl(void)
 {
     const esp_console_cmd_t cmd = {
         .command = "set_ttl",
-        .help = "Set TTL override for upstream STA packets (0 = disabled)",
+        .help = "Set TTL override for IPv4 packets to/from upstream (0 = disabled)",
         .hint = NULL,
         .func = &set_ttl_cmd,
     };

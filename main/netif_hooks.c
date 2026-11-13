@@ -133,6 +133,42 @@ void format_bytes_human(uint64_t bytes, char *buf, size_t len) {
         snprintf(buf, len, "%" PRIu64 " B", bytes);
 }
 
+// Rewrite the IPv4 TTL of an Ethernet frame and update the header checksum.
+// Only IPv4 is handled; other frames are left untouched.
+static IRAM_ATTR void ttl_override_apply(struct pbuf *p, uint8_t ttl) {
+    // Ethernet header: 14 bytes (6 dst + 6 src + 2 ethertype)
+    // Use p->len (first segment) to ensure header is accessible in this pbuf
+    if (p == NULL || p->len < 14 + sizeof(struct ip_hdr)) {
+        return;
+    }
+    uint8_t *payload = (uint8_t *)p->payload;
+    // Check ethertype for IPv4 (0x0800)
+    if (payload[12] != 0x08 || payload[13] != 0x00) {
+        return;
+    }
+    struct ip_hdr *iphdr = (struct ip_hdr *)(payload + 14);
+    if (IPH_V(iphdr) != 4 || iphdr->_ttl == ttl) {
+        return;
+    }
+
+    // Read 16-bit word containing TTL and protocol
+    uint16_t old_ttl_proto = *(uint16_t *)&iphdr->_ttl;
+    iphdr->_ttl = ttl;
+    uint16_t new_ttl_proto = *(uint16_t *)&iphdr->_ttl;
+
+    // RFC 1624: Incremental checksum update
+    // HC' = ~(~HC + ~m + m')
+    // where HC = old checksum, m = old value, m' = new value
+    uint32_t sum = (uint16_t)~iphdr->_chksum;
+    sum += (uint16_t)~old_ttl_proto;
+    sum += new_ttl_proto;
+    // Fold 32-bit sum to 16 bits
+    while (sum >> 16) {
+        sum = (sum & 0xFFFF) + (sum >> 16);
+    }
+    iphdr->_chksum = (uint16_t)~sum;
+}
+
 // Hook function to count received bytes via netif input and ACL check
 static IRAM_ATTR err_t netif_input_hook(struct pbuf *p, struct netif *netif) {
     bool is_acl_monitored = false;
@@ -158,6 +194,16 @@ static IRAM_ATTR err_t netif_input_hook(struct pbuf *p, struct netif *netif) {
     // Capture packet based on mode and ACL monitor flag (STA interface = false)
     if (pcap_should_capture(is_acl_monitored, false)) {
         pcap_capture_packet(p);
+    }
+
+    // TTL override for downstream packets: rewrite the TTL before lwIP
+    // forwards the packet (like an nftables prerouting "ip ttl set"), so
+    // packets arriving with TTL=1 (anti-tethering) survive the decrement
+    // in ip4_forward. Done after PCAP capture so the capture shows what
+    // arrived on the wire. A value of 1 is skipped here, since it would
+    // make every forwarded downstream packet expire.
+    if (sta_ttl_override > 1) {
+        ttl_override_apply(p, sta_ttl_override);
     }
 
     // Count received bytes and toggle LED
@@ -202,34 +248,10 @@ static IRAM_ATTR err_t netif_linkoutput_hook(struct netif *netif, struct pbuf *p
         }
     }
 
-    // TTL override for upstream packets (must be before PCAP capture)
-    // Ethernet header: 14 bytes (6 dst + 6 src + 2 ethertype)
-    // Use p->len (first segment) to ensure header is accessible in this pbuf
-    if (sta_ttl_override > 0 && p != NULL && p->len >= 14 + sizeof(struct ip_hdr)) {
-        uint8_t *payload = (uint8_t *)p->payload;
-        // Check ethertype for IPv4 (0x0800)
-        if (payload[12] == 0x08 && payload[13] == 0x00) {
-            struct ip_hdr *iphdr = (struct ip_hdr *)(payload + 14);
-            // Verify it's IPv4
-            if (IPH_V(iphdr) == 4) {
-                // Read 16-bit word containing TTL and protocol
-                uint16_t old_ttl_proto = *(uint16_t *)&iphdr->_ttl;
-                iphdr->_ttl = sta_ttl_override;
-                uint16_t new_ttl_proto = *(uint16_t *)&iphdr->_ttl;
-
-                // RFC 1624: Incremental checksum update
-                // HC' = ~(~HC + ~m + m')
-                // where HC = old checksum, m = old value, m' = new value
-                uint32_t sum = (uint16_t)~iphdr->_chksum;
-                sum += (uint16_t)~old_ttl_proto;
-                sum += new_ttl_proto;
-                // Fold 32-bit sum to 16 bits
-                while (sum >> 16) {
-                    sum = (sum & 0xFFFF) + (sum >> 16);
-                }
-                iphdr->_chksum = (uint16_t)~sum;
-            }
-        }
+    // TTL override for upstream packets (must be before PCAP capture so the
+    // capture shows what goes out on the wire)
+    if (sta_ttl_override > 0) {
+        ttl_override_apply(p, sta_ttl_override);
     }
 
     // Capture packet based on mode and ACL monitor flag (STA interface = false)

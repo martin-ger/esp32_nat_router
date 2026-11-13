@@ -84,7 +84,8 @@ esp_err_t antenna_switch_apply(void);
 // the switch and releases the previously used pins; en_gpio may be negative.
 esp_err_t antenna_switch_set(int gpio, int state, int en_gpio);
 
-// TTL override for STA upstream (0 = disabled/no change, 1-255 = fixed TTL)
+// TTL override for STA upstream and downstream (0 = disabled/no change, 1-255 = fixed TTL;
+// downstream rewrite only for values >= 2)
 extern uint8_t sta_ttl_override;
 
 // Reconnect watchdog timeout in seconds (0 = disabled)
