@@ -184,7 +184,8 @@ void preprocess_string(char* str)
 static bool is_secret_param(const char *name)
 {
     static const char *const secrets[] = {
-        "passwd", "ap_passwd", "vpn_privkey", "vpn_psk", "web_password", "mqtt_pass"
+        "passwd", "ap_passwd", "vpn_privkey", "vpn_psk", "web_password", "mqtt_pass",
+        "rc_hostkey"
     };
     for (size_t i = 0; i < sizeof(secrets) / sizeof(secrets[0]); i++) {
         if (strcmp(name, secrets[i]) == 0) return true;
@@ -3424,10 +3425,10 @@ static int remote_console_cmd(int argc, char **argv)
     if (argc < 2) {
         printf("Usage: remote_console <action> [args]\n");
         printf("  status              - Show remote console status\n");
-        printf("  enable              - Enable remote console\n");
+        printf("  enable              - Enable remote console (SSH)\n");
         printf("  disable             - Disable remote console\n");
-        printf("  port <port>         - Set TCP port (requires restart)\n");
-        printf("  bind <both|ap|sta>  - Set interface binding\n");
+        printf("  port <port>         - Set SSH port (requires restart)\n");
+        printf("  bind <ap,sta,vpn>   - Set interface binding\n");
         printf("  timeout <seconds>   - Set idle timeout (0=none)\n");
         printf("  kick                - Disconnect current session\n");
         return 0;
@@ -3461,7 +3462,13 @@ static int remote_console_cmd(int argc, char **argv)
         printf("Connections:    %lu total\n", (unsigned long)status.total_connections);
         printf("Auth failures:  %lu\n", (unsigned long)status.failed_auths);
 
-        printf("\nWARNING: Currently uses plain TCP (not encrypted).\n");
+        char fp[64];
+        remote_console_get_hostkey_fingerprint(fp, sizeof(fp));
+        printf("Protocol:       SSH (password = router password)\n");
+        printf("Host key:       ecdsa-sha2-nistp256 %s\n", fp);
+        if (!is_web_password_set()) {
+            printf("\nNOTE: No router password set - SSH logins are refused.\n");
+        }
 
     } else if (strcmp(action, "enable") == 0) {
         esp_err_t err = remote_console_enable();
@@ -3551,11 +3558,11 @@ static void register_remote_console_cmd(void)
 {
     const esp_console_cmd_t cmd = {
         .command = "remote_console",
-        .help = "Manage remote console (network CLI access)\n"
+        .help = "Manage remote console (network CLI access over SSH)\n"
                 "  remote_console status              - Show status and connection info\n"
-                "  remote_console enable               - Enable remote console\n"
+                "  remote_console enable               - Enable remote console (SSH)\n"
                 "  remote_console disable              - Disable remote console\n"
-                "  remote_console port <port>          - Set TCP port (default: 2323)\n"
+                "  remote_console port <port>          - Set SSH port (default: 22)\n"
                 "  remote_console bind <ap,sta,vpn>    - Set interface binding\n"
                 "  remote_console timeout <seconds>    - Set idle timeout (0=none)\n"
                 "  remote_console kick                 - Disconnect current session",

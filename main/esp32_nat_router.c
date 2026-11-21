@@ -1701,7 +1701,7 @@ void app_main(void)
     // Initialize PCAP capture (TCP server on port 19000)
     pcap_init();
 
-    // Initialize remote console (TCP server on port 2323, disabled by default)
+    // Initialize remote console (SSH server, port 22 by default, disabled by default)
     remote_console_init();
 
     // Initialize syslog client (UDP forwarding, disabled by default)

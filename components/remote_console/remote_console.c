@@ -1,9 +1,11 @@
 /**
  * @file remote_console.c
- * @brief Secure remote console implementation
+ * @brief Remote console over SSH
  *
- * Phase 1: Plain TCP with password authentication
- * Phase 2 will add TLS encryption
+ * The network CLI is reachable only through SSH (see ssh_transport.c): the
+ * connection is encrypted and the router password is checked inside the
+ * encrypted channel.  One session at a time; buffers exist only while a
+ * client is connected.
  */
 
 #include <string.h>
@@ -23,17 +25,14 @@
 #include "nvs.h"
 #include "lwip/sockets.h"
 #include "lwip/ip4_addr.h"
+#include "mbedtls/platform_util.h"
 
 #include "remote_console.h"
+#include "ssh_transport.h"
 #include "router_config.h"
 #include "wifi_config.h"
 #include "vpn_config.h"
 #include "web_password.h"
-
-/* MSG_NOSIGNAL may not be defined on all platforms */
-#ifndef MSG_NOSIGNAL
-#define MSG_NOSIGNAL 0
-#endif
 
 static const char *TAG = "remote_console";
 
@@ -43,33 +42,29 @@ static const char *TAG = "remote_console";
 #define NVS_KEY_BIND        "rc_bind"
 #define NVS_KEY_TIMEOUT     "rc_timeout"
 
-/* Task configuration */
+/* Task configuration (mbedTLS ECC + esp_console_run share this stack) */
 #define RC_TASK_STACK_SIZE  6144
 #define RC_TASK_PRIORITY    5
 
 /* Protocol constants */
 #define RC_MAX_LINE_LEN     256
-#define RC_OUTPUT_BUF_SIZE  4096
+#define RC_MAX_PW_LEN       64
 #define RC_MAX_AUTH_ATTEMPTS 3
+#define RC_MAX_AUTH_REQUESTS 20       /* none/publickey probes included */
+#define RC_AUTH_FAIL_DELAY_MS 1000
 #define RC_AUTH_DELAY_MS    5000
+#define RC_LOGIN_GRACE_MS   60000     /* handshake + authentication */
 #define RC_SHUTDOWN_TIMEOUT_MS 3000
 #define RC_SHUTDOWN_POLL_MS 20
 
-/* Banner and prompts */
-static const char *RC_BANNER =
-    "\r\n"
-    "============================================\r\n"
-    "  ESP32 NAT Router - Remote Console\r\n"
-    "  WARNING: Plain TCP (not encrypted)\r\n"
-    "============================================\r\n"
-    "\r\n";
+/* Channel flow control: what we let the client send before a WINDOW_ADJUST */
+#define RC_CHAN_WINDOW      8192
+#define RC_CHAN_MAXPKT      SSH_MAX_DATA_CHUNK
 
 static const char *RC_PROMPT = "esp32> ";
-static const char *RC_AUTH_PROMPT = "Password: ";
-static const char *RC_AUTH_OK = "\r\nAuthentication successful.\r\n\r\n";
-static const char *RC_AUTH_FAIL = "\r\nAuthentication failed.\r\n";
-static const char *RC_BUSY = "BUSY: Another session is active.\r\n";
-static const char *RC_GOODBYE = "\r\nGoodbye.\r\n";
+static const char *RC_WELCOME =
+    "\r\nESP32 NAT Router - Remote Console (SSH)\r\n"
+    "Type 'help' for commands, 'exit' to quit.\r\n\r\n";
 
 /* State */
 static remote_console_config_t rc_config = {
@@ -104,24 +99,35 @@ static struct {
     .shutdown_requested = false
 };
 
-/* Output redirection state */
-static int rc_client_fd = -1;           /* Socket for active session output */
-
 /* Capture buffer for stdout - allocated only while a session is active */
 #define RC_CAPTURE_BUF_SIZE 10240
 static char *rc_capture_buf = NULL;
 static size_t rc_capture_pos = 0;
 static bool rc_capturing = false;
 
+/* One session channel per connection (clients may open several in sequence) */
+typedef struct {
+    bool open;
+    bool close_sent;
+    bool pty;                 /* client asked for a terminal: echo + CRLF */
+    bool shell;               /* interactive shell running */
+    uint32_t peer_id;
+    uint32_t peer_window;
+    uint32_t peer_maxpkt;
+    uint32_t consumed;        /* bytes received since the last WINDOW_ADJUST */
+    /* line editor */
+    char line[RC_MAX_LINE_LEN];
+    size_t pos;
+    uint8_t esc;              /* 0 = none, 1 = got ESC, 2 = in CSI/SS3 sequence */
+    bool last_cr;
+    uint8_t *in;              /* copy of received CHANNEL_DATA (rx buffer is reused) */
+} rc_chan_t;
 
 /* Forward declarations */
 static void remote_console_task(void *arg);
 static esp_err_t load_config(void);
 static esp_err_t save_config(void);
-static bool authenticate_client(int client_fd);
-static void handle_session(int client_fd);
-static int send_string(int fd, const char *str);
-static int recv_line(int fd, char *buf, size_t max_len, uint32_t timeout_sec);
+static void handle_connection(int client_fd);
 
 /* External declarations for wrapped functions */
 extern int __real_printf(const char *fmt, ...);
@@ -233,38 +239,19 @@ size_t __wrap_fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream) {
     return ret;
 }
 
-/**
- * @brief Send data to network client with LF->CRLF conversion
- */
-static void send_to_client_crlf(int fd, const char *data, size_t len) {
-    if (fd < 0 || len == 0) return;
 
-    char net_buf[512];
-    size_t net_pos = 0;
-
-    for (size_t i = 0; i < len; i++) {
-        if (data[i] == '\n' && (i == 0 || data[i-1] != '\r')) {
-            if (net_pos < sizeof(net_buf) - 1) {
-                net_buf[net_pos++] = '\r';
-            }
-        }
-        if (net_pos < sizeof(net_buf)) {
-            net_buf[net_pos++] = data[i];
-        }
-
-        /* Flush buffer if full */
-        if (net_pos >= sizeof(net_buf) - 2) {
-            send(fd, net_buf, net_pos, MSG_NOSIGNAL);
-            net_pos = 0;
-        }
+static esp_err_t start_task(void) {
+    rc_state.shutdown_requested = false;
+    BaseType_t ret = xTaskCreate(remote_console_task, "remote_console",
+                                 RC_TASK_STACK_SIZE, NULL,
+                                 RC_TASK_PRIORITY, (TaskHandle_t *)&rc_state.task_handle);
+    if (ret != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create remote console task");
+        return ESP_ERR_NO_MEM;
     }
-
-    /* Send remaining */
-    if (net_pos > 0) {
-        send(fd, net_buf, net_pos, MSG_NOSIGNAL);
-    }
+    rc_state.state = RC_STATE_LISTENING;
+    return ESP_OK;
 }
-
 
 esp_err_t remote_console_init(void) {
     ESP_LOGI(TAG, "Initializing remote console");
@@ -281,17 +268,9 @@ esp_err_t remote_console_init(void) {
 
     /* Start server if enabled */
     if (rc_config.enabled) {
-        /* Create server task */
-        BaseType_t ret = xTaskCreate(remote_console_task, "remote_console",
-                                     RC_TASK_STACK_SIZE, NULL,
-                                     RC_TASK_PRIORITY, (TaskHandle_t *)&rc_state.task_handle);
-        if (ret != pdPASS) {
-            ESP_LOGE(TAG, "Failed to create remote console task");
-            return ESP_ERR_NO_MEM;
-        }
-
-        rc_state.state = RC_STATE_LISTENING;
-        ESP_LOGI(TAG, "Remote console started on port %d", rc_config.port);
+        esp_err_t err = start_task();
+        if (err != ESP_OK) return err;
+        ESP_LOGI(TAG, "Remote console (SSH) started on port %d", rc_config.port);
     } else {
         rc_state.state = RC_STATE_DISABLED;
         ESP_LOGI(TAG, "Remote console disabled");
@@ -309,21 +288,13 @@ esp_err_t remote_console_enable(void) {
     save_config();
 
     /* Start server if not already running */
-    if (rc_state.task_handle == NULL) {
-        rc_state.shutdown_requested = false;
-        BaseType_t ret = xTaskCreate(remote_console_task, "remote_console",
-                                     RC_TASK_STACK_SIZE, NULL,
-                                     RC_TASK_PRIORITY, (TaskHandle_t *)&rc_state.task_handle);
-        if (ret != pdPASS) {
-            ESP_LOGE(TAG, "Failed to create remote console task");
-            rc_config.enabled = false;
-            save_config();
-            return ESP_ERR_NO_MEM;
-        }
-        rc_state.state = RC_STATE_LISTENING;
+    if (rc_state.task_handle == NULL && start_task() != ESP_OK) {
+        rc_config.enabled = false;
+        save_config();
+        return ESP_ERR_NO_MEM;
     }
 
-    ESP_LOGI(TAG, "Remote console enabled on port %d", rc_config.port);
+    ESP_LOGI(TAG, "Remote console (SSH) enabled on port %d", rc_config.port);
     return ESP_OK;
 }
 
@@ -402,7 +373,7 @@ esp_err_t remote_console_set_timeout(uint32_t timeout_sec) {
 }
 
 esp_err_t remote_console_kick(void) {
-    if (rc_state.state != RC_STATE_ACTIVE) {
+    if (rc_state.state != RC_STATE_ACTIVE && rc_state.state != RC_STATE_AUTH_WAIT) {
         return ESP_ERR_NOT_FOUND;
     }
 
@@ -438,6 +409,10 @@ esp_err_t remote_console_get_status(remote_console_status_t *status) {
     }
 
     return ESP_OK;
+}
+
+void remote_console_get_hostkey_fingerprint(char *out, size_t out_len) {
+    ssh_hostkey_fingerprint(out, out_len);
 }
 
 bool remote_console_is_enabled(void) {
@@ -506,226 +481,546 @@ static esp_err_t save_config(void) {
     return ESP_OK;
 }
 
-/* Password checking uses shared functions from router_globals.h:
- * is_web_password_set(), verify_web_password() */
-
-static int send_string(int fd, const char *str) {
-    size_t len = strlen(str);
-    ssize_t sent = send(fd, str, len, 0);
-    return (sent == (ssize_t)len) ? 0 : -1;
+static bool rc_should_abort(void) {
+    return rc_state.kick_requested || rc_state.shutdown_requested;
 }
 
-static int recv_line(int fd, char *buf, size_t max_len, uint32_t timeout_sec) {
-    size_t pos = 0;
-    int64_t start = esp_timer_get_time();
-    int64_t timeout_us = (int64_t)timeout_sec * 1000000;
+/* ---- Authentication (password only, checked against the router password) ---- */
 
-    /* Set socket timeout */
-    struct timeval tv;
-    tv.tv_sec = 1;  /* 1 second poll interval */
-    tv.tv_usec = 0;
-    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-
-    while (pos < max_len - 1) {
-        /* Check for kick or shutdown */
-        if (rc_state.kick_requested || rc_state.shutdown_requested) {
-            return -1;
-        }
-
-        /* Check timeout */
-        if (timeout_sec > 0) {
-            int64_t elapsed = esp_timer_get_time() - start;
-            if (elapsed > timeout_us) {
-                return -2;  /* Timeout */
-            }
-        }
-
-        char c;
-        ssize_t ret = recv(fd, &c, 1, 0);
-
-        if (ret < 0) {
-            if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                continue;  /* Timeout on recv, check for kick/shutdown */
-            }
-            return -1;  /* Error */
-        } else if (ret == 0) {
-            return -1;  /* Connection closed */
-        }
-
-        /* Handle special characters */
-        if (c == '\r') {
-            continue;  /* Ignore CR */
-        } else if (c == '\n') {
-            buf[pos] = '\0';
-            return (int)pos;
-        } else if (c == '\b' || c == 0x7f) {
-            /* Backspace */
-            if (pos > 0) {
-                pos--;
-                send(fd, "\b \b", 3, 0);  /* Erase character */
-            }
-        } else if (c == 0x03) {
-            /* Ctrl+C */
-            return -3;
-        } else if (c == 0x04) {
-            /* Ctrl+D */
-            return -1;
-        } else if (c >= 0x20 && c < 0x7f) {
-            buf[pos++] = c;
-        }
-    }
-
-    buf[pos] = '\0';
-    return (int)pos;
+static esp_err_t send_auth_failure(ssh_conn_t *c) {
+    ssh_out_t *o = ssh_out_begin(c, SSH_MSG_USERAUTH_FAILURE);
+    ssh_put_cstr(o, "password");
+    ssh_put_u8(o, 0);
+    return ssh_out_send(c);
 }
 
-static bool authenticate_client(int client_fd) {
-    char password_input[64];
+static bool authenticate(ssh_conn_t *c, int64_t deadline) {
+    int attempts = 0;
+    int requests = 0;
+    bool banner_sent = false;
 
-    /* If no password set, skip authentication */
-    if (!is_web_password_set()) {
-        ESP_LOGW(TAG, "No password set - allowing unauthenticated access");
-        send_string(client_fd, "WARNING: No password set. Use 'set_router_password' to secure access.\r\n");
-        return true;
-    }
-
-    for (int attempt = 0; attempt < RC_MAX_AUTH_ATTEMPTS; attempt++) {
-        send_string(client_fd, RC_AUTH_PROMPT);
-
-        /* Receive password (with echo disabled - we don't echo) */
-        int len = recv_line(client_fd, password_input, sizeof(password_input), 60);
-        if (len < 0) {
+    for (;;) {
+        int64_t left_ms = (deadline - esp_timer_get_time()) / 1000;
+        if (left_ms <= 0) {
+            ssh_send_disconnect(c, SSH_DISCONNECT_BY_APPLICATION, "login timeout");
             return false;
         }
 
-        if (verify_web_password(password_input)) {
-            send_string(client_fd, RC_AUTH_OK);
-            ESP_LOGI(TAG, "Remote console login successful from %s", rc_state.client_ip);
+        uint8_t *p;
+        int n = ssh_recv(c, &p, (uint32_t)left_ms);
+        if (n < 0) return false;
+
+        ssh_in_t in;
+        ssh_in_init(&in, p, n);
+        uint8_t type = ssh_get_u8(&in);
+
+        if (type == SSH_MSG_SERVICE_REQUEST) {
+            if (!ssh_get_string_eq(&in, "ssh-userauth")) {
+                ssh_send_disconnect(c, SSH_DISCONNECT_SERVICE_NOT_AVAILABLE, "service not available");
+                return false;
+            }
+            ssh_out_t *o = ssh_out_begin(c, SSH_MSG_SERVICE_ACCEPT);
+            ssh_put_cstr(o, "ssh-userauth");
+            if (ssh_out_send(c) != ESP_OK) return false;
+            continue;
+        }
+
+        if (type != SSH_MSG_USERAUTH_REQUEST) {
+            if (type >= SSH_MSG_GLOBAL_REQUEST) {
+                /* Connection protocol before authentication */
+                ssh_send_disconnect(c, SSH_DISCONNECT_PROTOCOL_ERROR, "not authenticated");
+                return false;
+            }
+            if (ssh_send_unimplemented(c) != ESP_OK) return false;
+            continue;
+        }
+
+        if (++requests > RC_MAX_AUTH_REQUESTS) {
+            ssh_send_disconnect(c, SSH_DISCONNECT_NO_MORE_AUTH_METHODS, "too many authentication requests");
+            return false;
+        }
+
+        size_t user_len;
+        ssh_get_string(&in, &user_len);
+        bool service_ok = ssh_get_string_eq(&in, "ssh-connection");
+        bool is_password = ssh_get_string_eq(&in, "password");
+
+        if (!is_web_password_set()) {
+            /* No router password: refuse every login rather than letting anyone in */
+            if (!banner_sent) {
+                ssh_out_t *o = ssh_out_begin(c, SSH_MSG_USERAUTH_BANNER);
+                ssh_put_cstr(o, "Remote console login is disabled until a router password is set\r\n"
+                                "(set_router_password on the serial console, or the web UI).\r\n");
+                ssh_put_cstr(o, "");
+                if (ssh_out_send(c) != ESP_OK) return false;
+                banner_sent = true;
+                ESP_LOGW(TAG, "SSH login from %s refused: no router password set", rc_state.client_ip);
+            }
+            if (send_auth_failure(c) != ESP_OK) return false;
+            continue;
+        }
+
+        if (!service_ok || !is_password || in.err) {
+            /* "none", "publickey", "keyboard-interactive", ...: offer password */
+            if (send_auth_failure(c) != ESP_OK) return false;
+            continue;
+        }
+
+        bool change = ssh_get_bool(&in);
+        size_t pw_len;
+        uint8_t *pw = ssh_get_string(&in, &pw_len);
+        bool ok = false;
+        if (!in.err && !change && pw_len > 0 && pw_len <= RC_MAX_PW_LEN &&
+            memchr(pw, '\0', pw_len) == NULL) {
+            char pw_buf[RC_MAX_PW_LEN + 1];
+            memcpy(pw_buf, pw, pw_len);
+            pw_buf[pw_len] = '\0';
+            ok = verify_web_password(pw_buf);
+            mbedtls_platform_zeroize(pw_buf, sizeof(pw_buf));
+        }
+        if (pw) mbedtls_platform_zeroize(pw, pw_len);
+
+        if (ok) {
+            ssh_out_begin(c, SSH_MSG_USERAUTH_SUCCESS);
+            if (ssh_out_send(c) != ESP_OK) return false;
+            ESP_LOGI(TAG, "SSH login successful from %s", rc_state.client_ip);
             return true;
         }
 
-        send_string(client_fd, RC_AUTH_FAIL);
+        attempts++;
         rc_state.failed_auths++;
-        ESP_LOGW(TAG, "Remote console login failed from %s (attempt %d/%d)",
-                 rc_state.client_ip, attempt + 1, RC_MAX_AUTH_ATTEMPTS);
+        ESP_LOGW(TAG, "SSH login failed from %s (attempt %d/%d)",
+                 rc_state.client_ip, attempts, RC_MAX_AUTH_ATTEMPTS);
+        if (attempts >= RC_MAX_AUTH_ATTEMPTS) {
+            ssh_send_disconnect(c, SSH_DISCONNECT_NO_MORE_AUTH_METHODS, "too many authentication failures");
+            /* Delay before allowing reconnection */
+            vTaskDelay(pdMS_TO_TICKS(RC_AUTH_DELAY_MS));
+            return false;
+        }
+        vTaskDelay(pdMS_TO_TICKS(RC_AUTH_FAIL_DELAY_MS));
+        if (send_auth_failure(c) != ESP_OK) return false;
+    }
+}
 
-        if (attempt < RC_MAX_AUTH_ATTEMPTS - 1) {
-            send_string(client_fd, "\r\n");
+/* ---- Channel helpers ---- */
+
+static esp_err_t chan_reply(ssh_conn_t *c, rc_chan_t *ch, bool ok) {
+    ssh_out_t *o = ssh_out_begin(c, ok ? SSH_MSG_CHANNEL_SUCCESS : SSH_MSG_CHANNEL_FAILURE);
+    ssh_put_u32(o, ch->peer_id);
+    return ssh_out_send(c);
+}
+
+/* Block until the client grants more window; only flow-control and teardown
+ * messages are acted on, anything typed meanwhile is dropped. */
+static esp_err_t chan_wait_window(ssh_conn_t *c, rc_chan_t *ch) {
+    while (ch->peer_window == 0) {
+        uint8_t *p;
+        int n = ssh_recv(c, &p, 30000);
+        if (n < 0) return ESP_FAIL;
+        ssh_in_t in;
+        ssh_in_init(&in, p, n);
+        uint8_t type = ssh_get_u8(&in);
+        if (type == SSH_MSG_CHANNEL_WINDOW_ADJUST) {
+            ssh_get_u32(&in);
+            uint32_t add = ssh_get_u32(&in);
+            if (!in.err) ch->peer_window += add;
+        } else if (type == SSH_MSG_CHANNEL_CLOSE || type == SSH_MSG_CHANNEL_EOF) {
+            return ESP_FAIL;
+        }
+    }
+    return ESP_OK;
+}
+
+/* Send output to the channel; with a pty, bare LF becomes CRLF. */
+static esp_err_t chan_write(ssh_conn_t *c, rc_chan_t *ch, const char *data, size_t len) {
+    size_t i = 0;
+    while (i < len) {
+        if (ch->peer_window == 0 && chan_wait_window(c, ch) != ESP_OK) return ESP_FAIL;
+
+        size_t limit = SSH_MAX_DATA_CHUNK;
+        if (limit > ch->peer_maxpkt) limit = ch->peer_maxpkt;
+        if (limit > ch->peer_window) limit = ch->peer_window;
+        if (limit < 2) limit = 2 > ch->peer_window ? ch->peer_window : 2;
+
+        ssh_out_t *o = ssh_out_begin(c, SSH_MSG_CHANNEL_DATA);
+        ssh_put_u32(o, ch->peer_id);
+        uint8_t *len_field = ssh_put_reserve(o, 4);
+        uint8_t *dst = ssh_put_reserve(o, limit);
+        if (!dst) return ESP_FAIL;
+
+        size_t out = 0;
+        while (i < len && out < limit) {
+            char b = data[i];
+            if (ch->pty && b == '\n' && (i == 0 || data[i - 1] != '\r')) {
+                if (out + 2 > limit) break;
+                dst[out++] = '\r';
+            }
+            dst[out++] = b;
+            i++;
+        }
+        if (out == 0) break;   /* window of 1 byte and a CRLF pending: give up */
+        o->len -= (limit - out);
+        len_field[0] = out >> 24; len_field[1] = out >> 16;
+        len_field[2] = out >> 8;  len_field[3] = out;
+        if (ssh_out_send(c) != ESP_OK) return ESP_FAIL;
+        ch->peer_window -= out;
+    }
+    return ESP_OK;
+}
+
+static esp_err_t chan_puts(ssh_conn_t *c, rc_chan_t *ch, const char *s) {
+    return chan_write(c, ch, s, strlen(s));
+}
+
+/* exit-status, EOF and CLOSE: the normal end of an exec or shell */
+static void chan_finish(ssh_conn_t *c, rc_chan_t *ch, uint32_t status) {
+    if (ch->close_sent) return;
+    ssh_out_t *o = ssh_out_begin(c, SSH_MSG_CHANNEL_REQUEST);
+    ssh_put_u32(o, ch->peer_id);
+    ssh_put_cstr(o, "exit-status");
+    ssh_put_u8(o, 0);
+    ssh_put_u32(o, status);
+    ssh_out_send(c);
+
+    o = ssh_out_begin(c, SSH_MSG_CHANNEL_EOF);
+    ssh_put_u32(o, ch->peer_id);
+    ssh_out_send(c);
+
+    o = ssh_out_begin(c, SSH_MSG_CHANNEL_CLOSE);
+    ssh_put_u32(o, ch->peer_id);
+    ssh_out_send(c);
+    ch->close_sent = true;
+    ch->shell = false;
+}
+
+/* Run one console command and send its output.  Returns the exit status. */
+static uint32_t run_command(ssh_conn_t *c, rc_chan_t *ch, char *line) {
+    rc_capture_pos = 0;
+    rc_capture_buf[0] = '\0';
+    rc_capturing = true;
+
+    int cmd_ret = 0;
+    esp_err_t err = esp_console_run(line, &cmd_ret);
+
+    /* Flush stdout to ensure all output is captured */
+    fflush(stdout);
+
+    /* Stop capturing - MUST happen even if command fails */
+    rc_capturing = false;
+
+    if (rc_capture_pos > 0) {
+        chan_write(c, ch, rc_capture_buf, rc_capture_pos);
+    }
+
+    if (err == ESP_ERR_NOT_FOUND) {
+        chan_puts(c, ch, "Unknown command. Type 'help' for list.\n");
+        return 127;
+    } else if (err == ESP_ERR_INVALID_ARG) {
+        /* Empty or unparsable line - output already sent */
+        return 1;
+    } else if (err != ESP_OK) {
+        char errbuf[64];
+        snprintf(errbuf, sizeof(errbuf), "Error: %s\n", esp_err_to_name(err));
+        chan_puts(c, ch, errbuf);
+        return 1;
+    }
+    return (uint32_t)cmd_ret;
+}
+
+/* Feed typed bytes to the shell's line editor. */
+static void shell_input(ssh_conn_t *c, rc_chan_t *ch, const uint8_t *data, size_t len) {
+    char echo[64];
+    size_t ne = 0;
+#define ECHO(s, n) do { \
+        if (ch->pty) { \
+            if (ne + (n) > sizeof(echo)) { chan_write(c, ch, echo, ne); ne = 0; } \
+            memcpy(echo + ne, (s), (n)); ne += (n); \
+        } \
+    } while (0)
+#define ECHO_FLUSH() do { if (ne) { chan_write(c, ch, echo, ne); ne = 0; } } while (0)
+
+    for (size_t i = 0; i < len && ch->shell; i++) {
+        uint8_t b = data[i];
+
+        /* Swallow escape sequences (arrow keys etc.) */
+        if (ch->esc == 1) {
+            ch->esc = (b == '[' || b == 'O') ? 2 : 0;
+            continue;
+        }
+        if (ch->esc == 2) {
+            if (b >= 0x40 && b <= 0x7e) ch->esc = 0;
+            continue;
+        }
+
+        if (b == '\n' && ch->last_cr) {
+            ch->last_cr = false;
+            continue;
+        }
+        ch->last_cr = (b == '\r');
+
+        if (b == '\r' || b == '\n') {
+            ECHO("\r\n", 2);
+            ECHO_FLUSH();
+            ch->line[ch->pos] = '\0';
+            size_t n = ch->pos;
+            ch->pos = 0;
+            rc_state.last_activity_time = esp_timer_get_time();
+            if (n > 0) {
+                if (strcmp(ch->line, "quit") == 0 || strcmp(ch->line, "exit") == 0) {
+                    chan_puts(c, ch, "Goodbye.\n");
+                    chan_finish(c, ch, 0);
+                    return;
+                }
+                run_command(c, ch, ch->line);
+            }
+            chan_puts(c, ch, RC_PROMPT);
+        } else if (b == 0x7f || b == 0x08) {
+            if (ch->pos > 0) {
+                ch->pos--;
+                ECHO("\b \b", 3);
+            }
+        } else if (b == 0x03) {             /* Ctrl+C: discard the line */
+            ECHO("^C\r\n", 4);
+            ECHO_FLUSH();
+            ch->pos = 0;
+            chan_puts(c, ch, RC_PROMPT);
+        } else if (b == 0x04) {             /* Ctrl+D on an empty line: logout */
+            if (ch->pos == 0) {
+                ECHO_FLUSH();
+                chan_puts(c, ch, "\n");
+                chan_finish(c, ch, 0);
+                return;
+            }
+        } else if (b == 0x1b) {
+            ch->esc = 1;
+        } else if (b >= 0x20 && b < 0x7f) {
+            if (ch->pos < sizeof(ch->line) - 1) {
+                ch->line[ch->pos++] = (char)b;
+                ECHO((char *)&b, 1);
+            }
+        }
+    }
+    ECHO_FLUSH();
+#undef ECHO
+#undef ECHO_FLUSH
+}
+
+static void handle_channel_request(ssh_conn_t *c, rc_chan_t *ch, ssh_in_t *in) {
+    size_t tlen;
+    uint8_t *type = ssh_get_string(in, &tlen);
+    bool want_reply = ssh_get_bool(in);
+    if (in->err || !ch->open || ch->close_sent) return;
+
+#define IS(s) (tlen == sizeof(s) - 1 && memcmp(type, s, tlen) == 0)
+    if (IS("pty-req")) {
+        ch->pty = true;
+        if (want_reply) chan_reply(c, ch, true);
+    } else if (IS("shell") && !ch->shell) {
+        if (want_reply) chan_reply(c, ch, true);
+        ch->shell = true;
+        ch->pos = 0;
+        chan_puts(c, ch, RC_WELCOME);
+        chan_puts(c, ch, RC_PROMPT);
+    } else if (IS("exec") && !ch->shell) {
+        size_t clen;
+        uint8_t *cmd = ssh_get_string(in, &clen);
+        if (in->err || clen >= RC_MAX_LINE_LEN) {
+            if (want_reply) chan_reply(c, ch, false);
+            return;
+        }
+        if (want_reply) chan_reply(c, ch, true);
+        memcpy(ch->line, cmd, clen);
+        ch->line[clen] = '\0';
+        rc_state.last_activity_time = esp_timer_get_time();
+        uint32_t status = run_command(c, ch, ch->line);
+        chan_finish(c, ch, status);
+    } else {
+        /* env, window-change, subsystem (sftp), x11, agent forwarding, ... */
+        if (want_reply) chan_reply(c, ch, false);
+    }
+#undef IS
+}
+
+/* Connection protocol after successful authentication. */
+static void serve_channels(ssh_conn_t *c) {
+    rc_chan_t *ch = calloc(1, sizeof(*ch));
+    uint8_t *inbuf = malloc(RC_CHAN_MAXPKT);
+    if (!ch || !inbuf) {
+        free(ch);
+        free(inbuf);
+        return;
+    }
+    ch->in = inbuf;
+
+    while (!rc_should_abort()) {
+        uint32_t timeout_ms = 0;
+        if (rc_config.idle_timeout_sec > 0) {
+            int64_t idle_ms = (esp_timer_get_time() - rc_state.last_activity_time) / 1000;
+            int64_t left = (int64_t)rc_config.idle_timeout_sec * 1000 - idle_ms;
+            timeout_ms = left > 0 ? (uint32_t)left : 1;
+        }
+
+        uint8_t *p;
+        int n = ssh_recv(c, &p, timeout_ms);
+        if (n == SSH_ERR_TIMEOUT) {
+            if (ch->open && !ch->close_sent) {
+                chan_puts(c, ch, "\nSession timeout.\n");
+                chan_finish(c, ch, 0);
+            }
+            ssh_send_disconnect(c, SSH_DISCONNECT_BY_APPLICATION, "idle timeout");
+            break;
+        }
+        if (n < 0) break;
+
+        ssh_in_t in;
+        ssh_in_init(&in, p, n);
+        uint8_t type = ssh_get_u8(&in);
+
+        switch (type) {
+        case SSH_MSG_GLOBAL_REQUEST: {
+            size_t l;
+            ssh_get_string(&in, &l);
+            if (ssh_get_bool(&in) && !in.err) {      /* e.g. keepalive@openssh.com */
+                ssh_out_begin(c, SSH_MSG_REQUEST_FAILURE);
+                ssh_out_send(c);
+            }
+            break;
+        }
+        case SSH_MSG_CHANNEL_OPEN: {
+            bool session = ssh_get_string_eq(&in, "session");
+            uint32_t sender = ssh_get_u32(&in);
+            uint32_t window = ssh_get_u32(&in);
+            uint32_t maxpkt = ssh_get_u32(&in);
+            if (in.err) break;
+            if (!session || ch->open) {
+                /* Only one shell/exec session; no port forwarding through the router */
+                ssh_out_t *o = ssh_out_begin(c, SSH_MSG_CHANNEL_OPEN_FAILURE);
+                ssh_put_u32(o, sender);
+                ssh_put_u32(o, 1);                   /* administratively prohibited */
+                ssh_put_cstr(o, "only one session channel is supported");
+                ssh_put_cstr(o, "");
+                ssh_out_send(c);
+                break;
+            }
+            memset(ch, 0, sizeof(*ch));
+            ch->in = inbuf;
+            ch->open = true;
+            ch->peer_id = sender;
+            ch->peer_window = window;
+            ch->peer_maxpkt = maxpkt ? maxpkt : 1;
+            ssh_out_t *o = ssh_out_begin(c, SSH_MSG_CHANNEL_OPEN_CONFIRMATION);
+            ssh_put_u32(o, sender);
+            ssh_put_u32(o, 0);                       /* our channel id */
+            ssh_put_u32(o, RC_CHAN_WINDOW);
+            ssh_put_u32(o, RC_CHAN_MAXPKT);
+            ssh_out_send(c);
+            break;
+        }
+        case SSH_MSG_CHANNEL_REQUEST:
+            ssh_get_u32(&in);
+            handle_channel_request(c, ch, &in);
+            break;
+        case SSH_MSG_CHANNEL_WINDOW_ADJUST: {
+            ssh_get_u32(&in);
+            uint32_t add = ssh_get_u32(&in);
+            if (!in.err && ch->open) {
+                ch->peer_window = (ch->peer_window + add < ch->peer_window)
+                                  ? UINT32_MAX : ch->peer_window + add;
+            }
+            break;
+        }
+        case SSH_MSG_CHANNEL_DATA: {
+            ssh_get_u32(&in);
+            size_t dlen;
+            uint8_t *data = ssh_get_string(&in, &dlen);
+            if (in.err || !ch->open || ch->close_sent) break;
+            if (dlen > RC_CHAN_MAXPKT) dlen = RC_CHAN_MAXPKT;
+            ch->consumed += dlen;
+            if (ch->consumed >= RC_CHAN_WINDOW / 2) {
+                ssh_out_t *o = ssh_out_begin(c, SSH_MSG_CHANNEL_WINDOW_ADJUST);
+                ssh_put_u32(o, ch->peer_id);
+                ssh_put_u32(o, ch->consumed);
+                ssh_out_send(c);
+                ch->consumed = 0;
+            }
+            if (ch->shell) {
+                /* Commands send packets (and may read some while waiting for
+                 * window), which reuses the rx buffer: work on a copy. */
+                memcpy(ch->in, data, dlen);
+                shell_input(c, ch, ch->in, dlen);
+            }
+            break;
+        }
+        case SSH_MSG_CHANNEL_EXTENDED_DATA:
+            break;
+        case SSH_MSG_CHANNEL_EOF:
+            if (ch->open && ch->shell) chan_finish(c, ch, 0);
+            break;
+        case SSH_MSG_CHANNEL_CLOSE:
+            if (ch->open) {
+                if (!ch->close_sent) {
+                    ssh_out_t *o = ssh_out_begin(c, SSH_MSG_CHANNEL_CLOSE);
+                    ssh_put_u32(o, ch->peer_id);
+                    ssh_out_send(c);
+                }
+                ch->open = false;
+                ch->close_sent = false;
+                ch->shell = false;
+            }
+            break;
+        default:
+            ssh_send_unimplemented(c);
+            break;
         }
     }
 
-    /* Max attempts reached */
-    ESP_LOGW(TAG, "Remote console: max auth attempts reached from %s, disconnecting",
-             rc_state.client_ip);
-
-    /* Delay before allowing reconnection */
-    vTaskDelay(pdMS_TO_TICKS(RC_AUTH_DELAY_MS));
-
-    return false;
+    if (rc_state.kick_requested || rc_state.shutdown_requested) {
+        ssh_send_disconnect(c, SSH_DISCONNECT_BY_APPLICATION, "session terminated by administrator");
+    }
+    mbedtls_platform_zeroize(ch, sizeof(*ch));
+    free(ch);
+    free(inbuf);
 }
 
-static void handle_session(int client_fd) {
-    char line[RC_MAX_LINE_LEN];
-    int ret;
+static void handle_connection(int client_fd) {
+    rc_state.state = RC_STATE_AUTH_WAIT;
+    rc_state.kick_requested = false;
 
-    rc_state.state = RC_STATE_ACTIVE;
-    rc_state.session_start_time = esp_timer_get_time();
-    rc_state.last_activity_time = rc_state.session_start_time;
-
-    ESP_LOGI(TAG, "Session started with %s", rc_state.client_ip);
-
-    /* Set client fd for any direct sends */
-    rc_client_fd = client_fd;
-
-    /* Allocate capture buffer for the duration of this session */
-    rc_capture_buf = malloc(RC_CAPTURE_BUF_SIZE);
-    if (rc_capture_buf == NULL) {
-        ESP_LOGE(TAG, "Failed to allocate capture buffer");
-        rc_client_fd = -1;
-        rc_state.state = RC_STATE_LISTENING;
+    int64_t deadline = esp_timer_get_time() + (int64_t)RC_LOGIN_GRACE_MS * 1000;
+    ssh_conn_t *c = ssh_conn_new(client_fd, rc_should_abort);
+    if (c == NULL) {
+        ESP_LOGE(TAG, "Out of memory for SSH session");
         return;
     }
 
-    /* Send initial prompt */
-    send_string(client_fd, RC_PROMPT);
-
-    while (!rc_state.kick_requested && !rc_state.shutdown_requested) {
-        /* Receive command line */
-        ret = recv_line(client_fd, line, sizeof(line), rc_config.idle_timeout_sec);
-
-        if (ret == -2) {
-            /* Timeout */
-            send_string(client_fd, "\r\nSession timeout.\r\n");
-            break;
-        } else if (ret == -3) {
-            /* Ctrl+C - cancel current line, show new prompt */
-            send_string(client_fd, "^C\r\n");
-            send_string(client_fd, RC_PROMPT);
-            continue;
-        } else if (ret < 0) {
-            /* Error or disconnect (including Ctrl+D) */
-            break;
-        }
-
-        rc_state.last_activity_time = esp_timer_get_time();
-
-        /* Empty line - just show prompt */
-        if (ret == 0) {
-            send_string(client_fd, RC_PROMPT);
-            continue;
-        }
-
-        /* Check for quit command */
-        if (strcmp(line, "quit") == 0 || strcmp(line, "exit") == 0) {
-            send_string(client_fd, RC_GOODBYE);
-            break;
-        }
-
-        /* Start capturing output */
-        rc_capture_pos = 0;
-        rc_capture_buf[0] = '\0';
-        rc_capturing = true;
-
-        /* Execute command */
-        int cmd_ret;
-        esp_err_t err = esp_console_run(line, &cmd_ret);
-
-        /* Flush stdout to ensure all output is captured */
-        fflush(stdout);
-
-        /* Stop capturing - MUST happen even if command fails */
-        rc_capturing = false;
-
-        /* Send captured output to client */
-        if (rc_capture_pos > 0) {
-            send_to_client_crlf(client_fd, rc_capture_buf, rc_capture_pos);
-        }
-
-        /* Handle command result */
-        if (err == ESP_ERR_NOT_FOUND) {
-            send_string(client_fd, "Unknown command. Type 'help' for list.\r\n");
-        } else if (err == ESP_ERR_INVALID_ARG) {
-            /* Command parsing error - output already sent */
-        } else if (err != ESP_OK) {
-            char errbuf[64];
-            snprintf(errbuf, sizeof(errbuf), "Error: %s\r\n", esp_err_to_name(err));
-            send_string(client_fd, errbuf);
-        }
-
-        /* Send prompt */
-        send_string(client_fd, RC_PROMPT);
+    if (ssh_handshake(c, RC_LOGIN_GRACE_MS) != ESP_OK) {
+        ESP_LOGW(TAG, "SSH handshake with %s failed", rc_state.client_ip);
+        ssh_conn_free(c);
+        return;
     }
 
-    /* Clear state */
-    rc_client_fd = -1;
-    rc_capturing = false;  /* Ensure capturing is disabled */
+    if (authenticate(c, deadline)) {
+        rc_capture_buf = malloc(RC_CAPTURE_BUF_SIZE);
+        if (rc_capture_buf == NULL) {
+            ESP_LOGE(TAG, "Failed to allocate capture buffer");
+        } else {
+            rc_state.state = RC_STATE_ACTIVE;
+            rc_state.session_start_time = esp_timer_get_time();
+            rc_state.last_activity_time = rc_state.session_start_time;
+            ESP_LOGI(TAG, "Session started with %s", rc_state.client_ip);
 
-    /* Free capture buffer */
-    free(rc_capture_buf);
-    rc_capture_buf = NULL;
-    rc_capture_pos = 0;
+            serve_channels(c);
 
-    ESP_LOGI(TAG, "Session ended with %s", rc_state.client_ip);
+            rc_capturing = false;
+            free(rc_capture_buf);
+            rc_capture_buf = NULL;
+            rc_capture_pos = 0;
+            ESP_LOGI(TAG, "Session ended with %s (stack headroom %u bytes)",
+                     rc_state.client_ip, (unsigned)uxTaskGetStackHighWaterMark(NULL));
+        }
+    }
+
+    ssh_conn_free(c);
 }
 
 static void remote_console_task(void *arg) {
@@ -734,6 +1029,17 @@ static void remote_console_task(void *arg) {
     int opt = 1;
 
     ESP_LOGI(TAG, "Remote console task started");
+
+    /* Load (or on first use generate) the SSH host key here rather than in the
+     * caller: key generation needs more stack than HTTP/MQTT handlers have. */
+    while (!rc_state.shutdown_requested && ssh_hostkey_init() != ESP_OK) {
+        vTaskDelay(pdMS_TO_TICKS(5000));
+    }
+    if (!rc_state.shutdown_requested) {
+        char fp[64];
+        ssh_hostkey_fingerprint(fp, sizeof(fp));
+        ESP_LOGI(TAG, "SSH host key %s", fp);
+    }
 
     while (!rc_state.shutdown_requested) {
         /* Create server socket */
@@ -771,7 +1077,7 @@ static void remote_console_task(void *arg) {
         }
 
         rc_state.state = RC_STATE_LISTENING;
-        ESP_LOGI(TAG, "Listening on port %d", rc_config.port);
+        ESP_LOGI(TAG, "SSH listening on port %d", rc_config.port);
 
         /* Accept loop */
         while (!rc_state.shutdown_requested) {
@@ -823,23 +1129,12 @@ static void remote_console_task(void *arg) {
 
             /* Try to acquire session mutex */
             if (xSemaphoreTake(rc_state.session_mutex, 0) != pdTRUE) {
-                send_string(rc_state.client_socket, RC_BUSY);
                 close(rc_state.client_socket);
                 rc_state.client_socket = -1;
                 continue;
             }
 
-            /* Send banner */
-            send_string(rc_state.client_socket, RC_BANNER);
-
-            /* Authenticate */
-            rc_state.state = RC_STATE_AUTH_WAIT;
-            rc_state.kick_requested = false;
-
-            if (authenticate_client(rc_state.client_socket)) {
-                /* Handle session */
-                handle_session(rc_state.client_socket);
-            }
+            handle_connection(rc_state.client_socket);
 
             /* Cleanup */
             close(rc_state.client_socket);

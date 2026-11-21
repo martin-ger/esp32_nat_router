@@ -40,9 +40,9 @@ idf.py -B build_eth -D SDKCONFIG=sdkconfig.eth \
   - `cmd_router` — almost all console commands, plus the NVS accessors `get/set_config_param_{str,int,blob}` (declared in `include/wifi_config.h`).
   - `cmd_system` — system commands (heap, tasks, restart, …).
   - `http_server` — web UI. Pages are C string macros in `pages/page_*.h`, streamed in chunks; handlers and `/api/*` endpoints (config export/import, VPN import, OTA upload) in `http_server.c`.
-  - `acl` (firewall), `pcap_capture` (ring buffer + TCP stream on port 19000), `remote_console` (TCP CLI, default 2323), `dhcpserver` (patched copy of the lwIP/IDF DHCP server), `mqtt_ha`, `oled_display`, `syslog`.
+  - `acl` (firewall), `pcap_capture` (ring buffer + TCP stream on port 19000), `remote_console` (CLI over SSH, default port 22; own minimal SSH server in `ssh_transport.c` built on mbedTLS), `dhcpserver` (patched copy of the lwIP/IDF DHCP server), `mqtt_ha`, `oled_display`, `syslog`.
 - `include/` — shared headers across main and components (`router_config.h` has global tuning vars and `AP_MAX_CONNECTIONS`, which is 5 on C3/C5 and 8 elsewhere).
-- `esp_nat_bridge.py` — MCP server (fastmcp + telnetlib3) that drives the router through the remote console and **parses console output with regexes**. If you change the text of a console command's output, update the bridge too.
+- `esp_nat_bridge.py` — MCP server (fastmcp + asyncssh) that drives the router through the remote console (one SSH exec per command) and **parses console output with regexes**. If you change the text of a console command's output, update the bridge too.
 
 ### Build-time configuration
 - `CONFIG_ETH_UPLINK` vs `CONFIG_WIFI_STA_UPLINK` (Kconfig `main/Kconfig.projbuild`) selects the uplink; code uses `#if CONFIG_ETH_UPLINK` with `ethNetif` vs `wifiSTA`. Changes to uplink handling must compile in both modes.

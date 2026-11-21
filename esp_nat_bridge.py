@@ -2,17 +2,22 @@
 """
 ESP32 NAT Router MCP Bridge
 
-MCP server that controls an ESP32 NAT Router via its remote console (telnet/TCP).
-Uses fastmcp and telnetlib3.
+MCP server that controls an ESP32 NAT Router via its remote console (SSH).
+Uses fastmcp and asyncssh.
 
 Usage:
     python esp_nat_bridge.py                          # stdio mode (for MCP clients)
     python esp_nat_bridge.py --transport streamable-http --port 8000  # HTTP mode
 
 Environment variables:
-    ESP_NAT_HOST     - Router IP address (default: 192.168.4.1)
-    ESP_NAT_PORT     - Remote console TCP port (default: 2323)
-    ESP_NAT_PASSWORD - Remote console password (default: empty)
+    ESP_NAT_HOST        - Router IP address (default: 192.168.4.1)
+    ESP_NAT_PORT        - Remote console SSH port (default: 22)
+    ESP_NAT_USER        - SSH user name; any name is accepted (default: admin)
+    ESP_NAT_PASSWORD    - Router password (required; the router refuses SSH
+                          logins while no password is set)
+    ESP_NAT_FINGERPRINT - Expected host key fingerprint ("SHA256:..." as shown by
+                          'remote_console status'). If unset, the host key is
+                          checked against ~/.ssh/known_hosts.
 """
 
 import asyncio
@@ -24,7 +29,7 @@ import tempfile
 from contextlib import asynccontextmanager
 from typing import Optional
 
-import telnetlib3
+import asyncssh
 from fastmcp import FastMCP, Context
 
 # ---------------------------------------------------------------------------
@@ -32,138 +37,97 @@ from fastmcp import FastMCP, Context
 # ---------------------------------------------------------------------------
 
 ESP_HOST = os.environ.get("ESP_NAT_HOST", "192.168.4.1")
-ESP_PORT = int(os.environ.get("ESP_NAT_PORT", "2323"))
+ESP_PORT = int(os.environ.get("ESP_NAT_PORT", "22"))
+ESP_USER = os.environ.get("ESP_NAT_USER", "admin")
 ESP_PASSWORD = os.environ.get("ESP_NAT_PASSWORD", "")
+ESP_FINGERPRINT = os.environ.get("ESP_NAT_FINGERPRINT", "").strip()
 
 COMMAND_TIMEOUT = 10  # seconds to wait for command output
-CONNECT_TIMEOUT = 10  # seconds to wait for TCP connection
+CONNECT_TIMEOUT = 10  # seconds for SSH connect + login
 PCAP_PORT = 19000     # ESP32 PCAP streaming TCP port
 
 # ---------------------------------------------------------------------------
-# Telnet connection manager
+# SSH connection manager
 # ---------------------------------------------------------------------------
 
 
 class RouterConnection:
-    """Manages a persistent telnet connection to the ESP32 remote console."""
+    """Persistent SSH connection to the ESP32 remote console.
 
-    def __init__(self, host: str, port: int, password: str):
+    Every command runs as its own SSH exec request on that connection, so the
+    output is exactly the command's output - no prompt scraping needed.
+    """
+
+    def __init__(self, host: str, port: int, user: str, password: str, fingerprint: str):
         self.host = host
         self.port = port
+        self.user = user
         self.password = password
-        self.reader: Optional[telnetlib3.TelnetReader] = None
-        self.writer: Optional[telnetlib3.TelnetWriter] = None
+        self.fingerprint = fingerprint
+        self.conn: Optional[asyncssh.SSHClientConnection] = None
         self._lock = asyncio.Lock()
 
     async def connect(self):
-        """Establish telnet connection and authenticate if needed."""
-        self.reader, self.writer = await asyncio.wait_for(
-            telnetlib3.open_connection(self.host, self.port, encoding="utf-8"),
+        """Open the SSH connection, verify the host key and log in."""
+        if not self.password:
+            raise RuntimeError("ESP_NAT_PASSWORD is not set (the router requires a password for SSH)")
+        conn = await asyncio.wait_for(
+            asyncssh.connect(
+                self.host,
+                port=self.port,
+                username=self.user,
+                password=self.password,
+                # With a pinned fingerprint we check the key ourselves below;
+                # otherwise asyncssh verifies against ~/.ssh/known_hosts.
+                known_hosts=None if self.fingerprint else (),
+                client_keys=None,
+                agent_path=None,
+                preferred_auth="password",
+            ),
             timeout=CONNECT_TIMEOUT,
         )
-        # Read the initial banner/prompt
-        banner = await self._read_until_prompt(timeout=5)
-
-        # If we see a password prompt, authenticate
-        if "password" in banner.lower() or "Password" in banner:
-            if not self.password:
+        if self.fingerprint:
+            key = conn.get_server_host_key()
+            actual = key.get_fingerprint("sha256") if key else ""
+            if actual != self.fingerprint:
+                conn.close()
                 raise RuntimeError(
-                    "Router requires a password but ESP_NAT_PASSWORD is not set"
+                    f"Router host key mismatch: expected {self.fingerprint}, got {actual}"
                 )
-            self.writer.write(self.password + "\r\n")
-            auth_response = await self._read_until_prompt(timeout=5)
-            if "denied" in auth_response.lower() or "invalid" in auth_response.lower():
-                raise RuntimeError("Authentication failed - check ESP_NAT_PASSWORD")
+        self.conn = conn
 
     async def disconnect(self):
-        """Close the telnet connection."""
-        if self.writer:
+        """Close the SSH connection."""
+        if self.conn:
             try:
-                self.writer.write("quit\r\n")
-                self.writer.close()
+                self.conn.close()
+                await self.conn.wait_closed()
             except Exception:
                 pass
-        self.reader = None
-        self.writer = None
+        self.conn = None
 
-    async def _read_until_prompt(self, timeout: float = COMMAND_TIMEOUT) -> str:
-        """Read data until we see the ESP32 command prompt or timeout."""
-        buf = ""
-        try:
-            end_time = asyncio.get_event_loop().time() + timeout
-            while asyncio.get_event_loop().time() < end_time:
-                remaining = end_time - asyncio.get_event_loop().time()
-                if remaining <= 0:
-                    break
-                try:
-                    chunk = await asyncio.wait_for(
-                        self.reader.read(4096), timeout=min(remaining, 1.0)
-                    )
-                except asyncio.TimeoutError:
-                    # Check if we already have a complete response
-                    if buf.strip() and (buf.rstrip().endswith(">") or buf.rstrip().endswith("#") or "\nesp32>" in buf or "\n> " in buf):
-                        break
-                    continue
-                if not chunk:
-                    break
-                buf += chunk
-                # The ESP32 console prompt is typically "esp32> " or just "> "
-                if "esp32>" in buf or "\n> " in buf or buf.rstrip().endswith(">"):
-                    break
-        except asyncio.TimeoutError:
-            pass
-        return buf
+    async def _run(self, command: str, timeout: float) -> str:
+        result = await asyncio.wait_for(
+            self.conn.run(command, check=False), timeout=timeout
+        )
+        out = result.stdout or ""
+        if isinstance(out, bytes):
+            out = out.decode("utf-8", errors="replace")
+        return out.replace("\r\n", "\n").strip()
 
-    async def send_command(self, command: str) -> str:
-        """Send a command and return the response text."""
+    async def send_command(self, command: str, timeout: float = COMMAND_TIMEOUT) -> str:
+        """Run a command and return its output."""
         async with self._lock:
-            if not self.writer or not self.reader:
+            if not self.conn:
                 await self.connect()
-
             try:
-                # Drain any pending data
-                try:
-                    while True:
-                        chunk = await asyncio.wait_for(
-                            self.reader.read(4096), timeout=0.2
-                        )
-                        if not chunk:
-                            break
-                except asyncio.TimeoutError:
-                    pass
-
-                self.writer.write(command + "\r\n")
-                response = await self._read_until_prompt()
-
-                # Strip the echoed command and the trailing prompt
-                lines = response.splitlines()
-                # Remove echo of the command
-                if lines and command.strip() in lines[0]:
-                    lines = lines[1:]
-                # Remove trailing prompt line
-                while lines and (
-                    lines[-1].strip() in ("esp32>", ">", "")
-                    or lines[-1].strip().endswith(">")
-                ):
-                    lines.pop()
-
-                return "\n".join(lines).strip()
-            except (ConnectionError, OSError, EOFError) as e:
-                # Connection lost, try to reconnect once
+                return await self._run(command, timeout)
+            except (asyncssh.Error, ConnectionError, OSError, EOFError) as e:
+                # Connection lost (idle timeout, reboot, kick): reconnect once
                 await self.disconnect()
                 try:
                     await self.connect()
-                    self.writer.write(command + "\r\n")
-                    response = await self._read_until_prompt()
-                    lines = response.splitlines()
-                    if lines and command.strip() in lines[0]:
-                        lines = lines[1:]
-                    while lines and (
-                        lines[-1].strip() in ("esp32>", ">", "")
-                        or lines[-1].strip().endswith(">")
-                    ):
-                        lines.pop()
-                    return "\n".join(lines).strip()
+                    return await self._run(command, timeout)
                 except Exception:
                     raise RuntimeError(
                         f"Lost connection to router and reconnect failed: {e}"
@@ -180,7 +144,7 @@ _conn: Optional[RouterConnection] = None
 def _get_conn() -> RouterConnection:
     global _conn
     if _conn is None:
-        _conn = RouterConnection(ESP_HOST, ESP_PORT, ESP_PASSWORD)
+        _conn = RouterConnection(ESP_HOST, ESP_PORT, ESP_USER, ESP_PASSWORD, ESP_FINGERPRINT)
     return _conn
 
 
@@ -202,7 +166,7 @@ async def lifespan(server):
 
 mcp = FastMCP(
     "ESP32 NAT Router Bridge",
-    instructions="Control an ESP32 NAT Router via its remote console (telnet/TCP)",
+    instructions="Control an ESP32 NAT Router via its remote console (SSH)",
     lifespan=lifespan,
 )
 
@@ -751,34 +715,7 @@ async def ping(host: str) -> str:
     """
     _require(host, "host")
     # Ping sends 5 packets at 1s interval with 1s timeout = ~12s max
-    conn = _get_conn()
-    async with conn._lock:
-        if not conn.writer or not conn.reader:
-            await conn.connect()
-        try:
-            try:
-                while True:
-                    chunk = await asyncio.wait_for(conn.reader.read(4096), timeout=0.2)
-                    if not chunk:
-                        break
-            except asyncio.TimeoutError:
-                pass
-
-            conn.writer.write(f"ping {host}\r\n")
-            response = await conn._read_until_prompt(timeout=15)
-
-            lines = response.splitlines()
-            if lines and f"ping {host}" in lines[0]:
-                lines = lines[1:]
-            while lines and (
-                lines[-1].strip() in ("esp32>", ">", "")
-                or lines[-1].strip().endswith(">")
-            ):
-                lines.pop()
-            return "\n".join(lines).strip()
-        except (ConnectionError, OSError, EOFError) as e:
-            await conn.disconnect()
-            raise RuntimeError(f"Connection lost during ping: {e}")
+    return await _get_conn().send_command(f"ping {host}", timeout=15)
 
 
 @mcp.tool()

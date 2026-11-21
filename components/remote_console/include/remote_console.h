@@ -1,14 +1,15 @@
 /**
  * @file remote_console.h
- * @brief Secure remote console for ESP32 NAT Router
+ * @brief Remote console for ESP32 NAT Router
  *
- * Provides network-accessible CLI with password authentication.
- * Phase 1: Plain TCP (TLS to be added in Phase 2)
+ * Network-accessible CLI, served only over SSH (encrypted, password
+ * authentication against the router password).
  */
 
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include "esp_err.h"
 
@@ -16,8 +17,8 @@
 extern "C" {
 #endif
 
-/** Default TCP port for remote console */
-#define REMOTE_CONSOLE_DEFAULT_PORT     2323
+/** Default TCP port for the remote console (SSH) */
+#define REMOTE_CONSOLE_DEFAULT_PORT     22
 
 /** Default idle timeout in seconds */
 #define REMOTE_CONSOLE_DEFAULT_TIMEOUT  300
@@ -129,6 +130,13 @@ esp_err_t remote_console_get_config(remote_console_config_t *config);
  * @return ESP_OK on success
  */
 esp_err_t remote_console_get_status(remote_console_status_t *status);
+
+/**
+ * @brief SSH host key fingerprint ("SHA256:...", as printed by ssh clients)
+ *
+ * Writes "(none)" until the server has started once and created its key.
+ */
+void remote_console_get_hostkey_fingerprint(char *out, size_t out_len);
 
 /**
  * @brief Check if remote console is enabled

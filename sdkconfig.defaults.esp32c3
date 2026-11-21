@@ -6,3 +6,9 @@ CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_160=y
 # Use built-in USB_SERIAL_JTAG for console output
 CONFIG_ESP_CONSOLE_UART_DEFAULT=n
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# Flash budget (the C3 image is the largest of all targets): the CA bundle
+# used for "validate server certificate" with WPA2-Enterprise carries only the
+# common root CAs (~40 instead of ~140). Enterprise RADIUS servers normally use
+# a private CA anyway, which the bundle can't validate in either form.
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_CMN=y

@@ -608,14 +608,16 @@ static char *nvs_export_to_json_robust(bool include_secrets)
          *   web_password — salt:hash of the web UI password. Exporting it put
          *                  the hash in a plaintext file anyone could take away
          *                  and grind offline.
-         *   mqtt_pass    — MQTT broker credential */
+         *   mqtt_pass    — MQTT broker credential
+         *   rc_hostkey   — SSH host private key of the remote console */
         if (!include_secrets &&
             (strcmp(info.key, "passwd")       == 0 ||
              strcmp(info.key, "ap_passwd")    == 0 ||
              strcmp(info.key, "vpn_privkey")  == 0 ||
              strcmp(info.key, "vpn_psk")      == 0 ||
              strcmp(info.key, "web_password") == 0 ||
-             strcmp(info.key, "mqtt_pass")    == 0)) {
+             strcmp(info.key, "mqtt_pass")    == 0 ||
+             strcmp(info.key, "rc_hostkey")   == 0)) {
             err = nvs_entry_next(&it);
             continue;
         }
@@ -2211,12 +2213,14 @@ static esp_err_t config_get_handler(httpd_req_t *req)
     SEND_CHUNK(req, section, HTTPD_RESP_USE_STRLEN);
 
     /* Chunk 7: Remote Console */
+    char rc_fp[64];
+    remote_console_get_hostkey_fingerprint(rc_fp, sizeof(rc_fp));
     snprintf(section, sizeof(section), CONFIG_CHUNK_RC,
         rc_enabled_checked, rc_disabled_checked,
         rc_status_color, rc_status_text, rc_kick_section,
         rc_config.port,
         rc_ap_chk, rc_sta_chk, rc_vpn_chk,
-        (unsigned long)rc_config.idle_timeout_sec);
+        (unsigned long)rc_config.idle_timeout_sec, rc_fp);
     SEND_CHUNK(req, section, HTTPD_RESP_USE_STRLEN);
 
     /* Chunk 8: PCAP */
