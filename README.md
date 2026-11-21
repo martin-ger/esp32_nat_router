@@ -2,6 +2,14 @@
 
 This is a firmware to use the ESP32 as WiFi NAT router. It routes between the network of the AP interface and the STA or ETH interface as uplink network. It can also work as a VPN router using WireGuard as uplink.
 
+## Video
+
+A video introduction to the project is on YouTube:
+
+[![ESP32 NAT Router video](https://img.youtube.com/vi/LYB6vbwZsc0/hqdefault.jpg)](https://youtu.be/LYB6vbwZsc0)
+
+[Watch on YouTube](https://youtu.be/LYB6vbwZsc0)
+
 ## Other WiFi Router/Repeater Projects
 Starting from this code base I started several spin-off projects with slightly differrent scope. These are all (ab)using the ESP as a minimal network device. 
 
