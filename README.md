@@ -43,7 +43,7 @@ Starting from this code base I started several spin-off projects with slightly d
 - **Ethernet Support**: Use a W32-ET01 board with LAN8720 PHY to get Ethernet uplink
 - **Web Interface**: Web UI with password protection for easy configuration
 - **Serial Console**: Full CLI for advanced configuration
-- **Remote Console**: Network-accessible CLI via TCP (password protected, per-interface binding)
+- **SSH Console**: Network-accessible CLI via SSH (encrypted connection, per-interface binding)
 - **LED Status Indicator**: Visual feedback via plain GPIO LED or addressable LED strip (WS2812/SK6812) with color-coded status
 - **OLED Display**: Status display on 72x40 I2C SSD1306 OLEDs (as found on some ESP32-C3 mini boards)
 - **MQTT Home Assistant**: Publish telemetry and per-client stats to MQTT with HA auto-discovery
@@ -51,7 +51,7 @@ Starting from this code base I started several spin-off projects with slightly d
 - **mDNS**: The router is reachable as `esp32-nat-router.local` via mDNS/Bonjour — no need to look up the IP address.
 - **OTA Updates**: Flash new firmware directly from the Web UI
 
-The maximum number of simultaniously connected WiFi clients is 8 (5 on the ESP32c3) due to RAM limitations (uses about 5KB per client). Each of the features: Web Interface, PCAP Capture, Wireguard VPN, Remote Console, WPA Enterprise and MQTT Home Assistant require several KB of additional RAM. So using all of them at once will probably burst the ESP32's ressources. Unused/disabled features are optimized for minimal to no RAM usage. Have a look at remaining heap size if in doubt.
+The maximum number of simultaniously connected WiFi clients is 8 (5 on the ESP32c3) due to RAM limitations (uses about 5KB per client). Each of the features: Web Interface, PCAP Capture, Wireguard VPN, SSH Console, WPA Enterprise and MQTT Home Assistant require several KB of additional RAM. So using all of them at once will probably burst the ESP32's ressources. Unused/disabled features are optimized for minimal to no RAM usage. Have a look at remaining heap size if in doubt.
 
 ## First Boot
 
