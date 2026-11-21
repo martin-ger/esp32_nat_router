@@ -1765,7 +1765,19 @@ void app_main(void)
          * The line is returned when ENTER is pressed.
          */
         char* line = linenoise(prompt);
-        if (line == NULL) { /* Ignore empty lines */
+        if (line == NULL) { /* Empty line, or no input available */
+#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+            /* While no USB host is attached (board powered from a charger),
+             * ESP-IDF's USB-Serial-JTAG read() returns -1 at once instead of
+             * blocking (IDF-14303), so linenoise() never waits. Without this
+             * the loop spins at priority 1: it starves the idle task, which
+             * then never frees deleted tasks (each ping leaked ~4.6 KB), and
+             * floods the prompt into captured SSH command output. */
+            while (!usb_serial_jtag_is_connected()) {
+                vTaskDelay(pdMS_TO_TICKS(500));
+            }
+#endif
+            vTaskDelay(pdMS_TO_TICKS(10));   /* never busy-loop, whatever the cause */
             continue;
         }
         /* Add the command to the history */
