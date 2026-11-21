@@ -13,6 +13,7 @@
 #include <inttypes.h>
 #include <stdint.h>
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "esp_console.h"
 #include "esp_system.h"
 #include "esp_sleep.h"
@@ -1253,6 +1254,51 @@ bool verify_web_password(const char *plaintext)
         set_web_password_hashed(plaintext);
     }
     return match;
+}
+
+/* ---- Shared failed-login backoff (web UI + SSH) ---- */
+
+#define LOGIN_BACKOFF_BASE_MS   1000
+#define LOGIN_BACKOFF_MAX_MS    30000
+#define LOGIN_BACKOFF_STEP      3                         /* failures per doubling */
+#define LOGIN_BACKOFF_RESET_US  (15LL * 60 * 1000000)     /* forget after 15 quiet min */
+
+static portMUX_TYPE s_login_lock = portMUX_INITIALIZER_UNLOCKED;
+static uint32_t s_login_fail_streak;
+static int64_t s_login_last_fail_us;
+static int64_t s_login_next_us;         /* no attempt is checked before this */
+
+uint32_t router_login_wait_ms(void)
+{
+    int64_t now = esp_timer_get_time();
+    portENTER_CRITICAL(&s_login_lock);
+    int64_t left = s_login_next_us - now;
+    portEXIT_CRITICAL(&s_login_lock);
+    return left > 0 ? (uint32_t)((left + 999) / 1000) : 0;
+}
+
+uint32_t router_login_result(bool success)
+{
+    int64_t now = esp_timer_get_time();
+    uint32_t ms = 0;
+    portENTER_CRITICAL(&s_login_lock);
+    if (success) {
+        s_login_fail_streak = 0;
+        s_login_next_us = 0;
+    } else {
+        if (s_login_fail_streak && now - s_login_last_fail_us > LOGIN_BACKOFF_RESET_US) {
+            s_login_fail_streak = 0;
+        }
+        s_login_fail_streak++;
+        s_login_last_fail_us = now;
+        uint32_t shift = (s_login_fail_streak - 1) / LOGIN_BACKOFF_STEP;
+        if (shift > 5) shift = 5;
+        ms = (uint32_t)LOGIN_BACKOFF_BASE_MS << shift;
+        if (ms > LOGIN_BACKOFF_MAX_MS) ms = LOGIN_BACKOFF_MAX_MS;
+        s_login_next_us = now + (int64_t)ms * 1000;
+    }
+    portEXIT_CRITICAL(&s_login_lock);
+    return ms;
 }
 
 esp_err_t set_web_password_hashed(const char *plaintext)

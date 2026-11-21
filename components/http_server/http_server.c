@@ -1255,7 +1255,19 @@ static esp_err_t index_get_handler(httpd_req_t *req)
             /* Handle login */
             else if (httpd_query_key_value(buf, "login_password", param, sizeof(param)) == ESP_OK) {
                 preprocess_string(param);
-                if (password_protection_enabled && verify_web_password(param)) {
+                /* Shared backoff with SSH: while it runs, no password is
+                 * checked. Refusing instead of sleeping keeps the (single)
+                 * httpd task responsive for everyone else. */
+                uint32_t wait_ms = password_protection_enabled ? router_login_wait_ms() : 0;
+                if (wait_ms > 0) {
+                    char ip[16];
+                    ESP_LOGW(TAG, "Web UI login from %s refused: backoff %lu ms",
+                             get_client_ip(req, ip, sizeof(ip)), (unsigned long)wait_ms);
+                    snprintf(login_message, sizeof(login_message),
+                             "ERROR: Too many failed logins. Try again in %lu s.",
+                             (unsigned long)((wait_ms + 999) / 1000));
+                } else if (password_protection_enabled && verify_web_password(param)) {
+                    router_login_result(true);
                     create_session(req);
                     { char _ip[16]; ESP_LOGI(TAG, "Web UI login successful from %s", get_client_ip(req, _ip, sizeof(_ip))); }
                     free(buf);
@@ -1266,7 +1278,9 @@ static esp_err_t index_get_handler(httpd_req_t *req)
                     return ESP_OK;
                 } else {
                     char ip[16];
-                    ESP_LOGW(TAG, "Web UI login failed: incorrect password from %s", get_client_ip(req, ip, sizeof(ip)));
+                    uint32_t next_ms = password_protection_enabled ? router_login_result(false) : 0;
+                    ESP_LOGW(TAG, "Web UI login failed: incorrect password from %s (next check in %lu ms)",
+                             get_client_ip(req, ip, sizeof(ip)), (unsigned long)next_ms);
                     strcpy(login_message, "ERROR: Incorrect password.");
                 }
             }

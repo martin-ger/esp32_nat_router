@@ -51,10 +51,7 @@ static const char *TAG = "remote_console";
 #define RC_MAX_PW_LEN       64
 #define RC_MAX_AUTH_ATTEMPTS 3
 #define RC_MAX_AUTH_REQUESTS 20       /* none/publickey probes included */
-#define RC_AUTH_FAIL_DELAY_MS 1000
 #define RC_AUTH_DELAY_MS    5000
-#define RC_AUTH_BACKOFF_MAX_MS 30000
-#define RC_AUTH_BACKOFF_RESET_US (15LL * 60 * 1000000)  /* forget failures after 15 quiet min */
 #define RC_LOGIN_GRACE_MS   60000     /* handshake + authentication */
 #define RC_SHUTDOWN_TIMEOUT_MS 3000
 #define RC_SHUTDOWN_POLL_MS 20
@@ -500,26 +497,10 @@ static bool rc_should_abort(void) {
 
 /* ---- Authentication (password only, checked against the router password) ---- */
 
-/* Failed logins across connections (console task only). The per-connection
- * attempt limit alone let a client reconnect and keep guessing at ~25/min. */
-static uint32_t rc_fail_streak;
-static int64_t rc_last_fail_us;
-
-/* Record a failed login; returns how long to wait before answering:
- * 1 s, doubling every RC_MAX_AUTH_ATTEMPTS consecutive failures, up to 30 s. */
-static uint32_t auth_fail_delay_ms(void) {
-    int64_t now = esp_timer_get_time();
-    if (rc_fail_streak && now - rc_last_fail_us > RC_AUTH_BACKOFF_RESET_US) {
-        rc_fail_streak = 0;
-    }
-    rc_fail_streak++;
-    rc_last_fail_us = now;
-
-    uint32_t shift = (rc_fail_streak - 1) / RC_MAX_AUTH_ATTEMPTS;
-    if (shift > 5) shift = 5;
-    uint32_t ms = (uint32_t)RC_AUTH_FAIL_DELAY_MS << shift;
-    return ms > RC_AUTH_BACKOFF_MAX_MS ? RC_AUTH_BACKOFF_MAX_MS : ms;
-}
+/* Failed logins are throttled across connections and services by the shared
+ * backoff in cmd_router (router_login_wait_ms / router_login_result): the
+ * per-connection attempt limit alone let a client reconnect and keep guessing,
+ * and guesses on the web UI would otherwise not slow down SSH. */
 
 /* Sleep, but still react to kick / disable within ~100 ms. */
 static void delay_abortable(uint32_t ms) {
@@ -613,6 +594,18 @@ static bool authenticate(ssh_conn_t *c, int64_t deadline) {
         size_t pw_len;
         uint8_t *pw = ssh_get_string(&in, &pw_len);
         bool ok = false;
+
+        /* Wait out a backoff from earlier failures (SSH or web UI) before
+         * checking: no password is tested while the backoff runs. */
+        uint32_t wait_ms = router_login_wait_ms();
+        if (wait_ms > 0) {
+            delay_abortable(wait_ms);
+            if (rc_should_abort()) {
+                if (pw) mbedtls_platform_zeroize(pw, pw_len);
+                return false;
+            }
+        }
+
         if (!in.err && !change && pw_len > 0 && pw_len <= RC_MAX_PW_LEN &&
             memchr(pw, '\0', pw_len) == NULL) {
             char pw_buf[RC_MAX_PW_LEN + 1];
@@ -627,17 +620,17 @@ static bool authenticate(ssh_conn_t *c, int64_t deadline) {
             ssh_out_begin(c, SSH_MSG_USERAUTH_SUCCESS);
             if (ssh_out_send(c) != ESP_OK) return false;
             ssh_set_authenticated(c);
-            rc_fail_streak = 0;
+            router_login_result(true);
             ESP_LOGI(TAG, "SSH login successful from %s", rc_state.client_ip);
             return true;
         }
 
         attempts++;
         rc_state.failed_auths++;
-        uint32_t delay_ms = auth_fail_delay_ms();
-        ESP_LOGW(TAG, "SSH login failed from %s (attempt %d/%d, %lu consecutive)",
+        uint32_t delay_ms = router_login_result(false);
+        ESP_LOGW(TAG, "SSH login failed from %s (attempt %d/%d, next check in %lu ms)",
                  rc_state.client_ip, attempts, RC_MAX_AUTH_ATTEMPTS,
-                 (unsigned long)rc_fail_streak);
+                 (unsigned long)delay_ms);
         if (attempts >= RC_MAX_AUTH_ATTEMPTS) {
             ssh_send_disconnect(c, SSH_DISCONNECT_NO_MORE_AUTH_METHODS, "too many authentication failures");
             /* Delay before allowing reconnection (one session slot) */
