@@ -53,6 +53,8 @@ static const char *TAG = "remote_console";
 #define RC_MAX_AUTH_REQUESTS 20       /* none/publickey probes included */
 #define RC_AUTH_FAIL_DELAY_MS 1000
 #define RC_AUTH_DELAY_MS    5000
+#define RC_AUTH_BACKOFF_MAX_MS 30000
+#define RC_AUTH_BACKOFF_RESET_US (15LL * 60 * 1000000)  /* forget failures after 15 quiet min */
 #define RC_LOGIN_GRACE_MS   60000     /* handshake + authentication */
 #define RC_SHUTDOWN_TIMEOUT_MS 3000
 #define RC_SHUTDOWN_POLL_MS 20
@@ -103,7 +105,10 @@ static struct {
 #define RC_CAPTURE_BUF_SIZE 10240
 static char *rc_capture_buf = NULL;
 static size_t rc_capture_pos = 0;
-static bool rc_capturing = false;
+static volatile bool rc_capturing = false;
+/* printf from any task lands in the capture buffer while a command runs (ping
+ * prints from its own task), so appends, reset and teardown are serialised. */
+static portMUX_TYPE rc_capture_lock = portMUX_INITIALIZER_UNLOCKED;
 
 /* One session channel per connection (clients may open several in sequence) */
 typedef struct {
@@ -111,6 +116,13 @@ typedef struct {
     bool close_sent;
     bool pty;                 /* client asked for a terminal: echo + CRLF */
     bool shell;               /* interactive shell running */
+    /* A finished channel waits for the client's CLOSE, but clients may open the
+     * next channel before sending it. Each channel gets its own local id and
+     * the finished one is remembered as "draining", so its late CLOSE cannot
+     * shut the new channel. */
+    bool draining;
+    uint32_t local_id;
+    uint32_t draining_id;
     uint32_t peer_id;
     uint32_t peer_window;
     uint32_t peer_maxpkt;
@@ -140,16 +152,17 @@ extern size_t __real_fwrite(const void *ptr, size_t size, size_t nmemb, FILE *st
  * @brief Helper to add data to capture buffer
  */
 static void rc_capture_add(const char *data, size_t len) {
-    if (!rc_capturing || len == 0 || rc_capture_buf == NULL) return;
-    if (rc_capture_pos >= RC_CAPTURE_BUF_SIZE - 1) return;
+    if (!rc_capturing || len == 0) return;      /* cheap unlocked pre-check */
 
-    size_t copy_len = len;
-    if (rc_capture_pos + copy_len >= RC_CAPTURE_BUF_SIZE) {
-        copy_len = RC_CAPTURE_BUF_SIZE - 1 - rc_capture_pos;
+    portENTER_CRITICAL(&rc_capture_lock);
+    if (rc_capturing && rc_capture_buf != NULL && rc_capture_pos < RC_CAPTURE_BUF_SIZE - 1) {
+        size_t room = RC_CAPTURE_BUF_SIZE - 1 - rc_capture_pos;
+        size_t copy_len = len < room ? len : room;
+        memcpy(rc_capture_buf + rc_capture_pos, data, copy_len);
+        rc_capture_pos += copy_len;
+        rc_capture_buf[rc_capture_pos] = '\0';
     }
-    memcpy(rc_capture_buf + rc_capture_pos, data, copy_len);
-    rc_capture_pos += copy_len;
-    rc_capture_buf[rc_capture_pos] = '\0';
+    portEXIT_CRITICAL(&rc_capture_lock);
 }
 
 /**
@@ -487,6 +500,36 @@ static bool rc_should_abort(void) {
 
 /* ---- Authentication (password only, checked against the router password) ---- */
 
+/* Failed logins across connections (console task only). The per-connection
+ * attempt limit alone let a client reconnect and keep guessing at ~25/min. */
+static uint32_t rc_fail_streak;
+static int64_t rc_last_fail_us;
+
+/* Record a failed login; returns how long to wait before answering:
+ * 1 s, doubling every RC_MAX_AUTH_ATTEMPTS consecutive failures, up to 30 s. */
+static uint32_t auth_fail_delay_ms(void) {
+    int64_t now = esp_timer_get_time();
+    if (rc_fail_streak && now - rc_last_fail_us > RC_AUTH_BACKOFF_RESET_US) {
+        rc_fail_streak = 0;
+    }
+    rc_fail_streak++;
+    rc_last_fail_us = now;
+
+    uint32_t shift = (rc_fail_streak - 1) / RC_MAX_AUTH_ATTEMPTS;
+    if (shift > 5) shift = 5;
+    uint32_t ms = (uint32_t)RC_AUTH_FAIL_DELAY_MS << shift;
+    return ms > RC_AUTH_BACKOFF_MAX_MS ? RC_AUTH_BACKOFF_MAX_MS : ms;
+}
+
+/* Sleep, but still react to kick / disable within ~100 ms. */
+static void delay_abortable(uint32_t ms) {
+    while (ms > 0 && !rc_should_abort()) {
+        uint32_t step = ms > 100 ? 100 : ms;
+        vTaskDelay(pdMS_TO_TICKS(step));
+        ms -= step;
+    }
+}
+
 static esp_err_t send_auth_failure(ssh_conn_t *c) {
     ssh_out_t *o = ssh_out_begin(c, SSH_MSG_USERAUTH_FAILURE);
     ssh_put_cstr(o, "password");
@@ -583,21 +626,26 @@ static bool authenticate(ssh_conn_t *c, int64_t deadline) {
         if (ok) {
             ssh_out_begin(c, SSH_MSG_USERAUTH_SUCCESS);
             if (ssh_out_send(c) != ESP_OK) return false;
+            ssh_set_authenticated(c);
+            rc_fail_streak = 0;
             ESP_LOGI(TAG, "SSH login successful from %s", rc_state.client_ip);
             return true;
         }
 
         attempts++;
         rc_state.failed_auths++;
-        ESP_LOGW(TAG, "SSH login failed from %s (attempt %d/%d)",
-                 rc_state.client_ip, attempts, RC_MAX_AUTH_ATTEMPTS);
+        uint32_t delay_ms = auth_fail_delay_ms();
+        ESP_LOGW(TAG, "SSH login failed from %s (attempt %d/%d, %lu consecutive)",
+                 rc_state.client_ip, attempts, RC_MAX_AUTH_ATTEMPTS,
+                 (unsigned long)rc_fail_streak);
         if (attempts >= RC_MAX_AUTH_ATTEMPTS) {
             ssh_send_disconnect(c, SSH_DISCONNECT_NO_MORE_AUTH_METHODS, "too many authentication failures");
-            /* Delay before allowing reconnection */
-            vTaskDelay(pdMS_TO_TICKS(RC_AUTH_DELAY_MS));
+            /* Delay before allowing reconnection (one session slot) */
+            delay_abortable(delay_ms > RC_AUTH_DELAY_MS ? delay_ms : RC_AUTH_DELAY_MS);
             return false;
         }
-        vTaskDelay(pdMS_TO_TICKS(RC_AUTH_FAIL_DELAY_MS));
+        delay_abortable(delay_ms);
+        if (rc_should_abort()) return false;
         if (send_auth_failure(c) != ESP_OK) return false;
     }
 }
@@ -610,6 +658,15 @@ static esp_err_t chan_reply(ssh_conn_t *c, rc_chan_t *ch, bool ok) {
     return ssh_out_send(c);
 }
 
+/* Is the recipient channel id of a received channel message ours / the draining one? */
+static bool chan_is_current(const rc_chan_t *ch, uint32_t rid) {
+    return ch->open && rid == ch->local_id;
+}
+
+static bool chan_is_draining(const rc_chan_t *ch, uint32_t rid) {
+    return ch->draining && rid == ch->draining_id;
+}
+
 /* Block until the client grants more window; only flow-control and teardown
  * messages are acted on, anything typed meanwhile is dropped. */
 static esp_err_t chan_wait_window(ssh_conn_t *c, rc_chan_t *ch) {
@@ -620,8 +677,14 @@ static esp_err_t chan_wait_window(ssh_conn_t *c, rc_chan_t *ch) {
         ssh_in_t in;
         ssh_in_init(&in, p, n);
         uint8_t type = ssh_get_u8(&in);
+        uint32_t rid = ssh_get_u32(&in);
+        if (in.err) continue;
+        if (type == SSH_MSG_CHANNEL_CLOSE && chan_is_draining(ch, rid)) {
+            ch->draining = false;      /* late CLOSE of the previous channel */
+            continue;
+        }
+        if (!chan_is_current(ch, rid)) continue;
         if (type == SSH_MSG_CHANNEL_WINDOW_ADJUST) {
-            ssh_get_u32(&in);
             uint32_t add = ssh_get_u32(&in);
             if (!in.err) ch->peer_window += add;
         } else if (type == SSH_MSG_CHANNEL_CLOSE || type == SSH_MSG_CHANNEL_EOF) {
@@ -695,9 +758,11 @@ static void chan_finish(ssh_conn_t *c, rc_chan_t *ch, uint32_t status) {
 
 /* Run one console command and send its output.  Returns the exit status. */
 static uint32_t run_command(ssh_conn_t *c, rc_chan_t *ch, char *line) {
+    portENTER_CRITICAL(&rc_capture_lock);
     rc_capture_pos = 0;
     rc_capture_buf[0] = '\0';
     rc_capturing = true;
+    portEXIT_CRITICAL(&rc_capture_lock);
 
     int cmd_ret = 0;
     esp_err_t err = esp_console_run(line, &cmd_ret);
@@ -705,8 +770,11 @@ static uint32_t run_command(ssh_conn_t *c, rc_chan_t *ch, char *line) {
     /* Flush stdout to ensure all output is captured */
     fflush(stdout);
 
-    /* Stop capturing - MUST happen even if command fails */
+    /* Stop capturing - MUST happen even if command fails. Under the lock, so
+     * no other task is still appending once the buffer is read below. */
+    portENTER_CRITICAL(&rc_capture_lock);
     rc_capturing = false;
+    portEXIT_CRITICAL(&rc_capture_lock);
 
     if (rc_capture_pos > 0) {
         chan_write(c, ch, rc_capture_buf, rc_capture_pos);
@@ -851,6 +919,7 @@ static void serve_channels(ssh_conn_t *c) {
         return;
     }
     ch->in = inbuf;
+    uint32_t next_id = 0;     /* local channel ids, never reused within a connection */
 
     while (!rc_should_abort()) {
         uint32_t timeout_ms = 0;
@@ -892,8 +961,9 @@ static void serve_channels(ssh_conn_t *c) {
             uint32_t window = ssh_get_u32(&in);
             uint32_t maxpkt = ssh_get_u32(&in);
             if (in.err) break;
-            if (!session || ch->open) {
-                /* Only one shell/exec session; no port forwarding through the router */
+            if (!session || (ch->open && !ch->close_sent)) {
+                /* Only one shell/exec session at a time; no port forwarding
+                 * through the router */
                 ssh_out_t *o = ssh_out_begin(c, SSH_MSG_CHANNEL_OPEN_FAILURE);
                 ssh_put_u32(o, sender);
                 ssh_put_u32(o, 1);                   /* administratively prohibited */
@@ -902,38 +972,47 @@ static void serve_channels(ssh_conn_t *c) {
                 ssh_out_send(c);
                 break;
             }
+            /* A finished channel still waiting for the client's CLOSE becomes
+             * the draining one; otherwise keep any earlier draining state. */
+            bool draining = ch->open ? true : ch->draining;
+            uint32_t draining_id = ch->open ? ch->local_id : ch->draining_id;
             memset(ch, 0, sizeof(*ch));
             ch->in = inbuf;
             ch->open = true;
+            ch->local_id = next_id++;
+            ch->draining = draining;
+            ch->draining_id = draining_id;
             ch->peer_id = sender;
             ch->peer_window = window;
             ch->peer_maxpkt = maxpkt ? maxpkt : 1;
             ssh_out_t *o = ssh_out_begin(c, SSH_MSG_CHANNEL_OPEN_CONFIRMATION);
             ssh_put_u32(o, sender);
-            ssh_put_u32(o, 0);                       /* our channel id */
+            ssh_put_u32(o, ch->local_id);            /* our channel id */
             ssh_put_u32(o, RC_CHAN_WINDOW);
             ssh_put_u32(o, RC_CHAN_MAXPKT);
             ssh_out_send(c);
             break;
         }
         case SSH_MSG_CHANNEL_REQUEST:
-            ssh_get_u32(&in);
-            handle_channel_request(c, ch, &in);
+            /* Requests for the draining or an unknown channel are dropped */
+            if (chan_is_current(ch, ssh_get_u32(&in)) && !in.err) {
+                handle_channel_request(c, ch, &in);
+            }
             break;
         case SSH_MSG_CHANNEL_WINDOW_ADJUST: {
-            ssh_get_u32(&in);
+            uint32_t rid = ssh_get_u32(&in);
             uint32_t add = ssh_get_u32(&in);
-            if (!in.err && ch->open) {
+            if (!in.err && chan_is_current(ch, rid)) {
                 ch->peer_window = (ch->peer_window + add < ch->peer_window)
                                   ? UINT32_MAX : ch->peer_window + add;
             }
             break;
         }
         case SSH_MSG_CHANNEL_DATA: {
-            ssh_get_u32(&in);
+            uint32_t rid = ssh_get_u32(&in);
             size_t dlen;
             uint8_t *data = ssh_get_string(&in, &dlen);
-            if (in.err || !ch->open || ch->close_sent) break;
+            if (in.err || !chan_is_current(ch, rid) || ch->close_sent) break;
             if (dlen > RC_CHAN_MAXPKT) dlen = RC_CHAN_MAXPKT;
             ch->consumed += dlen;
             if (ch->consumed >= RC_CHAN_WINDOW / 2) {
@@ -954,10 +1033,19 @@ static void serve_channels(ssh_conn_t *c) {
         case SSH_MSG_CHANNEL_EXTENDED_DATA:
             break;
         case SSH_MSG_CHANNEL_EOF:
-            if (ch->open && ch->shell) chan_finish(c, ch, 0);
+            if (chan_is_current(ch, ssh_get_u32(&in)) && !in.err && ch->shell) {
+                chan_finish(c, ch, 0);
+            }
             break;
-        case SSH_MSG_CHANNEL_CLOSE:
-            if (ch->open) {
+        case SSH_MSG_CHANNEL_CLOSE: {
+            uint32_t rid = ssh_get_u32(&in);
+            if (in.err) break;
+            if (chan_is_draining(ch, rid)) {
+                /* Late CLOSE of the previous channel; ours went out already */
+                ch->draining = false;
+                break;
+            }
+            if (chan_is_current(ch, rid)) {
                 if (!ch->close_sent) {
                     ssh_out_t *o = ssh_out_begin(c, SSH_MSG_CHANNEL_CLOSE);
                     ssh_put_u32(o, ch->peer_id);
@@ -968,6 +1056,7 @@ static void serve_channels(ssh_conn_t *c) {
                 ch->shell = false;
             }
             break;
+        }
         default:
             ssh_send_unimplemented(c);
             break;
@@ -1011,10 +1100,13 @@ static void handle_connection(int client_fd) {
 
             serve_channels(c);
 
+            portENTER_CRITICAL(&rc_capture_lock);
             rc_capturing = false;
-            free(rc_capture_buf);
+            char *buf = rc_capture_buf;
             rc_capture_buf = NULL;
             rc_capture_pos = 0;
+            portEXIT_CRITICAL(&rc_capture_lock);
+            free(buf);
             ESP_LOGI(TAG, "Session ended with %s (stack headroom %u bytes)",
                      rc_state.client_ip, (unsigned)uxTaskGetStackHighWaterMark(NULL));
         }
@@ -1099,7 +1191,12 @@ static void remote_console_task(void *arg) {
             /* Get client IP */
             inet_ntop(AF_INET, &client_addr.sin_addr, rc_state.client_ip, sizeof(rc_state.client_ip));
 
-            /* Check interface binding - reject connections on disallowed interfaces */
+            /* Check interface binding - reject connections on disallowed interfaces.
+             * Keying on the local address is sufficient: lwIP accepts packets for
+             * any of its addresses on any interface, but ESP-IDF's source-based
+             * routing hook sends the replies out of the interface owning that
+             * address, so e.g. an upstream host targeting the AP address cannot
+             * complete the TCP handshake (verified on hardware). */
             {
                 struct sockaddr_in local_addr;
                 socklen_t addr_len = sizeof(local_addr);

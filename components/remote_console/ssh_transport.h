@@ -111,6 +111,9 @@ esp_err_t ssh_handshake(ssh_conn_t *c, uint32_t timeout_ms);
  *  @return payload length (> 0, payload[0] is the message number) or SSH_ERR_* */
 int ssh_recv(ssh_conn_t *c, uint8_t **payload, uint32_t timeout_ms);
 
+/** Mark the user as authenticated (lifts the pre-auth rekey limit). */
+void ssh_set_authenticated(ssh_conn_t *c);
+
 /** Start a new outgoing packet of the given message type. */
 ssh_out_t *ssh_out_begin(ssh_conn_t *c, uint8_t type);
 /** Encrypt and send the packet started with ssh_out_begin(). */

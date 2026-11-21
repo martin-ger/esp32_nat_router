@@ -45,6 +45,7 @@ static const char *TAG = "ssh";
 #define SSH_PACKET_TIMEOUT_US (30LL * 1000000)  /* finishing a started packet */
 #define SSH_MAX_VERSION_LINES 16
 #define SSH_KEXINIT_MAX     320
+#define SSH_MAX_PREAUTH_REKEYS 1
 
 /* Algorithm names */
 static const char ALG_KEX[]     = "curve25519-sha256";
@@ -93,6 +94,8 @@ struct ssh_conn {
     bool strict;                 /* strict kex negotiated (Terrapin mitigation) */
     bool have_session_id;
     uint8_t session_id[32];
+    bool authenticated;          /* set by the auth layer: lifts the rekey limit */
+    uint8_t preauth_rekeys;
 };
 
 /* ---- Small helpers ---- */
@@ -443,8 +446,15 @@ static int read_packet(ssh_conn_t *c, uint8_t **payload, int64_t deadline_us)
 
     uint32_t plen = get32(b);
     size_t tag = c->rxd.active ? 16 : 0;
+    /* Bound plen before doing arithmetic on it: size_t is 32 bits here, so
+     * "plen + 4 + tag > size" wraps for plen near UINT32_MAX and let a
+     * 4 GB read into the rx buffer through (pre-auth heap overflow). */
+    if (plen < 8 || plen > SSH_RX_BUF_SIZE - 4 - tag) {
+        ESP_LOGW(TAG, "Bad packet length %lu", (unsigned long)plen);
+        return SSH_ERR_PROTO;
+    }
     bool aligned = c->rxd.active ? (plen % 16 == 0) : ((plen + 4) % 8 == 0);
-    if (plen < 8 || !aligned || (size_t)plen + 4 + tag > SSH_RX_BUF_SIZE) {
+    if (!aligned) {
         ESP_LOGW(TAG, "Bad packet length %lu", (unsigned long)plen);
         return SSH_ERR_PROTO;
     }
@@ -851,10 +861,18 @@ esp_err_t ssh_handshake(ssh_conn_t *c, uint32_t timeout_ms)
     return do_kex(c, p, n, deadline);
 }
 
+void ssh_set_authenticated(ssh_conn_t *c)
+{
+    c->authenticated = true;
+}
+
 int ssh_recv(ssh_conn_t *c, uint8_t **payload, uint32_t timeout_ms)
 {
+    /* One deadline for the whole call. Restarting it for every skipped
+     * IGNORE/DEBUG or rekey let a client that never logs in hold the only
+     * session slot forever (and stretch the idle timeout). */
+    int64_t deadline = timeout_ms ? esp_timer_get_time() + (int64_t)timeout_ms * 1000 : 0;
     for (;;) {
-        int64_t deadline = timeout_ms ? esp_timer_get_time() + (int64_t)timeout_ms * 1000 : 0;
         int n = read_packet(c, payload, deadline);
         if (n < 0) return n;
 
@@ -866,7 +884,12 @@ int ssh_recv(ssh_conn_t *c, uint8_t **payload, uint32_t timeout_ms)
         case SSH_MSG_DISCONNECT:
             return SSH_ERR_CLOSED;
         case SSH_MSG_KEXINIT:
-            /* Client-initiated re-key */
+            /* Client-initiated re-key. Each costs an X25519 and an ECDSA
+             * signature, so an unauthenticated client gets only a few. */
+            if (!c->authenticated && c->preauth_rekeys++ >= SSH_MAX_PREAUTH_REKEYS) {
+                ssh_send_disconnect(c, SSH_DISCONNECT_PROTOCOL_ERROR, "too many key exchanges");
+                return SSH_ERR_PROTO;
+            }
             if (do_kex(c, *payload, n, esp_timer_get_time() + 60LL * 1000000) != ESP_OK) {
                 return SSH_ERR_PROTO;
             }
