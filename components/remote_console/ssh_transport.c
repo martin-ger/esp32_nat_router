@@ -36,7 +36,8 @@
 
 static const char *TAG = "ssh";
 
-#define SSH_VERSION_STR     "SSH-2.0-ESP32NATRouter"
+/* Generic on purpose: don't advertise the device to scanners */
+#define SSH_VERSION_STR     "SSH-2.0-SSH"
 #define SSH_HOSTKEY_NVS_KEY "rc_hostkey"
 
 #define SSH_RX_BUF_SIZE     4608    /* largest accepted packet (client KEXINIT ~2 KB) */
