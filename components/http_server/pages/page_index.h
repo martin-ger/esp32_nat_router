@@ -190,6 +190,7 @@ font-size: 0.8rem;\
 <a href='/mappings' class='nav-button'>🔀 Mappings</a>\
 <a href='/firewall' class='nav-button'>🛡️ Firewall</a>\
 <a href='/vpn' class='nav-button'>🔒 VPN</a>\
+<a href='/gpio' class='nav-button'>🔌 GPIO</a>\
 </div>"
 #else
 #define INDEX_CHUNK_BUTTONS "\
@@ -198,6 +199,7 @@ font-size: 0.8rem;\
 <a href='/mappings' class='nav-button'>🔀 Mappings</a>\
 <a href='/firewall' class='nav-button'>🛡️ Firewall</a>\
 <a href='/vpn' class='nav-button'>🔒 VPN</a>\
+<a href='/gpio' class='nav-button'>🔌 GPIO</a>\
 </div>"
 #endif
 /* Auth UI streamed here */

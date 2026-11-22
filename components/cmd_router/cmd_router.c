@@ -53,6 +53,7 @@ extern uint8_t web_ui_get_bind(void);
 extern void    web_ui_set_bind(uint8_t bind);
 #include "syslog_client.h"
 #include "oled_display.h"
+#include "gpio_monitor.h"
 #include "esp_ota_ops.h"
 #include "esp_app_desc.h"
 
@@ -115,6 +116,7 @@ static void register_set_sta_band(void);
 #endif
 static void register_set_vpn(void);
 static void register_set_tz(void);
+static void register_gpio_cmd(void);
 
 /* ACL helper functions (forward declarations) */
 static char* acl_format_ip_with_name(uint32_t ip, uint32_t mask, char* buf, size_t buf_len);
@@ -468,6 +470,7 @@ void register_router(void)
     register_syslog_cmd();
     register_set_tz();
     register_set_vpn();
+    register_gpio_cmd();
 #if defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32S3)
     register_set_oled();
     register_set_oled_gpio();
@@ -4060,4 +4063,84 @@ static void register_set_vpn(void)
         .argtable = &set_vpn_args
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
+}
+
+/* 'gpio' command - manage GPIO sensor monitor */
+static int gpio_cli_cmd(int argc, char **argv)
+{
+    if (argc < 2 || strcmp(argv[1], "status") == 0) {
+        printf("GPIO Monitor: %s\n", gpio_monitor_is_enabled() ? "enabled" : "disabled");
+        for (int i = 0; i < MAX_GPIO_SENSORS; i++) {
+            gpio_sensor_config_t cfg;
+            if (!gpio_monitor_get_sensor(i, &cfg)) continue;
+            gpio_sample_t latest;
+            bool has = gpio_monitor_get_latest(i, &latest);
+            printf("  [%d] %s | GPIO %d | %s | every %lus | persist=%s | latest=",
+                   i, cfg.name, (int)cfg.gpio,
+                   cfg.mode == GPIO_SENSOR_ANALOG ? "analog" : "digital",
+                   (unsigned long)cfg.interval_sec,
+                   cfg.persist ? "yes" : "no");
+            if (!has) printf("none\n");
+            else if (cfg.mode == GPIO_SENSOR_ANALOG) printf("%u (%u mV)\n", latest.raw, latest.mv);
+            else printf("%s\n", latest.raw ? "HIGH" : "LOW");
+        }
+        return 0;
+    }
+
+    if (strcmp(argv[1], "enable") == 0) {
+        gpio_monitor_set_enabled(true);
+        printf("GPIO monitor enabled\n");
+        return 0;
+    }
+    if (strcmp(argv[1], "disable") == 0) {
+        gpio_monitor_set_enabled(false);
+        printf("GPIO monitor disabled\n");
+        return 0;
+    }
+    if (strcmp(argv[1], "add") == 0 && argc >= 5) {
+        int pin = atoi(argv[2]);
+        gpio_sensor_mode_t mode = (strcasecmp(argv[3], "digital") == 0) ? GPIO_SENSOR_DIGITAL : GPIO_SENSOR_ANALOG;
+        uint32_t ival = (uint32_t)atoi(argv[4]);
+        const char *name = (argc >= 6) ? argv[5] : "Sensor";
+        bool persist = (argc >= 7) ? (atoi(argv[6]) != 0) : (ival >= GPIO_MIN_PERSIST_S);
+        char err[96] = "";
+        if (gpio_monitor_set_sensor(-1, pin, mode, ival, persist, name, err, sizeof(err)) != ESP_OK) {
+            printf("Error: %s\n", err);
+            return 1;
+        }
+        printf("Sensor saved\n");
+        return 0;
+    }
+    if (strcmp(argv[1], "del") == 0 && argc >= 3) {
+        gpio_monitor_del_sensor(atoi(argv[2]));
+        printf("Sensor deleted\n");
+        return 0;
+    }
+    if (strcmp(argv[1], "read") == 0 && argc >= 3) {
+        if (gpio_monitor_read_now(atoi(argv[2])) == ESP_OK) {
+            printf("Reading captured\n");
+            return 0;
+        }
+        printf("Read failed (is GPIO monitor enabled?)\n");
+        return 1;
+    }
+
+    printf("Usage:\n"
+           "  gpio status\n"
+           "  gpio enable | disable\n"
+           "  gpio add <pin> <analog|digital> <interval_s> [<name>] [<persist 0|1>]\n"
+           "  gpio del <slot>\n"
+           "  gpio read <slot>\n");
+    return 1;
+}
+
+static void register_gpio_cmd(void)
+{
+    const esp_console_cmd_t cmd = {
+        .command = "gpio",
+        .help = "Manage GPIO sensor monitoring (gpio <status|enable|disable|add|del|read>)",
+        .hint = NULL,
+        .func = &gpio_cli_cmd,
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&cmd));
 }
