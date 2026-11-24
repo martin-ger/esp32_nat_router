@@ -31,6 +31,9 @@
 #include "dhcp_reservations.h"
 #include "wifi_config.h"
 #include "remote_console.h"
+#ifdef CONFIG_GPIO_MONITOR
+#include "gpio_monitor.h"
+#endif
 
 static const char *TAG = "mqtt_ha";
 
@@ -50,6 +53,9 @@ static const char *TAG = "mqtt_ha";
 #define TOPIC_CMD_RC       TOPIC_PREFIX "/command/remote_console"
 #define TOPIC_CMD_AP       TOPIC_PREFIX "/command/ap"
 #define TOPIC_CLIENTS      TOPIC_PREFIX "/clients/"
+#ifdef CONFIG_GPIO_MONITOR
+#define TOPIC_GPIO         TOPIC_PREFIX "/gpio/"
+#endif
 
 /* ---------- Config limits ---------- */
 #define MQTT_URI_MAX   128
@@ -75,10 +81,6 @@ extern uint16_t connect_count;
 extern bool     ap_connect;
 extern struct dhcp_reservation_entry dhcp_reservations[];
 
-/* ================================================================
- *  Helpers
- * ================================================================ */
-
 static void build_device_id(void)
 {
     uint8_t mac[6];
@@ -90,7 +92,6 @@ static void build_device_id(void)
              "esp32_nat_router_%s", s_mac_str);
 }
 
-/* Shared device JSON fragment (embedded in every discovery payload). */
 static int device_json(char *buf, size_t len)
 {
     char ip_str[16];
@@ -104,10 +105,6 @@ static int device_json(char *buf, size_t len)
         s_device_id, ap_ssid,
         esp_app_get_description()->version, ip_str);
 }
-
-/* ================================================================
- *  NVS load / save
- * ================================================================ */
 
 static void load_config(void)
 {
@@ -142,10 +139,6 @@ static inline esp_err_t save_str(const char *key, const char *val)
     return set_config_param_str(key, val);
 }
 
-/* ================================================================
- *  HA Discovery publishing
- * ================================================================ */
-
 static void publish_discovery(void)
 {
     if (!s_connected) return;
@@ -155,9 +148,6 @@ static void publish_discovery(void)
     char dev[256];
     device_json(dev, sizeof(dev));
 
-    /* --- Router-level entities --- */
-
-    /* binary_sensor: Uplink Status */
     snprintf(topic, sizeof(topic),
         "homeassistant/binary_sensor/%s/uplink/config", s_device_id);
     snprintf(payload, sizeof(payload),
@@ -171,7 +161,6 @@ static void publish_discovery(void)
         "%s}", s_device_id, dev);
     esp_mqtt_client_publish(s_client, topic, payload, 0, 1, 1);
 
-    /* sensor: Connected Clients */
     snprintf(topic, sizeof(topic),
         "homeassistant/sensor/%s/clients/config", s_device_id);
     snprintf(payload, sizeof(payload),
@@ -185,7 +174,6 @@ static void publish_discovery(void)
         "%s}", s_device_id, dev);
     esp_mqtt_client_publish(s_client, topic, payload, 0, 1, 1);
 
-    /* sensor: Bytes Sent */
     snprintf(topic, sizeof(topic),
         "homeassistant/sensor/%s/bytes_tx/config", s_device_id);
     snprintf(payload, sizeof(payload),
@@ -200,7 +188,6 @@ static void publish_discovery(void)
         "%s}", s_device_id, dev);
     esp_mqtt_client_publish(s_client, topic, payload, 0, 1, 1);
 
-    /* sensor: Bytes Received */
     snprintf(topic, sizeof(topic),
         "homeassistant/sensor/%s/bytes_rx/config", s_device_id);
     snprintf(payload, sizeof(payload),
@@ -215,7 +202,6 @@ static void publish_discovery(void)
         "%s}", s_device_id, dev);
     esp_mqtt_client_publish(s_client, topic, payload, 0, 1, 1);
 
-    /* sensor: Free Heap */
     snprintf(topic, sizeof(topic),
         "homeassistant/sensor/%s/free_heap/config", s_device_id);
     snprintf(payload, sizeof(payload),
@@ -231,7 +217,6 @@ static void publish_discovery(void)
         "%s}", s_device_id, dev);
     esp_mqtt_client_publish(s_client, topic, payload, 0, 1, 1);
 
-    /* sensor: Uptime */
     snprintf(topic, sizeof(topic),
         "homeassistant/sensor/%s/uptime/config", s_device_id);
     snprintf(payload, sizeof(payload),
@@ -247,7 +232,6 @@ static void publish_discovery(void)
         "%s}", s_device_id, dev);
     esp_mqtt_client_publish(s_client, topic, payload, 0, 1, 1);
 
-    /* sensor: Uplink RSSI */
     snprintf(topic, sizeof(topic),
         "homeassistant/sensor/%s/rssi/config", s_device_id);
     snprintf(payload, sizeof(payload),
@@ -263,7 +247,6 @@ static void publish_discovery(void)
         "%s}", s_device_id, dev);
     esp_mqtt_client_publish(s_client, topic, payload, 0, 1, 1);
 
-    /* sensor: Uplink SSID */
     snprintf(topic, sizeof(topic),
         "homeassistant/sensor/%s/uplink_ssid/config", s_device_id);
     snprintf(payload, sizeof(payload),
@@ -277,7 +260,6 @@ static void publish_discovery(void)
         "%s}", s_device_id, dev);
     esp_mqtt_client_publish(s_client, topic, payload, 0, 1, 1);
 
-    /* button: Restart */
     snprintf(topic, sizeof(topic),
         "homeassistant/button/%s/restart/config", s_device_id);
     snprintf(payload, sizeof(payload),
@@ -290,7 +272,6 @@ static void publish_discovery(void)
         "%s}", s_device_id, dev);
     esp_mqtt_client_publish(s_client, topic, payload, 0, 1, 1);
 
-    /* switch: Web UI */
     snprintf(topic, sizeof(topic),
         "homeassistant/switch/%s/web_ui/config", s_device_id);
     snprintf(payload, sizeof(payload),
@@ -305,7 +286,6 @@ static void publish_discovery(void)
         "%s}", s_device_id, dev);
     esp_mqtt_client_publish(s_client, topic, payload, 0, 1, 1);
 
-    /* switch: Remote Console */
     snprintf(topic, sizeof(topic),
         "homeassistant/switch/%s/remote_console/config", s_device_id);
     snprintf(payload, sizeof(payload),
@@ -320,7 +300,6 @@ static void publish_discovery(void)
         "%s}", s_device_id, dev);
     esp_mqtt_client_publish(s_client, topic, payload, 0, 1, 1);
 
-    /* switch: AP Interface */
     snprintf(topic, sizeof(topic),
         "homeassistant/switch/%s/ap/config", s_device_id);
     snprintf(payload, sizeof(payload),
@@ -334,7 +313,6 @@ static void publish_discovery(void)
         "%s}", s_device_id, dev);
     esp_mqtt_client_publish(s_client, topic, payload, 0, 1, 1);
 
-    /* --- Per-client entities (DHCP reservations only) --- */
     for (int i = 0; i < MAX_DHCP_RESERVATIONS; i++) {
         if (!dhcp_reservations[i].valid) continue;
 
@@ -344,13 +322,11 @@ static void publish_discovery(void)
                  r->mac[0], r->mac[1], r->mac[2],
                  r->mac[3], r->mac[4], r->mac[5]);
 
-        /* Use reservation name if set, otherwise MAC */
         const char *name = (r->name[0] != '\0') ? r->name : cmac;
         char client_state_topic[64];
         snprintf(client_state_topic, sizeof(client_state_topic),
                  TOPIC_CLIENTS "%s", cmac);
 
-        /* binary_sensor: Presence */
         snprintf(topic, sizeof(topic),
             "homeassistant/binary_sensor/%s/%s_presence/config",
             s_device_id, cmac);
@@ -365,7 +341,6 @@ static void publish_discovery(void)
             "%s}", name, s_device_id, cmac, client_state_topic, dev);
         esp_mqtt_client_publish(s_client, topic, payload, 0, 1, 1);
 
-        /* sensor: TX */
         snprintf(topic, sizeof(topic),
             "homeassistant/sensor/%s/%s_tx/config", s_device_id, cmac);
         snprintf(payload, sizeof(payload),
@@ -380,7 +355,6 @@ static void publish_discovery(void)
             "%s}", name, s_device_id, cmac, client_state_topic, dev);
         esp_mqtt_client_publish(s_client, topic, payload, 0, 1, 1);
 
-        /* sensor: RX */
         snprintf(topic, sizeof(topic),
             "homeassistant/sensor/%s/%s_rx/config", s_device_id, cmac);
         snprintf(payload, sizeof(payload),
@@ -395,7 +369,6 @@ static void publish_discovery(void)
             "%s}", name, s_device_id, cmac, client_state_topic, dev);
         esp_mqtt_client_publish(s_client, topic, payload, 0, 1, 1);
 
-        /* sensor: RSSI */
         snprintf(topic, sizeof(topic),
             "homeassistant/sensor/%s/%s_rssi/config", s_device_id, cmac);
         snprintf(payload, sizeof(payload),
@@ -411,12 +384,49 @@ static void publish_discovery(void)
         esp_mqtt_client_publish(s_client, topic, payload, 0, 1, 1);
     }
 
+#ifdef CONFIG_GPIO_MONITOR
+    if (gpio_monitor_is_enabled()) {
+        for (int i = 0; i < MAX_GPIO_SENSORS; i++) {
+            gpio_sensor_config_t gcfg;
+            if (!gpio_monitor_get_sensor(i, &gcfg) || !gcfg.enabled) continue;
+
+            char gtopic[64];
+            snprintf(gtopic, sizeof(gtopic), TOPIC_GPIO "%d", i);
+
+            if (gcfg.mode == GPIO_SENSOR_ANALOG) {
+                snprintf(topic, sizeof(topic),
+                    "homeassistant/sensor/%s/gpio_%d/config", s_device_id, i);
+                snprintf(payload, sizeof(payload),
+                    "{\"name\":\"%s\","
+                    "\"uniq_id\":\"%s_gpio_%d\","
+                    "\"stat_t\":\"%s\","
+                    "\"val_tpl\":\"{{value_json.mv}}\","
+                    "\"dev_cla\":\"voltage\","
+                    "\"stat_cla\":\"measurement\","
+                    "\"unit_of_meas\":\"mV\","
+                    "\"avty_t\":\"" TOPIC_AVAILABILITY "\","
+                    "%s}",
+                    gcfg.name, s_device_id, i, gtopic, dev);
+            } else {
+                snprintf(topic, sizeof(topic),
+                    "homeassistant/binary_sensor/%s/gpio_%d/config", s_device_id, i);
+                snprintf(payload, sizeof(payload),
+                    "{\"name\":\"%s\","
+                    "\"uniq_id\":\"%s_gpio_%d\","
+                    "\"stat_t\":\"%s\","
+                    "\"val_tpl\":\"{{value_json.state}}\","
+                    "\"pl_on\":\"ON\",\"pl_off\":\"OFF\","
+                    "\"avty_t\":\"" TOPIC_AVAILABILITY "\","
+                    "%s}",
+                    gcfg.name, s_device_id, i, gtopic, dev);
+            }
+            esp_mqtt_client_publish(s_client, topic, payload, 0, 1, 1);
+        }
+    }
+#endif
+
     ESP_LOGI(TAG, "Discovery configs published");
 }
-
-/* ================================================================
- *  Periodic state publish
- * ================================================================ */
 
 static bool is_web_ui_enabled(void)
 {
@@ -431,7 +441,6 @@ static void publish_state(void *arg)
 {
     if (!s_connected) return;
 
-    /* Get uplink info (RSSI + SSID) */
     wifi_ap_record_t ap_info;
     int8_t rssi = 0;
     char uplink_ssid[33] = "";
@@ -440,7 +449,6 @@ static void publish_state(void *arg)
         strncpy(uplink_ssid, (const char *)ap_info.ssid, sizeof(uplink_ssid));
     }
 
-    /* Router-level state */
     char payload[384];
     snprintf(payload, sizeof(payload),
         "{\"uplink\":\"%s\",\"clients\":%u,"
@@ -461,11 +469,9 @@ static void publish_state(void *arg)
         ap_disabled ? "OFF" : "ON");
     esp_mqtt_client_publish(s_client, TOPIC_STATE, payload, 0, 0, 1);
 
-    /* Get AP station list for per-client RSSI */
     wifi_sta_list_t sta_list;
     esp_wifi_ap_get_sta_list(&sta_list);
 
-    /* Per-client state (DHCP reservations only) */
     client_stats_entry_t stats[CLIENT_STATS_MAX];
     int nstats = client_stats_get_all(stats, CLIENT_STATS_MAX);
 
@@ -478,7 +484,6 @@ static void publish_state(void *arg)
                  r->mac[0], r->mac[1], r->mac[2],
                  r->mac[3], r->mac[4], r->mac[5]);
 
-        /* Find matching stats entry */
         uint64_t tx = 0, rx = 0;
         bool present = false;
         for (int j = 0; j < nstats; j++) {
@@ -490,7 +495,6 @@ static void publish_state(void *arg)
             }
         }
 
-        /* Find RSSI from AP station list */
         int8_t client_rssi = 0;
         for (int j = 0; j < sta_list.num; j++) {
             if (memcmp(sta_list.sta[j].mac, r->mac, 6) == 0) {
@@ -506,11 +510,31 @@ static void publish_state(void *arg)
             present ? "ON" : "OFF", tx, rx, client_rssi);
         esp_mqtt_client_publish(s_client, topic, payload, 0, 0, 1);
     }
-}
 
-/* ================================================================
- *  MQTT event handler
- * ================================================================ */
+#ifdef CONFIG_GPIO_MONITOR
+    if (gpio_monitor_is_enabled()) {
+        for (int i = 0; i < MAX_GPIO_SENSORS; i++) {
+            gpio_sensor_config_t gcfg;
+            gpio_sample_t latest;
+            if (!gpio_monitor_get_sensor(i, &gcfg) || !gcfg.enabled) continue;
+            if (!gpio_monitor_get_latest(i, &latest)) continue;
+
+            char gtopic[64];
+            snprintf(gtopic, sizeof(gtopic), TOPIC_GPIO "%d", i);
+            if (gcfg.mode == GPIO_SENSOR_ANALOG) {
+                snprintf(payload, sizeof(payload),
+                    "{\"raw\":%u,\"mv\":%u}",
+                    (unsigned)latest.raw, (unsigned)latest.mv);
+            } else {
+                snprintf(payload, sizeof(payload),
+                    "{\"raw\":%u,\"state\":\"%s\"}",
+                    (unsigned)latest.raw, latest.raw ? "ON" : "OFF");
+            }
+            esp_mqtt_client_publish(s_client, gtopic, payload, 0, 0, 1);
+        }
+    }
+#endif
+}
 
 static void mqtt_event_handler(void *arg, esp_event_base_t base,
                                 int32_t event_id, void *event_data)
@@ -521,16 +545,12 @@ static void mqtt_event_handler(void *arg, esp_event_base_t base,
     case MQTT_EVENT_CONNECTED:
         ESP_LOGI(TAG, "Connected to broker");
         s_connected = true;
-        /* Publish online availability */
         esp_mqtt_client_publish(s_client, TOPIC_AVAILABILITY, "online", 0, 1, 1);
-        /* Subscribe to command topics */
         esp_mqtt_client_subscribe(s_client, TOPIC_CMD_RESTART, 1);
         esp_mqtt_client_subscribe(s_client, TOPIC_CMD_WEBUI, 1);
         esp_mqtt_client_subscribe(s_client, TOPIC_CMD_RC, 1);
         esp_mqtt_client_subscribe(s_client, TOPIC_CMD_AP, 1);
-        /* Publish HA discovery */
         publish_discovery();
-        /* Publish initial state */
         publish_state(NULL);
         break;
 
@@ -552,7 +572,6 @@ static void mqtt_event_handler(void *arg, esp_event_base_t base,
                            strncasecmp(event->data, "ON", 2) == 0);
                 ESP_LOGI(TAG, "Web UI %s via MQTT", on ? "enabled" : "disabled");
                 set_config_param_str("web_disabled", on ? "0" : "1");
-                /* Publish updated state immediately */
                 publish_state(NULL);
             }
             if (event->topic_len == (int)strlen(TOPIC_CMD_RC) &&
@@ -586,10 +605,6 @@ static void mqtt_event_handler(void *arg, esp_event_base_t base,
         break;
     }
 }
-
-/* ================================================================
- *  Start / Stop
- * ================================================================ */
 
 esp_err_t mqtt_ha_start(void)
 {
@@ -637,7 +652,6 @@ esp_err_t mqtt_ha_start(void)
         return err;
     }
 
-    /* Create periodic publish timer */
     if (s_publish_timer == NULL) {
         esp_timer_create_args_t timer_args = {
             .callback = publish_state,
@@ -659,10 +673,9 @@ esp_err_t mqtt_ha_stop(void)
     }
 
     if (s_client != NULL) {
-        /* Publish offline before disconnecting */
         if (s_connected) {
             esp_mqtt_client_publish(s_client, TOPIC_AVAILABILITY, "offline", 0, 1, 1);
-            vTaskDelay(pdMS_TO_TICKS(200)); /* brief delay to let it send */
+            vTaskDelay(pdMS_TO_TICKS(200));
         }
         esp_mqtt_client_stop(s_client);
         esp_mqtt_client_destroy(s_client);
@@ -689,10 +702,6 @@ const char *mqtt_ha_get_status(void)
     if (s_connected)  return "connected";
     return "disconnected";
 }
-
-/* ================================================================
- *  CLI commands
- * ================================================================ */
 
 static struct {
     struct arg_str *action;
@@ -782,7 +791,6 @@ static int mqtt_cmd(int argc, char **argv)
         s_interval = (uint32_t)val;
         save_int(NVS_KEY_MQTT_INTV, (int32_t)s_interval);
         printf("Publish interval set to %" PRIu32 "s\n", s_interval);
-        /* Restart timer if running */
         if (s_publish_timer != NULL && s_client != NULL) {
             esp_timer_stop(s_publish_timer);
             esp_timer_start_periodic(s_publish_timer,
@@ -819,10 +827,6 @@ static void register_mqtt_cmd(void)
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&cmd));
 }
-
-/* ================================================================
- *  Init (called from app_main)
- * ================================================================ */
 
 void mqtt_ha_init(void)
 {

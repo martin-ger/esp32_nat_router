@@ -68,6 +68,7 @@
 #include "syslog_client.h"
 #include "oled_display.h"
 #include "led_strip_status.h"
+#include "gpio_monitor.h"
 #if !defined(CONFIG_IDF_TARGET_ESP32C5)
 #include "mdns.h"
 #endif
@@ -1709,6 +1710,9 @@ void app_main(void)
 
     // Initialize OLED display (ESP32-S3 defaults to enabled on GPIO17/18)
     oled_display_init();
+
+    // Initialize GPIO sensor monitor (allocates 0 RAM if disabled)
+    gpio_monitor_init();
 
     initialize_console();
 

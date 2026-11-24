@@ -7,3 +7,6 @@
 #include "pages/page_vpn.h"
 #include "pages/page_setup.h"
 #include "pages/page_scan.h"
+#ifdef CONFIG_GPIO_MONITOR
+#include "pages/page_gpio.h"
+#endif

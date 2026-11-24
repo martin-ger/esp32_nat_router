@@ -43,6 +43,7 @@
 #include "pcap_capture.h"
 #include "acl.h"
 #include "remote_console.h"
+#include "gpio_monitor.h"
 #include "cJSON.h"
 #include "esp_ota_ops.h"
 #include "esp_app_format.h"
@@ -1457,6 +1458,41 @@ static esp_err_t index_get_handler(httpd_req_t *req)
 
     /* Navigation buttons */
     SEND_CHUNK(req, INDEX_CHUNK_BUTTONS, HTTPD_RESP_USE_STRLEN);
+
+#ifdef CONFIG_GPIO_MONITOR
+    /* Quick links to each active GPIO sensor page when enabled */
+    if (gpio_monitor_is_enabled()) {
+        bool any_sensor = false;
+        for (int s = 0; s < MAX_GPIO_SENSORS; s++) {
+            gpio_sensor_config_t scfg;
+            if (!gpio_monitor_get_sensor(s, &scfg) || !scfg.enabled) continue;
+            if (!any_sensor) {
+                SEND_CHUNK(req, "<h2>GPIO Sensors</h2><div class='button-container' style='margin-top:0.5rem;'>", HTTPD_RESP_USE_STRLEN);
+                any_sensor = true;
+            }
+            char safe_name[128], val_str[32] = "No data";
+            html_escape_to(safe_name, sizeof(safe_name), scfg.name);
+            gpio_sample_t latest;
+            if (gpio_monitor_get_latest(s, &latest)) {
+                if (scfg.mode == GPIO_SENSOR_ANALOG) {
+                    snprintf(val_str, sizeof(val_str), "%u mV", (unsigned)latest.mv);
+                } else {
+                    snprintf(val_str, sizeof(val_str), "%s", latest.raw ? "HIGH" : "LOW");
+                }
+            }
+            snprintf(row, sizeof(row),
+                     "<a href='/gpio/sensor?id=%d' class='nav-button' style='flex-direction:column;gap:0.4rem;'>"
+                     "<span>%s</span>"
+                     "<small style='font-weight:400;opacity:0.85;'>GPIO %d: %s</small>"
+                     "</a>",
+                     s, safe_name, (int)scfg.gpio, val_str);
+            SEND_CHUNK(req, row, HTTPD_RESP_USE_STRLEN);
+        }
+        if (any_sensor) {
+            SEND_CHUNK(req, "</div>", HTTPD_RESP_USE_STRLEN);
+        }
+    }
+#endif
 
     /* --- Auth UI Section (streamed directly) --- */
 
@@ -3775,6 +3811,490 @@ static httpd_uri_t vpnp = {
     .method    = HTTP_GET,
     .handler   = vpn_get_handler,
 };
+#ifdef CONFIG_GPIO_MONITOR
+/* --- GPIO Monitor Web Handlers --- */
+
+static bool parse_gpio_slot_id(const char *s, int *out)
+{
+    if (!s || *s == '\0') return false;
+    char *end = NULL;
+    long v = strtol(s, &end, 10);
+    if (*end != '\0' || v < 0 || v >= MAX_GPIO_SENSORS) return false;
+    *out = (int)v;
+    return true;
+}
+
+static bool parse_strict_int(const char *s, long min_v, long max_v, long *out)
+{
+    if (!s || *s == '\0') return false;
+    char *end = NULL;
+    long v = strtol(s, &end, 10);
+    if (*end != '\0' || v < min_v || v > max_v) return false;
+    *out = v;
+    return true;
+}
+
+static esp_err_t gpio_get_handler(httpd_req_t *req)
+{
+    resume_sta_if_scan_idle();
+    bool password_protection_enabled = is_web_password_set();
+    if (password_protection_enabled && !is_authenticated(req)) {
+        httpd_resp_set_status(req, "303 See Other");
+        httpd_resp_set_hdr(req, "Location", "/?auth_required=1");
+        httpd_resp_send(req, NULL, 0);
+        return ESP_OK;
+    }
+
+    char err_msg[128] = "";
+    int edit_slot = -1;
+    gpio_sensor_config_t edit_cfg = {0};
+    bool is_editing = false;
+
+    size_t buf_len = httpd_req_get_url_query_len(req) + 1;
+    if (buf_len > 1) {
+        char *buf = malloc(buf_len);
+        if (buf != NULL && httpd_req_get_url_query_str(req, buf, buf_len) == ESP_OK) {
+            char p1[32], name_raw[96], p_gpio[16], p_mode[16], p_ival[16], p_slot[16];
+
+            if (httpd_query_key_value(buf, "set_en", p1, sizeof(p1)) == ESP_OK) {
+                bool en = (httpd_query_key_value(buf, "en", p_slot, sizeof(p_slot)) == ESP_OK);
+                gpio_monitor_set_enabled(en);
+                free(buf);
+                httpd_resp_set_status(req, "303 See Other");
+                httpd_resp_set_hdr(req, "Location", "/gpio");
+                httpd_resp_send(req, NULL, 0);
+                return ESP_OK;
+            }
+            if (httpd_query_key_value(buf, "del", p1, sizeof(p1)) == ESP_OK) {
+                int del_id = -1;
+                if (parse_gpio_slot_id(p1, &del_id)) {
+                    gpio_monitor_del_sensor(del_id);
+                }
+                free(buf);
+                httpd_resp_set_status(req, "303 See Other");
+                httpd_resp_set_hdr(req, "Location", "/gpio");
+                httpd_resp_send(req, NULL, 0);
+                return ESP_OK;
+            }
+            if (httpd_query_key_value(buf, "edit", p1, sizeof(p1)) == ESP_OK) {
+                int cand = -1;
+                if (parse_gpio_slot_id(p1, &cand) && gpio_monitor_get_sensor(cand, &edit_cfg)) {
+                    edit_slot = cand;
+                    is_editing = true;
+                } else {
+                    strlcpy(err_msg, "Sensor slot not found.", sizeof(err_msg));
+                }
+            }
+            if (httpd_query_key_value(buf, "add_sensor", p1, sizeof(p1)) == ESP_OK) {
+                esp_err_t nerr = httpd_query_key_value(buf, "name", name_raw, sizeof(name_raw));
+                if (nerr == ESP_ERR_HTTPD_RESULT_TRUNC) {
+                    strlcpy(err_msg, "Sensor name is too long.", sizeof(err_msg));
+                } else if (nerr == ESP_OK &&
+                           httpd_query_key_value(buf, "gpio", p_gpio, sizeof(p_gpio)) == ESP_OK &&
+                           httpd_query_key_value(buf, "mode", p_mode, sizeof(p_mode)) == ESP_OK &&
+                           httpd_query_key_value(buf, "ival", p_ival, sizeof(p_ival)) == ESP_OK) {
+                    preprocess_string(name_raw);
+
+                    int slot_val = -1;
+                    if (httpd_query_key_value(buf, "slot", p_slot, sizeof(p_slot)) == ESP_OK) {
+                        if (strcmp(p_slot, "-1") != 0 && !parse_gpio_slot_id(p_slot, &slot_val)) {
+                            strlcpy(err_msg, "Invalid sensor slot.", sizeof(err_msg));
+                        }
+                    }
+
+                    long gpio_num = -1, ival_num = 0, mult = 1;
+                    char unit_s[16] = "1";
+                    httpd_query_key_value(buf, "iunit", unit_s, sizeof(unit_s));
+                    if (!parse_strict_int(unit_s, 1, 3600, &mult) || (mult != 1 && mult != 60 && mult != 3600)) {
+                        mult = 1;
+                    }
+
+                    if (err_msg[0] == '\0') {
+                        if (!parse_strict_int(p_gpio, 0, 48, &gpio_num)) {
+                            strlcpy(err_msg, "Invalid GPIO number.", sizeof(err_msg));
+                        } else if (!parse_strict_int(p_ival, 1, 86400, &ival_num) ||
+                                   ival_num * mult > GPIO_MAX_INTERVAL_S) {
+                            strlcpy(err_msg, "Interval out of range (max 24 hours).", sizeof(err_msg));
+                        } else {
+                            uint32_t interval_sec = (uint32_t)(ival_num * mult);
+                            char persist_s[8] = "";
+                            bool persist = (httpd_query_key_value(buf, "persist", persist_s, sizeof(persist_s)) == ESP_OK);
+                            gpio_sensor_mode_t mode = (atoi(p_mode) == 1) ? GPIO_SENSOR_DIGITAL : GPIO_SENSOR_ANALOG;
+
+                            char raw_err[96] = "";
+                            if (gpio_monitor_set_sensor(slot_val, (int)gpio_num, mode, interval_sec,
+                                                        persist, name_raw, raw_err, sizeof(raw_err)) != ESP_OK) {
+                                html_escape_to(err_msg, sizeof(err_msg), raw_err);
+                            } else {
+                                free(buf);
+                                httpd_resp_set_status(req, "303 See Other");
+                                httpd_resp_set_hdr(req, "Location", "/gpio");
+                                httpd_resp_send(req, NULL, 0);
+                                return ESP_OK;
+                            }
+                        }
+                    }
+                } else {
+                    strlcpy(err_msg, "Missing or oversized form field.", sizeof(err_msg));
+                }
+            }
+        }
+        free(buf);
+    }
+
+    char row[768];
+    SEND_CHUNK(req, GPIO_CHUNK_HEAD, HTTPD_RESP_USE_STRLEN);
+    if (session_active && password_protection_enabled) {
+        SEND_CHUNK(req,
+            "<a href='/?logout=1' style='padding:0.4rem 1rem;background:rgba(255,82,82,0.15);color:#ff5252;border:1px solid #ff5252;border-radius:6px;text-decoration:none;font-size:0.85rem;'>Logout</a>",
+            HTTPD_RESP_USE_STRLEN);
+    }
+
+    bool en = gpio_monitor_is_enabled();
+    snprintf(row, sizeof(row), GPIO_CHUNK_TOGGLE, en ? "checked" : "");
+    SEND_CHUNK(req, row, HTTPD_RESP_USE_STRLEN);
+
+    if (err_msg[0] != '\0') {
+        snprintf(row, sizeof(row), "<div class='err-box'>%s</div>", err_msg);
+        SEND_CHUNK(req, row, HTTPD_RESP_USE_STRLEN);
+    }
+
+    if (en) {
+        SEND_CHUNK(req, GPIO_CHUNK_TABLE_OPEN, HTTPD_RESP_USE_STRLEN);
+        int count = 0;
+        for (int i = 0; i < MAX_GPIO_SENSORS; i++) {
+            gpio_sensor_config_t scfg;
+            if (!gpio_monitor_get_sensor(i, &scfg)) continue;
+            count++;
+
+            char safe_name[128], val_str[32] = "-";
+            html_escape_to(safe_name, sizeof(safe_name), scfg.name);
+
+            gpio_sample_t latest;
+            if (gpio_monitor_get_latest(i, &latest)) {
+                if (scfg.mode == GPIO_SENSOR_ANALOG) {
+                    snprintf(val_str, sizeof(val_str), "%u (%u mV)", (unsigned)latest.raw, (unsigned)latest.mv);
+                } else {
+                    snprintf(val_str, sizeof(val_str), "%s", latest.raw ? "HIGH" : "LOW");
+                }
+            }
+
+            char ival_str[20];
+            if (scfg.interval_sec % 3600 == 0) {
+                snprintf(ival_str, sizeof(ival_str), "%luh", (unsigned long)(scfg.interval_sec / 3600));
+            } else if (scfg.interval_sec % 60 == 0) {
+                snprintf(ival_str, sizeof(ival_str), "%lum", (unsigned long)(scfg.interval_sec / 60));
+            } else {
+                snprintf(ival_str, sizeof(ival_str), "%lus", (unsigned long)scfg.interval_sec);
+            }
+
+            snprintf(row, sizeof(row),
+                "<tr><td>%s</td><td>GPIO %d</td><td>%s</td><td>%s</td><td>%s</td>"
+                "<td style='white-space:nowrap;'>"
+                "<a href='/gpio?edit=%d' class='btn-sm btn-blue'>Edit</a>"
+                "<a href='/gpio/sensor?id=%d' class='btn-sm btn-blue'>View</a>"
+                "<a href='/api/gpio-csv?id=%d' class='btn-sm btn-green'>CSV</a>"
+                "<a href='/gpio?del=%d' class='btn-sm btn-red'>Del</a>"
+                "</td></tr>",
+                safe_name, (int)scfg.gpio,
+                scfg.mode == GPIO_SENSOR_ANALOG ? "Analog" : "Digital",
+                ival_str, val_str, i, i, i, i);
+            SEND_CHUNK(req, row, HTTPD_RESP_USE_STRLEN);
+        }
+        if (count == 0) {
+            SEND_CHUNK(req, "<tr><td colspan='6' style='text-align:center;color:#888;'>No GPIO sensors configured yet</td></tr>", HTTPD_RESP_USE_STRLEN);
+        }
+
+        /* Render Add or Edit form */
+        char form_buf[2048];
+        char safe_edit_name[128] = "";
+        char gpio_str[8] = "";
+        unsigned long ival_val = 1;
+        const char *u_hr_sel = "selected", *u_min_sel = "", *u_sec_sel = "";
+        const char *m0_sel = "selected", *m1_sel = "";
+        const char *persist_chk = "checked";
+
+        if (is_editing) {
+            html_escape_to(safe_edit_name, sizeof(safe_edit_name), edit_cfg.name);
+            snprintf(gpio_str, sizeof(gpio_str), "%d", (int)edit_cfg.gpio);
+            m0_sel = (edit_cfg.mode == GPIO_SENSOR_ANALOG) ? "selected" : "";
+            m1_sel = (edit_cfg.mode == GPIO_SENSOR_DIGITAL) ? "selected" : "";
+            persist_chk = edit_cfg.persist ? "checked" : "";
+            if (edit_cfg.interval_sec % 3600 == 0) {
+                ival_val = edit_cfg.interval_sec / 3600;
+                u_hr_sel = "selected"; u_min_sel = ""; u_sec_sel = "";
+            } else if (edit_cfg.interval_sec % 60 == 0) {
+                ival_val = edit_cfg.interval_sec / 60;
+                u_hr_sel = ""; u_min_sel = "selected"; u_sec_sel = "";
+            } else {
+                ival_val = edit_cfg.interval_sec;
+                u_hr_sel = ""; u_min_sel = ""; u_sec_sel = "selected";
+            }
+        }
+
+        snprintf(form_buf, sizeof(form_buf), GPIO_CHUNK_ADD_FORM,
+            is_editing ? "Edit Sensor" : "Add Sensor",
+            edit_slot,
+            safe_edit_name,
+            gpio_str,
+            m0_sel, m1_sel,
+            ival_val, u_hr_sel, u_min_sel, u_sec_sel,
+            persist_chk,
+            is_editing ? "Update Sensor" : "Save Sensor",
+            is_editing ? "<div style='text-align:center;margin-top:0.5rem;'><a href='/gpio' style='color:#aaa;font-size:0.85rem;'>Cancel Edit</a></div>" : "");
+        SEND_CHUNK(req, form_buf, HTTPD_RESP_USE_STRLEN);
+    }
+
+    SEND_CHUNK(req, GPIO_CHUNK_TAIL, HTTPD_RESP_USE_STRLEN);
+    SEND_CHUNK(req, NULL, 0);
+    return ESP_OK;
+}
+
+static esp_err_t gpio_sensor_get_handler(httpd_req_t *req)
+{
+    resume_sta_if_scan_idle();
+    bool password_protection_enabled = is_web_password_set();
+    if (password_protection_enabled && !is_authenticated(req)) {
+        httpd_resp_set_status(req, "303 See Other");
+        httpd_resp_set_hdr(req, "Location", "/?auth_required=1");
+        httpd_resp_send(req, NULL, 0);
+        return ESP_OK;
+    }
+    if (!gpio_monitor_is_enabled()) {
+        httpd_resp_set_status(req, "303 See Other");
+        httpd_resp_set_hdr(req, "Location", "/gpio");
+        httpd_resp_send(req, NULL, 0);
+        return ESP_OK;
+    }
+
+    int id = -1;
+    bool has_id = false, do_read = false, do_clear = false;
+    size_t buf_len = httpd_req_get_url_query_len(req) + 1;
+    if (buf_len > 1) {
+        char *buf = malloc(buf_len);
+        if (buf != NULL && httpd_req_get_url_query_str(req, buf, buf_len) == ESP_OK) {
+            char p[16];
+            if (httpd_query_key_value(buf, "id", p, sizeof(p)) == ESP_OK) {
+                has_id = parse_gpio_slot_id(p, &id);
+            }
+            if (httpd_query_key_value(buf, "read", p, sizeof(p)) == ESP_OK) do_read = true;
+            if (httpd_query_key_value(buf, "clear", p, sizeof(p)) == ESP_OK) do_clear = true;
+        }
+        free(buf);
+    }
+
+    if (!has_id) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid sensor id");
+        return ESP_FAIL;
+    }
+
+    gpio_sensor_config_t scfg;
+    if (!gpio_monitor_get_sensor(id, &scfg)) {
+        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "Sensor not found");
+        return ESP_FAIL;
+    }
+    if (do_read) {
+        gpio_monitor_read_now(id);
+    } else if (do_clear) {
+        gpio_monitor_clear_history(id);
+    }
+    if (do_read || do_clear) {
+        char loc[32];
+        snprintf(loc, sizeof(loc), "/gpio/sensor?id=%d", id);
+        httpd_resp_set_status(req, "303 See Other");
+        httpd_resp_set_hdr(req, "Location", loc);
+        httpd_resp_send(req, NULL, 0);
+        return ESP_OK;
+    }
+
+    char safe_name[128], row[1024];
+    html_escape_to(safe_name, sizeof(safe_name), scfg.name);
+
+    SEND_CHUNK(req, GPIO_SENSOR_CHUNK_HEAD, HTTPD_RESP_USE_STRLEN);
+    snprintf(row, sizeof(row), "<h1>%s <small style='color:#888;font-size:0.85rem;'>(GPIO %d)</small></h1></div>", safe_name, (int)scfg.gpio);
+    SEND_CHUNK(req, row, HTTPD_RESP_USE_STRLEN);
+
+    if (session_active && password_protection_enabled) {
+        SEND_CHUNK(req,
+            "<a href='/?logout=1' style='padding:0.4rem 1rem;background:rgba(255,82,82,0.15);color:#ff5252;border:1px solid #ff5252;border-radius:6px;text-decoration:none;font-size:0.85rem;'>Logout</a>",
+            HTTPD_RESP_USE_STRLEN);
+    }
+    SEND_CHUNK(req, "</div>", HTTPD_RESP_USE_STRLEN);
+
+    snprintf(row, sizeof(row),
+        "<div class='card-grid'>"
+        "<div class='card'><div class='lbl'>Current</div><div class='val' id='vCur'>-</div><div class='sub' id='vSub'>Loading...</div></div>"
+        "<div class='card'><div class='lbl'>Min</div><div class='val' id='vMin'>-</div><div class='sub'>%s</div></div>"
+        "<div class='card'><div class='lbl'>Max</div><div class='val' id='vMax'>-</div><div class='sub'>Interval: %lus</div></div>"
+        "</div>"
+        "<div class='actions'>"
+        "<a href='/gpio/sensor?id=%d&read=1' class='btn btn-blue'>Measure Now</a>"
+        "<a href='/api/gpio-csv?id=%d' class='btn btn-green'>Download CSV</a>"
+        "<a href='/gpio/sensor?id=%d&clear=1' class='btn btn-red' onclick='return confirm(\"Clear history?\")'>Clear History</a>"
+        "</div>",
+        scfg.mode == GPIO_SENSOR_ANALOG ? "Analog ADC1" : "Digital",
+        (unsigned long)scfg.interval_sec,
+        id, id, id);
+    SEND_CHUNK(req, row, HTTPD_RESP_USE_STRLEN);
+
+    SEND_CHUNK(req, GPIO_SENSOR_CHUNK_GRAPH, HTTPD_RESP_USE_STRLEN);
+    SEND_CHUNK(req, NULL, 0);
+    return ESP_OK;
+}
+
+static esp_err_t gpio_data_api_handler(httpd_req_t *req)
+{
+    if (is_web_password_set() && !is_authenticated(req)) {
+        httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "Not authenticated");
+        return ESP_FAIL;
+    }
+    if (!gpio_monitor_is_enabled()) {
+        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "GPIO monitor disabled");
+        return ESP_FAIL;
+    }
+
+    int id = -1;
+    bool has_id = false;
+    size_t buf_len = httpd_req_get_url_query_len(req) + 1;
+    if (buf_len > 1) {
+        char *buf = malloc(buf_len);
+        if (buf != NULL && httpd_req_get_url_query_str(req, buf, buf_len) == ESP_OK) {
+            char p[16];
+            if (httpd_query_key_value(buf, "id", p, sizeof(p)) == ESP_OK) {
+                has_id = parse_gpio_slot_id(p, &id);
+            }
+        }
+        free(buf);
+    }
+    if (!has_id) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid sensor id");
+        return ESP_FAIL;
+    }
+
+    gpio_sensor_config_t scfg;
+    if (!gpio_monitor_get_sensor(id, &scfg)) {
+        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "Sensor not found");
+        return ESP_FAIL;
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    char hdr[128];
+    snprintf(hdr, sizeof(hdr), "{\"id\":%d,\"gpio\":%d,\"mode\":%d,\"samples\":[", id, (int)scfg.gpio, (int)scfg.mode);
+    SEND_CHUNK(req, hdr, HTTPD_RESP_USE_STRLEN);
+
+    gpio_sample_t batch[16];
+    size_t total = gpio_monitor_get_sample_count(id);
+    bool first = true;
+    for (size_t off = 0; off < total; ) {
+        size_t n = gpio_monitor_copy_history_range(id, off, batch, 16);
+        if (n == 0) break;
+        for (size_t i = 0; i < n; i++) {
+            char item[80];
+            snprintf(item, sizeof(item), "%s{\"t\":%lu,\"u\":%lu,\"raw\":%u,\"mv\":%u}",
+                     first ? "" : ",",
+                     (unsigned long)batch[i].unix_ts,
+                     (unsigned long)batch[i].uptime_s,
+                     (unsigned)batch[i].raw, (unsigned)batch[i].mv);
+            SEND_CHUNK(req, item, HTTPD_RESP_USE_STRLEN);
+            first = false;
+        }
+        off += n;
+    }
+    SEND_CHUNK(req, "]}", HTTPD_RESP_USE_STRLEN);
+    SEND_CHUNK(req, NULL, 0);
+    return ESP_OK;
+}
+
+static esp_err_t gpio_csv_handler(httpd_req_t *req)
+{
+    if (is_web_password_set() && !is_authenticated(req)) {
+        httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "Not authenticated");
+        return ESP_FAIL;
+    }
+    if (!gpio_monitor_is_enabled()) {
+        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "GPIO monitor disabled");
+        return ESP_FAIL;
+    }
+
+    int id = -1;
+    bool has_id = false;
+    size_t buf_len = httpd_req_get_url_query_len(req) + 1;
+    if (buf_len > 1) {
+        char *buf = malloc(buf_len);
+        if (buf != NULL && httpd_req_get_url_query_str(req, buf, buf_len) == ESP_OK) {
+            char p[16];
+            if (httpd_query_key_value(buf, "id", p, sizeof(p)) == ESP_OK) {
+                has_id = parse_gpio_slot_id(p, &id);
+            }
+        }
+        free(buf);
+    }
+    if (!has_id) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid sensor id");
+        return ESP_FAIL;
+    }
+
+    gpio_sensor_config_t scfg;
+    if (!gpio_monitor_get_sensor(id, &scfg)) {
+        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "Sensor not found");
+        return ESP_FAIL;
+    }
+
+    static char cd_hdr[96];
+    snprintf(cd_hdr, sizeof(cd_hdr), "attachment; filename=\"gpio_%d_%s.csv\"", id, scfg.name);
+    httpd_resp_set_type(req, "text/csv");
+    httpd_resp_set_hdr(req, "Content-Disposition", cd_hdr);
+
+    SEND_CHUNK(req, "timestamp_utc,unix_time,uptime_s,gpio,raw,mv\n", HTTPD_RESP_USE_STRLEN);
+
+    gpio_sample_t batch[16];
+    size_t total = gpio_monitor_get_sample_count(id);
+    for (size_t off = 0; off < total; ) {
+        size_t n = gpio_monitor_copy_history_range(id, off, batch, 16);
+        if (n == 0) break;
+        for (size_t i = 0; i < n; i++) {
+            char ts_buf[24] = "unsynced";
+            if (batch[i].unix_ts > 0) {
+                time_t t = (time_t)batch[i].unix_ts;
+                struct tm tm_info;
+                gmtime_r(&t, &tm_info);
+                strftime(ts_buf, sizeof(ts_buf), "%Y-%m-%d %H:%M:%S", &tm_info);
+            }
+            char line[96];
+            snprintf(line, sizeof(line), "%s,%lu,%lu,%d,%u,%u\n",
+                     ts_buf,
+                     (unsigned long)batch[i].unix_ts,
+                     (unsigned long)batch[i].uptime_s,
+                     (int)scfg.gpio, (unsigned)batch[i].raw, (unsigned)batch[i].mv);
+            SEND_CHUNK(req, line, HTTPD_RESP_USE_STRLEN);
+        }
+        off += n;
+    }
+    SEND_CHUNK(req, NULL, 0);
+    return ESP_OK;
+}
+
+static httpd_uri_t gpiop = {
+    .uri       = "/gpio",
+    .method    = HTTP_GET,
+    .handler   = gpio_get_handler,
+};
+static httpd_uri_t gpio_sensorp = {
+    .uri       = "/gpio/sensor",
+    .method    = HTTP_GET,
+    .handler   = gpio_sensor_get_handler,
+};
+static httpd_uri_t gpio_datap = {
+    .uri       = "/api/gpio-data",
+    .method    = HTTP_GET,
+    .handler   = gpio_data_api_handler,
+};
+static httpd_uri_t gpio_csvp = {
+    .uri       = "/api/gpio-csv",
+    .method    = HTTP_GET,
+    .handler   = gpio_csv_handler,
+};
+#endif /* CONFIG_GPIO_MONITOR */
 
 static esp_err_t captive_redirect_handler(httpd_req_t *req, httpd_err_code_t err);
 
@@ -3784,7 +4304,11 @@ httpd_handle_t start_webserver(uint16_t port)
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = port;
     config.stack_size = 16384;  // Large stack needed for mappings page with 3x 2KB HTML buffers
+#ifdef CONFIG_GPIO_MONITOR
+    config.max_uri_handlers = 18;
+#else
     config.max_uri_handlers = 14;
+#endif
     config.max_uri_len = 1024;
     config.open_fn = http_open_fn;
     /* Fail a stalled send/recv fast (default 5s) so an abandoned connection
@@ -3833,6 +4357,12 @@ httpd_handle_t start_webserver(uint16_t port)
         httpd_register_uri_handler(server, &config_importp);
         httpd_register_uri_handler(server, &vpn_importp);
         httpd_register_uri_handler(server, &ota_uploadp);
+#ifdef CONFIG_GPIO_MONITOR
+        httpd_register_uri_handler(server, &gpiop);
+        httpd_register_uri_handler(server, &gpio_sensorp);
+        httpd_register_uri_handler(server, &gpio_datap);
+        httpd_register_uri_handler(server, &gpio_csvp);
+#endif
 
 #if CONFIG_ETH_UPLINK
         // In ETH mode, start captive portal if router appears unconfigured

@@ -7,6 +7,12 @@
 #define INDEX_TITLE "ESP32 NAT Router"
 #endif
 
+#ifdef CONFIG_GPIO_MONITOR
+#define INDEX_GPIO_BTN "<a href='/gpio' class='nav-button'>🔌 GPIO</a>"
+#else
+#define INDEX_GPIO_BTN ""
+#endif
+
 /* Index Page - Chunked for streaming */
 #define INDEX_CHUNK_HEAD "<html>\
 <head>\
@@ -189,16 +195,18 @@ font-size: 0.8rem;\
 <a href='/config' class='nav-button'>⚙️ Configuration</a>\
 <a href='/mappings' class='nav-button'>🔀 Mappings</a>\
 <a href='/firewall' class='nav-button'>🛡️ Firewall</a>\
-<a href='/vpn' class='nav-button'>🔒 VPN</a>\
-</div>"
+<a href='/vpn' class='nav-button'>🔒 VPN</a>" \
+INDEX_GPIO_BTN \
+"</div>"
 #else
 #define INDEX_CHUNK_BUTTONS "\
 <div class='button-container'>\
 <a href='/config' class='nav-button'>⚙️ Configuration</a>\
 <a href='/mappings' class='nav-button'>🔀 Mappings</a>\
 <a href='/firewall' class='nav-button'>🛡️ Firewall</a>\
-<a href='/vpn' class='nav-button'>🔒 VPN</a>\
-</div>"
+<a href='/vpn' class='nav-button'>🔒 VPN</a>" \
+INDEX_GPIO_BTN \
+"</div>"
 #endif
 /* Auth UI streamed here */
 
@@ -211,4 +219,3 @@ IDF_VER\
 </div>\
 </body>\
 </html>"
-
