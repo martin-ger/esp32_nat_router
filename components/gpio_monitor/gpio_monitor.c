@@ -1,5 +1,8 @@
 /* GPIO Sensor Monitor implementation (ESP-IDF 5.5+ oneshot ADC1 & GPIO) */
 
+#include "sdkconfig.h"
+#ifdef CONFIG_GPIO_MONITOR
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,15 +18,23 @@
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
 #include "router_config.h"
+#include "oled_display.h"
 #include "gpio_monitor.h"
 
 static const char *TAG = "gpio_mon";
 
+#define GPIO_CSV_MAX_BYTES 24576
+#if CONFIG_STORE_HISTORY
+#define GPIO_TASK_STACK    3584
+#else
+#define GPIO_TASK_STACK    2560
+#endif
+
 typedef struct {
-    gpio_sample_t *samples;   /* Allocated only when master toggle is ON and slot valid */
-    size_t head;              /* Next write index */
-    size_t count;             /* Number of valid samples (0..GPIO_HISTORY_MAX) */
-    uint32_t last_sample_up;  /* Uptime (s) of last reading */
+    gpio_sample_t *samples;
+    size_t head;
+    size_t count;
+    uint32_t last_sample_up;
     bool has_sampled;
     bool read_requested;
     adc_channel_t adc_chan;
@@ -45,9 +56,15 @@ bool gpio_mon_internal_get_enabled(void) { return s_master_enabled; }
 void gpio_mon_internal_set_enabled_flag(bool en) { s_master_enabled = en; }
 gpio_sensor_config_t *gpio_mon_internal_get_table(void) { return s_sensors; }
 
+/* Strict 8.3 filenames (CONFIG_FATFS_LFN_NONE is enabled) */
 static void csv_path_for(int slot, char *buf, size_t len)
 {
     snprintf(buf, len, "/data/gpio_%d.csv", slot);
+}
+
+static void csv_tmp_for(int slot, char *buf, size_t len)
+{
+    snprintf(buf, len, "/data/gp%d.tmp", slot);
 }
 
 static void sanitize_name(const char *in, char *out, size_t out_len)
@@ -62,6 +79,154 @@ static void sanitize_name(const char *in, char *out, size_t out_len)
     }
     out[j] = '\0';
     if (j == 0) snprintf(out, out_len, "Sensor");
+}
+
+/* Comprehensive pin safety check covering reserved hardware, USB JTAG, ETH, OLED, UART0, BOOT */
+static bool validate_gpio_pin(int gpio, gpio_sensor_mode_t mode, char *err_buf, size_t err_len)
+{
+    if (gpio < 0 || gpio >= GPIO_NUM_MAX || !GPIO_IS_VALID_GPIO(gpio)) {
+        snprintf(err_buf, err_len, "Invalid GPIO pin %d", gpio);
+        return false;
+    }
+
+    /* SPI Flash / PSRAM pins per chip family */
+#if CONFIG_IDF_TARGET_ESP32
+    if (gpio >= 6 && gpio <= 11) {
+        snprintf(err_buf, err_len, "GPIO %d is used by SPI flash", gpio);
+        return false;
+    }
+#elif CONFIG_IDF_TARGET_ESP32C3
+    if (gpio >= 12 && gpio <= 17) {
+        snprintf(err_buf, err_len, "GPIO %d is used by SPI flash", gpio);
+        return false;
+    }
+#elif CONFIG_IDF_TARGET_ESP32S3
+    if (gpio >= 26 && gpio <= 32) {
+        snprintf(err_buf, err_len, "GPIO %d is used by SPI flash/PSRAM", gpio);
+        return false;
+    }
+#elif CONFIG_IDF_TARGET_ESP32C6
+    if (gpio >= 24 && gpio <= 30) {
+        snprintf(err_buf, err_len, "GPIO %d is used by SPI flash", gpio);
+        return false;
+    }
+#elif CONFIG_IDF_TARGET_ESP32C5
+    if (gpio >= 15 && gpio <= 22) {
+        snprintf(err_buf, err_len, "GPIO %d is used by SPI flash", gpio);
+        return false;
+    }
+#endif
+
+    /* USB Serial/JTAG pins (protect console & flashing on native-USB chips) */
+#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG || CONFIG_IDF_TARGET_ESP32C3 || CONFIG_IDF_TARGET_ESP32S3 || CONFIG_IDF_TARGET_ESP32C6 || CONFIG_IDF_TARGET_ESP32C5
+#if CONFIG_IDF_TARGET_ESP32C3
+    if (gpio == 18 || gpio == 19) {
+        snprintf(err_buf, err_len, "GPIO %d is used by USB Serial/JTAG", gpio);
+        return false;
+    }
+#elif CONFIG_IDF_TARGET_ESP32S3
+    if (gpio == 19 || gpio == 20) {
+        snprintf(err_buf, err_len, "GPIO %d is used by USB Serial/JTAG", gpio);
+        return false;
+    }
+#elif CONFIG_IDF_TARGET_ESP32C6
+    if (gpio == 12 || gpio == 13) {
+        snprintf(err_buf, err_len, "GPIO %d is used by USB Serial/JTAG", gpio);
+        return false;
+    }
+#elif CONFIG_IDF_TARGET_ESP32C5
+    if (gpio == 13 || gpio == 14) {
+        snprintf(err_buf, err_len, "GPIO %d is used by USB Serial/JTAG", gpio);
+        return false;
+    }
+#endif
+#endif
+
+    /* UART0 console TX/RX pins */
+#if CONFIG_ESP_CONSOLE_UART_DEFAULT
+#if CONFIG_IDF_TARGET_ESP32
+    if (gpio == 1 || gpio == 3) {
+        snprintf(err_buf, err_len, "GPIO %d is used by UART0 console", gpio);
+        return false;
+    }
+#elif CONFIG_IDF_TARGET_ESP32S3
+    if (gpio == 43 || gpio == 44) {
+        snprintf(err_buf, err_len, "GPIO %d is used by UART0 console", gpio);
+        return false;
+    }
+#elif CONFIG_IDF_TARGET_ESP32C3
+    if (gpio == 20 || gpio == 21) {
+        snprintf(err_buf, err_len, "GPIO %d is used by UART0 console", gpio);
+        return false;
+    }
+#elif CONFIG_IDF_TARGET_ESP32C6
+    if (gpio == 16 || gpio == 17) {
+        snprintf(err_buf, err_len, "GPIO %d is used by UART0 console", gpio);
+        return false;
+    }
+#elif CONFIG_IDF_TARGET_ESP32C5
+    if (gpio == 11 || gpio == 12) {
+        snprintf(err_buf, err_len, "GPIO %d is used by UART0 console", gpio);
+        return false;
+    }
+#endif
+#elif CONFIG_ESP_CONSOLE_UART_CUSTOM
+    if (gpio == CONFIG_ESP_CONSOLE_UART_TX_GPIO || gpio == CONFIG_ESP_CONSOLE_UART_RX_GPIO) {
+        snprintf(err_buf, err_len, "GPIO %d is used by UART console", gpio);
+        return false;
+    }
+#endif
+
+    /* Ethernet RMII / SMI / PHY power pins (ETH_UPLINK builds) */
+#if CONFIG_ETH_UPLINK
+    if (gpio == CONFIG_ETH_MDC_GPIO || gpio == CONFIG_ETH_MDIO_GPIO ||
+        (CONFIG_ETH_PHY_POWER_GPIO >= 0 && gpio == CONFIG_ETH_PHY_POWER_GPIO) ||
+#if defined(CONFIG_ETH_RMII_CLK_OUTPUT_GPIO) && CONFIG_ETH_RMII_CLK_OUTPUT_GPIO >= 0
+        gpio == CONFIG_ETH_RMII_CLK_OUTPUT_GPIO ||
+#endif
+        gpio == 0 || gpio == 19 || gpio == 21 || gpio == 22 ||
+        gpio == 25 || gpio == 26 || gpio == 27) {
+        snprintf(err_buf, err_len, "GPIO %d is used by Ethernet RMII/PHY", gpio);
+        return false;
+    }
+#else
+    /* BOOT button used by factory reset polling */
+#if defined(CONFIG_IDF_TARGET_ESP32C5)
+    if (gpio == 28) { snprintf(err_buf, err_len, "GPIO 28 is the BOOT button"); return false; }
+#elif defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32C6)
+    if (gpio == 9) { snprintf(err_buf, err_len, "GPIO 9 is the BOOT button"); return false; }
+#else
+    if (gpio == 0) { snprintf(err_buf, err_len, "GPIO 0 is the BOOT button"); return false; }
+#endif
+#endif
+
+    /* Router LED / LED strip / RF antenna switch */
+    if (gpio == led_gpio || gpio == led_strip_gpio ||
+        gpio == antenna_gpio || gpio == antenna_en_gpio) {
+        snprintf(err_buf, err_len, "GPIO %d is assigned to router LED/antenna", gpio);
+        return false;
+    }
+
+    /* OLED I2C pins (when OLED enabled) */
+    {
+        bool oled_en = false;
+        int oled_sda = -1, oled_scl = -1;
+        oled_display_get_config(&oled_en, &oled_sda, &oled_scl);
+        if (oled_en && (gpio == oled_sda || gpio == oled_scl)) {
+            snprintf(err_buf, err_len, "GPIO %d is used by OLED I2C", gpio);
+            return false;
+        }
+    }
+
+    if (mode == GPIO_SENSOR_ANALOG) {
+        adc_unit_t unit;
+        adc_channel_t chan;
+        if (adc_oneshot_io_to_channel(gpio, &unit, &chan) != ESP_OK || unit != ADC_UNIT_1) {
+            snprintf(err_buf, err_len, "GPIO %d is not an ADC1 pin (ADC2 conflicts with Wi-Fi)", gpio);
+            return false;
+        }
+    }
+    return true;
 }
 
 static bool init_adc_cali(adc_channel_t chan, adc_cali_handle_t *out_handle)
@@ -98,18 +263,20 @@ static void deinit_adc_cali(adc_cali_handle_t handle)
 #endif
 }
 
-static void teardown_slot_hw(int slot)
+static void teardown_slot_hw(int slot, bool keep_history)
 {
     if (s_rt[slot].cali) {
         deinit_adc_cali(s_rt[slot].cali);
         s_rt[slot].cali = NULL;
         s_rt[slot].cali_ok = false;
     }
-    free(s_rt[slot].samples);
-    s_rt[slot].samples = NULL;
-    s_rt[slot].head = 0;
-    s_rt[slot].count = 0;
-    s_rt[slot].has_sampled = false;
+    if (!keep_history) {
+        free(s_rt[slot].samples);
+        s_rt[slot].samples = NULL;
+        s_rt[slot].head = 0;
+        s_rt[slot].count = 0;
+        s_rt[slot].has_sampled = false;
+    }
 }
 
 static void setup_slot_hw(int slot)
@@ -117,6 +284,14 @@ static void setup_slot_hw(int slot)
     gpio_sensor_config_t *cfg = &s_sensors[slot];
     sensor_runtime_t *rt = &s_rt[slot];
     if (!cfg->valid || !cfg->enabled) return;
+
+    /* Re-validate at boot so corrupted/migrated NVS never touches reserved pins */
+    char err_buf[80];
+    if (!validate_gpio_pin(cfg->gpio, (gpio_sensor_mode_t)cfg->mode, err_buf, sizeof(err_buf))) {
+        ESP_LOGW(TAG, "Slot %d (%s) disabled: %s", slot, cfg->name, err_buf);
+        cfg->enabled = 0;
+        return;
+    }
 
     if (!rt->samples) {
         rt->samples = calloc(GPIO_HISTORY_MAX, sizeof(gpio_sample_t));
@@ -159,13 +334,12 @@ static void setup_slot_hw(int slot)
     }
 
 #if CONFIG_STORE_HISTORY
-    /* Restore persisted CSV samples into RAM ring buffer on startup */
     if (cfg->persist && cfg->interval_sec >= GPIO_MIN_PERSIST_S && rt->count == 0) {
-        char path[48];
+        char path[32];
         csv_path_for(slot, path, sizeof(path));
         FILE *f = fopen(path, "r");
         if (f) {
-            char line[96];
+            char line[64];
             while (fgets(line, sizeof(line), f)) {
                 unsigned long u_ts = 0, up = 0;
                 unsigned int raw = 0, mv = 0;
@@ -190,14 +364,14 @@ static void record_sample(int slot, const gpio_sample_t *s)
 {
 #if CONFIG_STORE_HISTORY
     bool do_persist = false;
-    char csv_path[48];
+    char csv_path[32];
 #endif
     char sname[GPIO_SENSOR_NAME_LEN];
     int pin = 0;
     uint8_t mode = 0;
 
     gpio_mon_lock();
-    if (s_master_enabled && s_sensors[slot].valid && s_rt[slot].samples) {
+    if (s_master_enabled && s_sensors[slot].valid && s_sensors[slot].enabled && s_rt[slot].samples) {
         sensor_runtime_t *rt = &s_rt[slot];
         rt->samples[rt->head] = *s;
         rt->head = (rt->head + 1) % GPIO_HISTORY_MAX;
@@ -219,23 +393,25 @@ static void record_sample(int slot, const gpio_sample_t *s)
     gpio_mon_unlock();
 
     if (mode == GPIO_SENSOR_ANALOG) {
-        ESP_LOGI(TAG, "[%s] GPIO%d raw=%u (%u mV)", sname, pin, s->raw, s->mv);
+        ESP_LOGD(TAG, "[%s] GPIO%d raw=%u (%u mV)", sname, pin, s->raw, s->mv);
     } else {
-        ESP_LOGI(TAG, "[%s] GPIO%d state=%s", sname, pin, s->raw ? "HIGH" : "LOW");
+        ESP_LOGD(TAG, "[%s] GPIO%d state=%s", sname, pin, s->raw ? "HIGH" : "LOW");
     }
 
 #if CONFIG_STORE_HISTORY
     if (do_persist) {
         struct stat st;
-        /* Keep persisted file bounded (~24 KB max) by trimming to current ring buffer */
-        if (stat(csv_path, &st) == 0 && st.st_size > 24576) {
-            char tmp_path[56];
-            snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", csv_path);
+        if (stat(csv_path, &st) == 0 && st.st_size >= GPIO_CSV_MAX_BYTES) {
+            /* 8.3 safe temp filename (gp0.tmp) */
+            char tmp_path[32];
+            csv_tmp_for(slot, tmp_path, sizeof(tmp_path));
             FILE *ft = fopen(tmp_path, "w");
             if (ft) {
                 gpio_sample_t batch[16];
                 size_t total = gpio_monitor_get_sample_count(slot);
-                for (size_t off = 0; off < total; ) {
+                /* Keep newest half-to-full buffer; drop oldest lines if already >24KB */
+                size_t start_off = (total > GPIO_HISTORY_MAX / 2) ? (total - GPIO_HISTORY_MAX / 2) : 0;
+                for (size_t off = start_off; off < total; ) {
                     size_t n = gpio_monitor_copy_history_range(slot, off, batch, 16);
                     if (n == 0) break;
                     for (size_t k = 0; k < n; k++) {
@@ -357,7 +533,7 @@ static void start_subsystem(void)
 
     if (!s_task) {
         s_task_stop = false;
-        xTaskCreate(gpio_monitor_task, "gpio_mon", 4096, NULL, 3, &s_task);
+        xTaskCreate(gpio_monitor_task, "gpio_mon", GPIO_TASK_STACK, NULL, 3, &s_task);
     }
 }
 
@@ -373,7 +549,7 @@ static void stop_subsystem(void)
 
     gpio_mon_lock();
     for (int i = 0; i < MAX_GPIO_SENSORS; i++) {
-        teardown_slot_hw(i);
+        teardown_slot_hw(i, false);
     }
     if (s_adc1) {
         adc_oneshot_del_unit(s_adc1);
@@ -417,34 +593,6 @@ esp_err_t gpio_monitor_set_enabled(bool enabled)
     return save_gpio_config();
 }
 
-static bool validate_gpio_pin(int gpio, gpio_sensor_mode_t mode, char *err_buf, size_t err_len)
-{
-    if (gpio < 0 || gpio >= GPIO_NUM_MAX || !GPIO_IS_VALID_GPIO(gpio)) {
-        snprintf(err_buf, err_len, "Invalid GPIO pin %d", gpio);
-        return false;
-    }
-#if CONFIG_IDF_TARGET_ESP32
-    if (gpio >= 6 && gpio <= 11) {
-        snprintf(err_buf, err_len, "GPIO %d is used by SPI flash", gpio);
-        return false;
-    }
-#endif
-    if (gpio == led_gpio || gpio == led_strip_gpio ||
-        gpio == antenna_gpio || gpio == antenna_en_gpio) {
-        snprintf(err_buf, err_len, "GPIO %d is already assigned to router LED/antenna", gpio);
-        return false;
-    }
-    if (mode == GPIO_SENSOR_ANALOG) {
-        adc_unit_t unit;
-        adc_channel_t chan;
-        if (adc_oneshot_io_to_channel(gpio, &unit, &chan) != ESP_OK || unit != ADC_UNIT_1) {
-            snprintf(err_buf, err_len, "GPIO %d is not an ADC1 analog pin (ADC2 conflicts with Wi-Fi)", gpio);
-            return false;
-        }
-    }
-    return true;
-}
-
 esp_err_t gpio_monitor_set_sensor(int slot, int gpio, gpio_sensor_mode_t mode,
                                   uint32_t interval_sec, bool persist, const char *name,
                                   char *err_buf, size_t err_len)
@@ -466,6 +614,7 @@ esp_err_t gpio_monitor_set_sensor(int slot, int gpio, gpio_sensor_mode_t mode,
     }
 
     gpio_mon_lock();
+    bool is_edit = (slot >= 0 && slot < MAX_GPIO_SENSORS && s_sensors[slot].valid);
     if (slot < 0) {
         for (int i = 0; i < MAX_GPIO_SENSORS; i++) {
             if (!s_sensors[i].valid) { slot = i; break; }
@@ -477,7 +626,6 @@ esp_err_t gpio_monitor_set_sensor(int slot, int gpio, gpio_sensor_mode_t mode,
         return ESP_ERR_NO_MEM;
     }
 
-    /* Check duplicate pin in another slot */
     for (int i = 0; i < MAX_GPIO_SENSORS; i++) {
         if (i != slot && s_sensors[i].valid && s_sensors[i].gpio == gpio) {
             gpio_mon_unlock();
@@ -486,7 +634,9 @@ esp_err_t gpio_monitor_set_sensor(int slot, int gpio, gpio_sensor_mode_t mode,
         }
     }
 
-    teardown_slot_hw(slot);
+    /* Preserve history when editing the same pin and mode */
+    bool keep_history = is_edit && (s_sensors[slot].gpio == gpio) && (s_sensors[slot].mode == (uint8_t)mode);
+    teardown_slot_hw(slot, keep_history);
 
     s_sensors[slot].valid = 1;
     s_sensors[slot].enabled = 1;
@@ -498,7 +648,7 @@ esp_err_t gpio_monitor_set_sensor(int slot, int gpio, gpio_sensor_mode_t mode,
 
     if (s_master_enabled) {
         setup_slot_hw(slot);
-        s_rt[slot].read_requested = true;  /* Take initial reading immediately */
+        s_rt[slot].read_requested = true;
     }
     gpio_mon_unlock();
 
@@ -513,12 +663,16 @@ esp_err_t gpio_monitor_del_sensor(int slot)
     if (slot < 0 || slot >= MAX_GPIO_SENSORS) return ESP_ERR_INVALID_ARG;
 
     gpio_mon_lock();
-    teardown_slot_hw(slot);
+    if (!s_sensors[slot].valid) {
+        gpio_mon_unlock();
+        return ESP_ERR_NOT_FOUND;
+    }
+    teardown_slot_hw(slot, false);
     memset(&s_sensors[slot], 0, sizeof(s_sensors[slot]));
     gpio_mon_unlock();
 
 #if CONFIG_STORE_HISTORY
-    char path[48];
+    char path[32];
     csv_path_for(slot, path, sizeof(path));
     remove(path);
 #endif
@@ -544,7 +698,7 @@ esp_err_t gpio_monitor_clear_history(int slot)
     gpio_mon_unlock();
 
 #if CONFIG_STORE_HISTORY
-    char path[48];
+    char path[32];
     csv_path_for(slot, path, sizeof(path));
     remove(path);
 #endif
@@ -604,3 +758,5 @@ size_t gpio_monitor_copy_history_range(int slot, size_t offset, gpio_sample_t *o
     gpio_mon_unlock();
     return n;
 }
+
+#endif /* CONFIG_GPIO_MONITOR */

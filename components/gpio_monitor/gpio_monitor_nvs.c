@@ -1,5 +1,8 @@
 /* NVS persistence for GPIO Monitor configuration */
 
+#include "sdkconfig.h"
+#ifdef CONFIG_GPIO_MONITOR
+
 #include <string.h>
 #include "esp_log.h"
 #include "nvs.h"
@@ -69,3 +72,5 @@ esp_err_t load_gpio_config(void)
     nvs_close(nvs);
     return ESP_OK;
 }
+
+#endif /* CONFIG_GPIO_MONITOR */

@@ -68,32 +68,35 @@ input:checked + .slider:before { transform: translateX(24px); background: #1a1a2
 <thead><tr><th>Name</th><th>Pin</th><th>Mode</th><th>Interval</th><th>Current</th><th>Actions</th></tr></thead>\
 <tbody>"
 
+/* Format args: heading, slot_val, name_val, gpio_val, mode0_sel, mode1_sel,
+ * ival_val, u_hr_sel, u_min_sel, u_sec_sel, persist_chk, btn_label, cancel_link */
 #define GPIO_CHUNK_ADD_FORM "\
 </tbody></table>\
-<h2>Add / Update Sensor</h2>\
+<h2>%s</h2>\
 <form action='/gpio' method='GET'>\
 <input type='hidden' name='add_sensor' value='1'/>\
+<input type='hidden' name='slot' value='%d'/>\
 <table class='form-tbl'>\
-<tr><td>Name</td><td><input type='text' name='name' placeholder='MQ135_Gas' maxlength='23' required/></td></tr>\
-<tr><td>GPIO Pin</td><td><input type='number' name='gpio' min='0' max='48' placeholder='34' required/></td></tr>\
+<tr><td>Name</td><td><input type='text' name='name' value='%s' placeholder='MQ135_Air' maxlength='23' required/></td></tr>\
+<tr><td>GPIO Pin</td><td><input type='number' name='gpio' min='0' max='48' value='%s' placeholder='34' required/></td></tr>\
 <tr><td>Mode</td><td><select name='mode'>\
-<option value='0'>Analog (ADC1 - e.g. MQ-135 on GPIO 32-39)</option>\
-<option value='1'>Digital (HIGH / LOW)</option>\
+<option value='0' %s>Analog (ADC1 - Wi-Fi safe)</option>\
+<option value='1' %s>Digital (HIGH / LOW)</option>\
 </select></td></tr>\
 <tr><td>Measure Every</td><td>\
 <div style='display:flex;gap:0.5rem;'>\
-<input type='number' name='ival' min='1' max='86400' value='1' style='width:45%%;' required/>\
+<input type='number' name='ival' min='1' max='86400' value='%lu' style='width:45%%;' required/>\
 <select name='iunit' style='width:55%%;'>\
-<option value='3600' selected>Hours</option>\
-<option value='60'>Minutes</option>\
-<option value='1'>Seconds</option>\
+<option value='3600' %s>Hours</option>\
+<option value='60' %s>Minutes</option>\
+<option value='1' %s>Seconds</option>\
 </select>\
 </div>\
 </td></tr>\
-<tr><td>Persist</td><td><label style='color:#aaa;font-size:0.85rem;'><input type='checkbox' name='persist' value='1' checked/> Save CSV to flash (/data, requires &ge; 60s interval)</label></td></tr>\
-<tr><td></td><td><input type='submit' value='Save Sensor' class='ok-button'/></td></tr>\
+<tr><td>Persist</td><td><label style='color:#aaa;font-size:0.85rem;'><input type='checkbox' name='persist' value='1' %s/> Save CSV to flash (/data, requires &ge; 60s interval)</label></td></tr>\
+<tr><td></td><td><input type='submit' value='%s' class='ok-button'/>%s</td></tr>\
 </table>\
-<small style='display:block;color:#888;margin-top:0.5rem;'>Analog sensors require ADC1 pins (GPIO 32-39 on ESP32; GPIO 1-10 on S3; GPIO 0-4 on C3) because ADC2 cannot run with Wi-Fi. Use a voltage divider if your sensor outputs 5V.</small>\
+<small style='display:block;color:#888;margin-top:0.5rem;'>Analog sensors require ADC1 pins (ESP32: 32-39, S3: 1-10, C3: 0-4, C5: 1-6, C6: 0-6) because ADC2 conflicts with Wi-Fi. Use a voltage divider if your sensor outputs 5V.</small>\
 </form>"
 
 #define GPIO_CHUNK_TAIL "\

@@ -74,3 +74,16 @@ menu "MQTT Home Assistant"
         range 5 3600
 
 endmenu
+
+menu "GPIO Sensor Monitor"
+
+    config GPIO_MONITOR
+        bool "Enable GPIO/ADC1 sensor monitor, history graph & CSV export"
+        default n
+        help
+            Enables periodic ADC1/digital GPIO logging, web UI (/gpio),
+            per-sensor history graphs, CSV download, and Home Assistant MQTT
+            publishing (when MQTT Home Assistant is also enabled).
+            Adds ~32 KB flash when enabled; 0 bytes when disabled.
+
+endmenu
